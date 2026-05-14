@@ -94,5 +94,6 @@ JSON export:
 - `AtomMapping` で、各対称操作による原子対応を保持する。
 - `RenderData` と `AtomMapping` はJSON出力できる。
 - JSONを入力にした最小PyVista表示を追加済み。操作一覧、操作ごとの要素絞り込み、原子対応表示、変位線表示に対応。
+- 仕様書との現在の整合性は `docs/SPEC_ALIGNMENT.md` に記録。
 - 次の実装対象はJSONビューア上の対称操作アニメーション。設計は `docs/ANIMATION_DESIGN.md` に記録。
 - GUI/Qt埋め込みはまだ再実装しない。

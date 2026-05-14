@@ -372,3 +372,46 @@ Codex に伝える際は「線形は一時的、すぐに arc へ切り替える
 - 最近接周期像: Section 16.2 と一致 ✓
 - `RenderData` の座標変換: Section 11 と一致 ✓
 - `operation_indices` の保持: Section 4.4 の要件を満たす ✓
+
+---
+
+## コード最適化レビュー（2026-05-15）
+
+### 最適化内容
+
+#### `crystal_viewer/atom_mapping.py`
+
+- `choose_nearest_periodic_image` のトリプルネストループを NumPy ベクトル化に置き換え
+- 27 シフトを `_PERIODIC_SHIFTS` としてモジュールレベルで事前計算（import 時に一度だけ生成）
+- `np.einsum("ij,ij->i", disp, disp)` で全候補の二乗距離を一括計算
+
+#### `crystal_viewer/render_data.py`
+
+- `render_data_from_crystal`：`symbols` dict をループ前に一度だけ構築するよう変更
+  - 変更前：`axis_label()`/`plane_label()`/`center_label()` が呼ばれるたびに dict を再生成
+  - 変更後：`symbols = {op.index: op.international_symbol for op in result.operations}` を一度だけ作り、`operation_group_label(..., symbols)` に渡す
+- `render_data_from_molecule`：同様に `symbols` dict を一度だけ構築
+- `bounds_points()` の二重呼び出しを廃止。`bpoints` を一度計算して `bmin`/`bmax` 両方に使う
+- 分子用ヘルパー関数の引数を `result: MoleculeAnalysisResult` → `symbols: dict[int, str]` に変更し、呼び出し元でビルド済み dict を渡す設計に統一
+- デッドコードの削除：`axis_label`、`plane_label`、`center_label`、`molecular_axis_label`、`molecular_plane_label`、`molecular_center_label` の 6 関数を削除（いずれも `operation_group_label` の薄いラッパーで、最適化後に未使用になった）
+
+### 動作確認
+
+```bash
+.venv/bin/python -m py_compile crystal_viewer/render_data.py crystal_viewer/atom_mapping.py  # OK
+.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
+.venv/bin/python tools/export_analysis_json.py 'F2 Pd.cif' --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --list-operations   # 4 operations, all mapping=ok
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations   # 12 operations, all mapping=ok
+```
+
+全て正常。`angle_deg` も正しく出力されている（water C2 → 180°、f2_pd rotation_3 → 120°）。
+
+### 仕様書との整合性
+
+変更後も全て仕様書に準拠：
+
+- `operation_group_label` のロジックは変更なし ✓
+- `bounds_min`/`bounds_max` の計算結果は変更なし ✓
+- `render_data_from_crystal` / `render_data_from_molecule` の出力 schema は変更なし ✓
+- `RenderData` の全フィールドが正しく埋まっていることを `--list-operations` 出力で確認 ✓

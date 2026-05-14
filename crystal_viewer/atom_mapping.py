@@ -15,6 +15,12 @@ from .analysis_models import (
 
 MappingMode = Literal["crystal", "molecule"]
 
+# All 27 integer shifts in [-1, 0, 1]^3, precomputed once.
+_PERIODIC_SHIFTS = np.array(
+    [(i, j, k) for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)],
+    dtype=float,
+)
+
 
 @dataclass(frozen=True)
 class AtomMappingEntry:
@@ -235,17 +241,10 @@ def choose_nearest_periodic_image(
     target_frac: np.ndarray,
     lattice: np.ndarray,
 ) -> np.ndarray:
-    best = None
-    best_distance = float("inf")
-    for i in (-1.0, 0.0, 1.0):
-        for j in (-1.0, 0.0, 1.0):
-            for k in (-1.0, 0.0, 1.0):
-                candidate = target_frac + np.array([i, j, k])
-                distance = np.linalg.norm((candidate - start_frac) @ lattice)
-                if distance < best_distance:
-                    best = candidate
-                    best_distance = float(distance)
-    return np.asarray(best, dtype=float)
+    candidates = target_frac + _PERIODIC_SHIFTS  # (27, 3)
+    disp = (candidates - start_frac) @ lattice   # (27, 3)
+    sq_distances = np.einsum("ij,ij->i", disp, disp)  # (27,) squared norms
+    return np.asarray(candidates[np.argmin(sq_distances)], dtype=float)
 
 
 def wrap_frac(frac: np.ndarray) -> np.ndarray:

@@ -116,11 +116,13 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
         for op in result.operations
     )
 
+    symbols = {op.index: op.international_symbol for op in result.operations}
+
     axes = tuple(
         RenderAxisData(
             point_cart=axis.point_frac @ lattice,
             direction_cart=normalize(axis.direction_frac @ lattice),
-            label=axis_label(axis.operation_indices, result),
+            label=operation_group_label(axis.operation_indices, symbols),
             operation_indices=axis.operation_indices,
         )
         for axis in result.axes
@@ -137,7 +139,7 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
                 basis1_cart=normalize(basis1_cart),
                 basis2_cart=normalize(basis2_cart),
                 normal_cart=normal_cart,
-                label=plane_label(plane.operation_indices, result),
+                label=operation_group_label(plane.operation_indices, symbols),
                 operation_indices=plane.operation_indices,
             )
         )
@@ -145,11 +147,15 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
     centers = tuple(
         RenderCenterData(
             point_cart=center.point_frac @ lattice,
-            label=center_label(center.operation_indices, result),
+            label=operation_group_label(center.operation_indices, symbols),
             operation_indices=center.operation_indices,
         )
         for center in result.centers
     )
+
+    bpoints = bounds_points(atoms, unit_cell)
+    bmin = np.min(bpoints, axis=0) if len(bpoints) else np.zeros(3)
+    bmax = np.max(bpoints, axis=0) if len(bpoints) else np.zeros(3)
 
     return RenderData(
         metadata=RenderMetadata(
@@ -165,8 +171,8 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
         planes=tuple(planes),
         centers=centers,
         unit_cell=unit_cell,
-        bounds_min=bounds_min(atoms, unit_cell),
-        bounds_max=bounds_max(atoms, unit_cell),
+        bounds_min=bmin,
+        bounds_max=bmax,
     )
 
 
@@ -184,9 +190,15 @@ def render_data_from_molecule(result: MoleculeAnalysisResult) -> RenderData:
         for op in result.operations
     )
 
-    axes = tuple(render_axis_from_molecular_axis(axis, result) for axis in result.axes)
-    planes = tuple(render_plane_from_molecular_plane(plane, result) for plane in result.planes)
-    centers = tuple(render_center_from_molecular_center(center, result) for center in result.centers)
+    symbols = {op.index: op.symbol for op in result.operations}
+
+    axes = tuple(render_axis_from_molecular_axis(axis, symbols) for axis in result.axes)
+    planes = tuple(render_plane_from_molecular_plane(plane, symbols) for plane in result.planes)
+    centers = tuple(render_center_from_molecular_center(center, symbols) for center in result.centers)
+
+    bpoints = bounds_points(atoms, None)
+    bmin = np.min(bpoints, axis=0) if len(bpoints) else np.zeros(3)
+    bmax = np.max(bpoints, axis=0) if len(bpoints) else np.zeros(3)
 
     return RenderData(
         metadata=RenderMetadata(
@@ -202,8 +214,8 @@ def render_data_from_molecule(result: MoleculeAnalysisResult) -> RenderData:
         planes=planes,
         centers=centers,
         unit_cell=None,
-        bounds_min=bounds_min(atoms, None),
-        bounds_max=bounds_max(atoms, None),
+        bounds_min=bmin,
+        bounds_max=bmax,
     )
 
 
@@ -219,19 +231,19 @@ def render_atom_from_site(atom: AtomSite) -> RenderAtomData:
 
 def render_axis_from_molecular_axis(
     axis: MolecularAxisElement,
-    result: MoleculeAnalysisResult,
+    symbols: dict[int, str],
 ) -> RenderAxisData:
     return RenderAxisData(
         point_cart=np.asarray(axis.point_cart, dtype=float),
         direction_cart=normalize(axis.direction_cart),
-        label=molecular_axis_label(axis, result),
+        label=operation_group_label(axis.operation_indices, symbols),
         operation_indices=axis.operation_indices,
     )
 
 
 def render_plane_from_molecular_plane(
     plane: MolecularPlaneElement,
-    result: MoleculeAnalysisResult,
+    symbols: dict[int, str],
 ) -> RenderPlaneData:
     basis = np.asarray(plane.basis_cart, dtype=float)
     basis1_cart = normalize(basis[:, 0])
@@ -242,18 +254,18 @@ def render_plane_from_molecular_plane(
         basis1_cart=basis1_cart,
         basis2_cart=basis2_cart,
         normal_cart=normal_cart,
-        label=molecular_plane_label(plane, result),
+        label=operation_group_label(plane.operation_indices, symbols),
         operation_indices=plane.operation_indices,
     )
 
 
 def render_center_from_molecular_center(
     center: MolecularCenterElement,
-    result: MoleculeAnalysisResult,
+    symbols: dict[int, str],
 ) -> RenderCenterData:
     return RenderCenterData(
         point_cart=np.asarray(center.point_cart, dtype=float),
-        label=molecular_center_label(center, result),
+        label=operation_group_label(center.operation_indices, symbols),
         operation_indices=center.operation_indices,
     )
 
@@ -291,30 +303,6 @@ def unit_cell_from_lattice(lattice: np.ndarray) -> UnitCellRenderData:
     return UnitCellRenderData(lattice=lattice, vertices_cart=vertices, edges=edges)
 
 
-def axis_label(operation_indices: tuple[int, ...], result: StructureAnalysisResult) -> str:
-    return operation_group_label(operation_indices, {op.index: op.international_symbol for op in result.operations})
-
-
-def plane_label(operation_indices: tuple[int, ...], result: StructureAnalysisResult) -> str:
-    return operation_group_label(operation_indices, {op.index: op.international_symbol for op in result.operations})
-
-
-def center_label(operation_indices: tuple[int, ...], result: StructureAnalysisResult) -> str:
-    return operation_group_label(operation_indices, {op.index: op.international_symbol for op in result.operations})
-
-
-def molecular_axis_label(axis: MolecularAxisElement, result: MoleculeAnalysisResult) -> str:
-    return operation_group_label(axis.operation_indices, {op.index: op.symbol for op in result.operations})
-
-
-def molecular_plane_label(plane: MolecularPlaneElement, result: MoleculeAnalysisResult) -> str:
-    return operation_group_label(plane.operation_indices, {op.index: op.symbol for op in result.operations})
-
-
-def molecular_center_label(center: MolecularCenterElement, result: MoleculeAnalysisResult) -> str:
-    return operation_group_label(center.operation_indices, {op.index: op.symbol for op in result.operations})
-
-
 def operation_group_label(operation_indices: tuple[int, ...], symbols_by_index: dict[int, str]) -> str:
     counts: dict[str, int] = {}
     for index in operation_indices:
@@ -322,20 +310,6 @@ def operation_group_label(operation_indices: tuple[int, ...], symbols_by_index: 
         counts[symbol] = counts.get(symbol, 0) + 1
     parts = [f"{symbol}x{count}" if count > 1 else symbol for symbol, count in sorted(counts.items())]
     return ", ".join(parts)
-
-
-def bounds_min(atoms: tuple[RenderAtomData, ...], unit_cell: UnitCellRenderData | None) -> np.ndarray:
-    points = bounds_points(atoms, unit_cell)
-    if len(points) == 0:
-        return np.zeros(3)
-    return np.min(points, axis=0)
-
-
-def bounds_max(atoms: tuple[RenderAtomData, ...], unit_cell: UnitCellRenderData | None) -> np.ndarray:
-    points = bounds_points(atoms, unit_cell)
-    if len(points) == 0:
-        return np.zeros(3)
-    return np.max(points, axis=0)
 
 
 def bounds_points(atoms: tuple[RenderAtomData, ...], unit_cell: UnitCellRenderData | None) -> np.ndarray:

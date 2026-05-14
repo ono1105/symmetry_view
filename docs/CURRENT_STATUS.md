@@ -47,6 +47,12 @@ Detailed design:
 docs/ANIMATION_DESIGN.md
 ```
 
+Specification alignment before animation:
+
+```text
+docs/SPEC_ALIGNMENT.md
+```
+
 For external review, start with:
 
 ```text
