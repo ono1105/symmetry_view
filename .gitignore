@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+.claude/settings.local.json
+
+exports/*.png
+
+.DS_Store

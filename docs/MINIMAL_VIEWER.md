@@ -1,0 +1,68 @@
+# Minimal JSON PyVista Viewer
+
+`tools/view_json_pyvista.py` is a small display prototype.
+
+It reads exported JSON only. It does not run crystal or molecule analysis.
+
+## Commands
+
+Show all render elements:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json
+.venv/bin/python tools/view_json_pyvista.py exports/water.json
+```
+
+List operations:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations
+```
+
+Show elements related to one operation:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1
+```
+
+Show atom mapping and source-to-target displacement lines for one operation:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --show-mapping --show-displacements
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --show-mapping --show-displacements
+```
+
+Render a screenshot and exit:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --screenshot exports/water_view.png
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --screenshot exports/f2_pd_op1_view.png
+```
+
+## Scope
+
+Implemented:
+
+```text
+atoms
+unit cell
+axes
+planes
+centers
+operation-based element filtering
+operation list
+atom mapping printout
+source-to-target displacement lines
+screenshots
+```
+
+Not implemented yet:
+
+```text
+GUI controls
+atom selection
+animation
+puzzle interactions
+```
+
+This viewer is intentionally separate from analysis code. It should consume only exported JSON.
