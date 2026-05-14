@@ -217,7 +217,8 @@ def print_operations(render_data: dict, atom_mappings: dict | None) -> None:
             status = f"mapping={'ok' if mapping['complete'] else 'incomplete'} max_dist={mapping['max_distance']:.3e}"
         print(
             f"{operation['index']:3d}: {operation['label']} "
-            f"kind={operation['kind']} order={operation['order']} {status}"
+            f"kind={operation['kind']} order={operation['order']} "
+            f"angle={operation.get('angle_deg')} {status}"
         )
 
 

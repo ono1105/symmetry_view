@@ -35,7 +35,7 @@ Stdout export is also supported:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_kind": "crystal",
   "render_data": {},
   "atom_mappings": {}
@@ -61,6 +61,19 @@ bounds_max
 ```
 
 All geometry in `render_data` is Cartesian. For crystals, fractional geometry is converted before export.
+
+Each render operation contains:
+
+```text
+index
+label
+kind
+order
+angle_deg
+symbol
+```
+
+`angle_deg` is included for operation-aware animation. Rotation direction can be decided by the viewer by comparing positive and negative candidate rotations against `atom_mappings.entries[].transformed_cart`.
 
 ## `atom_mappings`
 
@@ -95,4 +108,3 @@ For molecule mappings, `transformed_cart` is the raw transformed Cartesian coord
 .venv/bin/python -m json.tool exports/f2_pd.json /tmp/f2_pd_checked.json
 .venv/bin/python -m json.tool exports/water.json /tmp/water_checked.json
 ```
-

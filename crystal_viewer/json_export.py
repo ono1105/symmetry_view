@@ -11,7 +11,7 @@ from .atom_mapping import AtomMappingSet
 from .render_data import RenderData
 
 
-EXPORT_SCHEMA_VERSION = 1
+EXPORT_SCHEMA_VERSION = 2
 
 
 def export_payload(
@@ -98,4 +98,3 @@ def to_jsonable(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): to_jsonable(item) for key, item in value.items()}
     return value
-

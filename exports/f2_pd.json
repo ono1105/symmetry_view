@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -197,6 +197,7 @@
         "label": "0: 1 identity",
         "kind": "identity",
         "order": 1,
+        "angle_deg": 0.0,
         "symbol": "1"
       },
       {
@@ -204,6 +205,7 @@
         "label": "1: 2_? screw_2",
         "kind": "screw_2",
         "order": 2,
+        "angle_deg": 180.0,
         "symbol": "2_?"
       },
       {
@@ -211,6 +213,7 @@
         "label": "2: 2_? screw_2",
         "kind": "screw_2",
         "order": 2,
+        "angle_deg": 180.0,
         "symbol": "2_?"
       },
       {
@@ -218,6 +221,7 @@
         "label": "3: 2_? screw_2",
         "kind": "screw_2",
         "order": 2,
+        "angle_deg": 180.0,
         "symbol": "2_?"
       },
       {
@@ -225,6 +229,7 @@
         "label": "4: 3 rotation_3",
         "kind": "rotation_3",
         "order": 3,
+        "angle_deg": 120.00000000000001,
         "symbol": "3"
       },
       {
@@ -232,6 +237,7 @@
         "label": "5: 3 rotation_3",
         "kind": "rotation_3",
         "order": 3,
+        "angle_deg": 120.00000000000001,
         "symbol": "3"
       },
       {
@@ -239,6 +245,7 @@
         "label": "6: 3 rotation_3",
         "kind": "rotation_3",
         "order": 3,
+        "angle_deg": 120.00000000000001,
         "symbol": "3"
       },
       {
@@ -246,6 +253,7 @@
         "label": "7: 3 rotation_3",
         "kind": "rotation_3",
         "order": 3,
+        "angle_deg": 120.00000000000001,
         "symbol": "3"
       },
       {
@@ -253,6 +261,7 @@
         "label": "8: 3 rotation_3",
         "kind": "rotation_3",
         "order": 3,
+        "angle_deg": 120.00000000000001,
         "symbol": "3"
       },
       {
@@ -260,6 +269,7 @@
         "label": "9: 3 rotation_3",
         "kind": "rotation_3",
         "order": 3,
+        "angle_deg": 120.00000000000001,
         "symbol": "3"
       },
       {
@@ -267,6 +277,7 @@
         "label": "10: 3 rotation_3",
         "kind": "rotation_3",
         "order": 3,
+        "angle_deg": 120.00000000000001,
         "symbol": "3"
       },
       {
@@ -274,6 +285,7 @@
         "label": "11: 3 rotation_3",
         "kind": "rotation_3",
         "order": 3,
+        "angle_deg": 120.00000000000001,
         "symbol": "3"
       }
     ],

@@ -24,6 +24,7 @@ GUI/3D表示は一度失敗したので、現在は段階的に作り直して�
 4. AtomMapping
 5. JSON export
 6. 最小JSON表示
+7. アニメーション設計
 ```
 
 まだやらないもの:
@@ -169,7 +170,8 @@ DEFAULT_LEGACY_CORE = Path("/home/ken/work/kouzoukaiseki/symmetry_core.py")
 5. legacy `symmetry_core.py` をいつ取り込むべきか → 急がなくてよい（Q4参照）
 6. スクリュー軸ラベル `2_?` 問題 → 表示層まで保留でよい（Q5参照）
 7. ~~最小PyVista表示プロトタイプの実装レビュー~~ → 操作一覧、操作絞り込み、mapping表示、変位線表示まで実装済み
-8. **次の相談**: `AtomMappingEntry.transformed_cart` を使った最初のアニメーション設計。まず線形補間でよいか、その後に軸回転・鏡映など操作別の動きへ分ける方針でよいか
+8. ~~最初のアニメーション設計レビュー~~ → 操作別dispatcherを最初から作り、線形補間は短期デバッグ用に限定。`RenderOperationData.angle_deg` を追加する方針
+9. **次の相談**: `docs/ANIMATION_DESIGN.md` の方針で `tools/view_json_pyvista.py --animate` を実装してよいか。特に screw 操作の「arc + residual-to-target correction」の扱いが妥当か
 
 ## Claudeへの依頼文例
 
@@ -177,9 +179,9 @@ DEFAULT_LEGACY_CORE = Path("/home/ken/work/kouzoukaiseki/symmetry_core.py")
 このプロジェクトは結晶/分子の対称性ビューアーを段階的に作り直しています。
 GUIはまだ作らず、現時点では解析層・RenderData・AtomMapping・JSON export・最小PyVista表示まで実装済みです。
 
-まず README.md, docs/CURRENT_STATUS.md, docs/REVIEW_NOTES.md, docs/CLAUDE_HANDOFF.md を読んでください。
-そのうえで、tools/view_json_pyvista.py と crystal_viewer/atom_mapping.py を中心に、
-最初の対称操作アニメーションへ進む設計として問題がないかレビューしてください。
+まず README.md, docs/CURRENT_STATUS.md, docs/REVIEW_NOTES.md, docs/CLAUDE_HANDOFF.md, docs/ANIMATION_DESIGN.md を読んでください。
+そのうえで、次に tools/view_json_pyvista.py に `--animate` を実装する前提で、
+アニメーション設計に問題がないかレビューしてください。
 
 archive/old_gui_attempt/ は古い失敗コードなので、現行実装としては使わないでください。
 ```

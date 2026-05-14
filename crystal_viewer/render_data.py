@@ -34,6 +34,7 @@ class RenderOperationData:
     label: str
     kind: str
     order: int | None
+    angle_deg: float | None
     symbol: str
 
 
@@ -109,6 +110,7 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
             label=f"{op.index}: {op.international_symbol} {op.kind}",
             kind=op.kind,
             order=op.order,
+            angle_deg=op.angle_deg,
             symbol=op.international_symbol,
         )
         for op in result.operations
@@ -176,6 +178,7 @@ def render_data_from_molecule(result: MoleculeAnalysisResult) -> RenderData:
             label=f"{op.index}: {op.symbol} {op.kind}",
             kind=op.kind,
             order=op.order,
+            angle_deg=op.angle_deg,
             symbol=op.symbol,
         )
         for op in result.operations

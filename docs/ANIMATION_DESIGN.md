@@ -1,0 +1,155 @@
+# Animation Design
+
+This document defines the next implementation step after JSON export and the minimal JSON PyVista viewer.
+
+## Goal
+
+Add a small animation prototype on top of `tools/view_json_pyvista.py`.
+
+The prototype should still consume exported JSON only. It should not call CIF or molecule analysis code directly.
+
+## Inputs
+
+Animation uses:
+
+```text
+render_data.atoms[].cart
+render_data.operations[]
+render_data.axes / planes / centers
+atom_mappings.mappings[].entries[].transformed_cart
+```
+
+For crystals, `transformed_cart` is the nearest periodic animation image, computed from `animation_frac @ lattice`.
+For molecules, `transformed_cart` is the raw transformed Cartesian coordinate.
+
+## Operation Data
+
+`RenderOperationData` includes:
+
+```text
+index
+label
+kind
+order
+angle_deg
+symbol
+```
+
+`angle_deg` is required for operation-aware rotation and screw animation. It is already computed during analysis, then copied into RenderData and JSON. JSON exports that contain this field use `schema_version = 2`.
+
+## CLI Scope
+
+Add these options to `tools/view_json_pyvista.py`:
+
+```bash
+--animate
+--animation-frames N
+--animation-output PATH
+```
+
+Required usage:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-output exports/f2_pd_op1.gif
+```
+
+`--animate` requires `--operation`, because atom targets are operation-specific.
+
+## Interpolation Policy
+
+Use an operation-aware dispatcher from the beginning:
+
+```text
+operation kind starts with rotation_ or screw_:
+  arc interpolation around the selected operation axis
+
+mirror, glide, inversion, translation, identity, fallback:
+  linear interpolation from start_cart to transformed_cart
+```
+
+For the very first debugging pass, the arc interpolation function may temporarily call linear interpolation internally. That temporary state should be short-lived, because the final specification expects rotation and screw operations to move along arcs.
+
+## Axis Lookup
+
+For rotation and screw operations:
+
+```text
+operation index
+  -> first RenderAxisData whose operation_indices contains the index
+```
+
+Use:
+
+```text
+axis.point_cart
+axis.direction_cart
+operation.angle_deg
+```
+
+There can be multiple equivalent axes for one operation in a periodic crystal. The first matching axis is acceptable for the first prototype, because the target position check still comes from `transformed_cart`.
+
+## Rotation Direction
+
+`angle_deg` is an unsigned magnitude. The viewer should determine the sign per atom by comparing candidate rotations:
+
+```text
+candidate +angle
+candidate -angle
+choose the candidate closer to transformed_cart
+```
+
+For screw operations, first implement:
+
+```text
+arc rotation component + linear residual-to-target correction
+```
+
+That keeps the end frame exactly equal to `transformed_cart` while preserving a visibly rotational path.
+
+## Frame Calculation
+
+For each frame parameter `s` in `[0, 1]`:
+
+```text
+start = atom.cart
+target = mapping_entry.transformed_cart
+
+if operation uses arc and axis exists:
+  pos = arc_path(start, target, axis, angle_deg, s)
+else:
+  pos = (1 - s) * start + s * target
+```
+
+Static atoms may be left in place.
+
+## Verification
+
+Minimum checks:
+
+```bash
+.venv/bin/python -m py_compile tools/view_json_pyvista.py crystal_viewer/render_data.py
+.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
+.venv/bin/python tools/export_analysis_json.py 'F2 Pd.cif' --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --list-operations
+```
+
+Visual checks:
+
+```text
+water operation 0:
+  H atoms exchange positions via C2 motion
+
+F2 Pd operation 1:
+  atoms move toward nearest periodic screw-equivalent positions
+```
+
+## Deferred
+
+```text
+GUI controls
+selected-atom-only animation
+wrapping final crystal positions back into the unit cell
+high-quality operation labels for screw axes
+puzzle interactions
+```

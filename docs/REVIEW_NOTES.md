@@ -303,4 +303,72 @@ For molecule mappings, `transformed_cart` is the raw transformed Cartesian coord
 1. まず線形補間で動作確認
 2. その後、回転は円弧補間、鏡映・反転は線形補間に切り替え（仕様書通り）
 
-データは `AtomMappingEntry.transformed_cart` と `RenderData.axes` に揃っているので、アニメーション実装に必要な材料はすべてあります。
+データは `AtomMappingEntry.transformed_cart` と `RenderData.axes` に揃っているので、アニメーション実装に必要な材料はほぼあります。
+
+---
+
+## アニメーション設計レビュー（`CLAUDE_HANDOFF.md` 質問8への回答）
+
+仕様書 `docs/specs/codex_final_spec_crystal_symmetry_viewer.md` Section 16 を参照しながら確認しました。
+
+### Q. この順番（線形補間 → 円弧補間）で進めるのが妥当か
+
+妥当です。ただし仕様書 Section 16.3 は「**最初から**」円弧補間を実装するよう明記しています。
+線形補間はデバッグ用として一時的なものと位置づけ、すぐに切り替えることを前提にしてください。
+
+実装上の推奨: 最初から操作別の分岐骨格だけ作り、`arc_interpolate` を最初は線形の仮実装にしておく。
+
+```python
+def interpolate(s, entry, operation, axes_by_op):
+    kind = operation["kind"]
+    if kind.startswith(("rotation_", "screw_")):
+        return arc_interpolate(s, ...)  # 最初は linear でもよい
+    else:
+        return (1 - s) * start + s * end
+```
+
+### Q. `transformed_cart` をアニメーション終点として使う設計で問題ないか
+
+問題ありません。
+
+- 結晶: `animation_frac @ lattice`（最近接周期像）→ 正しい終点 ✓
+- 分子: `rotation @ cart + translation`（raw）→ 正しい終点 ✓
+
+円弧補間でも `transformed_cart` を終点チェックとして使えます（Rodrigues 公式の結果と一致するはず）。
+
+### Q. 周期境界の `animation_frac` 最近接像の考え方でよいか
+
+正しく、仕様書 Section 16.2 と完全に一致しています ✓
+
+アニメーション終了時に `wrapped_frac` へ戻す処理（Section 16.2 末尾の注記）は GUI 実装時に必要になりますが、今の PyVista 単体ツールでは不要です。
+
+### Q. JSON schema に追加しておくべき情報はあるか
+
+**`angle_deg` を `RenderOperationData` に追加することを推奨します。**
+
+現在 `RenderOperationData` には `kind` と `order` のみ。円弧補間で回転角の大きさが必要になります。
+
+- `order=2` → 角度 180°、`order=3` → 120° と計算できますが、
+- `SymmetryOperationInfo.angle_deg` はすでに計算済み（符号なし絶対値）なので、そのまま渡す方が確実。
+
+```python
+# render_data.py の RenderOperationData に追加
+angle_deg: float | None  # rotation/screw のとき設定、それ以外 None
+```
+
+回転方向（符号）は viewer 側で start/end 座標と軸の外積から決定します。
+
+パズル化に必要なもの（`atom_to_atom`、`operation_indices`）は現在の schema で揃っています ✓
+
+### Q. 仕様書とのズレとして気になる点
+
+1点のみ：
+
+**補間方式**（Section 16.3）: 仕様書は回転・らせん軸の円弧補間を「最初から」実装するよう指定しています。
+現在の `CURRENT_STATUS.md` の「まず線形」はそれとやや異なります。
+Codex に伝える際は「線形は一時的、すぐに arc へ切り替える前提」と明示してください。
+
+それ以外は仕様書との整合性は取れています：
+- 最近接周期像: Section 16.2 と一致 ✓
+- `RenderData` の座標変換: Section 11 と一致 ✓
+- `operation_indices` の保持: Section 4.4 の要件を満たす ✓

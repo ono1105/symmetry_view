@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_kind": "molecule",
   "render_data": {
     "metadata": {
@@ -50,6 +50,7 @@
         "label": "0: C2 rotation_2",
         "kind": "rotation_2",
         "order": 2,
+        "angle_deg": 179.99999879258172,
         "symbol": "C2"
       },
       {
@@ -57,6 +58,7 @@
         "label": "1: sigma mirror",
         "kind": "mirror",
         "order": 2,
+        "angle_deg": null,
         "symbol": "sigma"
       },
       {
@@ -64,6 +66,7 @@
         "label": "2: E identity",
         "kind": "identity",
         "order": 1,
+        "angle_deg": null,
         "symbol": "E"
       },
       {
@@ -71,6 +74,7 @@
         "label": "3: sigma mirror",
         "kind": "mirror",
         "order": 2,
+        "angle_deg": null,
         "symbol": "sigma"
       }
     ],
