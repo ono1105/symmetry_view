@@ -653,6 +653,24 @@ def effective_operation_center(
 
     if point is None:
         return center
+
+    # Snap to the nearest periodic image of the visual center marker (Q4 fix).
+    # The affine-computed fixed point can land on a different lattice image than
+    # the visual element.  Only snap when shared_shift is absent or zero,
+    # because the render_data visual center corresponds to the unshifted operation.
+    # When shared_shift is nonzero, the correct pivot has already moved and
+    # snapping to the original visual center would introduce a new error.
+    shift_is_zero = shared_shift is None or not np.any(np.asarray(shared_shift, dtype=float))
+    if center is not None and shift_is_zero:
+        unit_cell = render_data.get("unit_cell")
+        if unit_cell is not None:
+            lattice = np.asarray(unit_cell["lattice"], dtype=float)
+            visual_pt = np.asarray(center["point_cart"], dtype=float)
+            diff_frac = (point - visual_pt) @ np.linalg.inv(lattice)
+            snapped = point - np.round(diff_frac) @ lattice
+            if np.linalg.norm(matrix @ snapped + translation - snapped) < 1e-8:
+                point = snapped
+
     return {"point_cart": point}
 
 

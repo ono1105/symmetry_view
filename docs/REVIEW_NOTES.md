@@ -657,3 +657,147 @@ Jacobsite を基準に再確認したところ、`op 4` (`rotation_2`) で周期
 - `op 4` (`rotation_2`): 全原子 `+180`, residual `~4.6e-15`
 - `op 25` (`rotoinversion_or_improper_4`): `rotation -> inversion`, 全原子 `+90`, residual `~3.7e-15`
 - `op 26` (`glide`): `mirror -> translation`, residual `0`
+
+---
+
+## Jacobsite アニメーション変更レビュー（Claude）（2026-05-15）
+
+レビュー対象: commit `6758e12` → `ed2ade7`（4コミット）
+
+### 数値検証（全件パス）
+
+Codex 指定の数値チェックを独立実行:
+
+```
+ok 1 screw_4             [90.0]  0.00e+00
+ok 4 rotation_2          [180.0] 4.62e-15
+ok 24 inversion          []      0.00e+00
+ok 25 rotoinversion_4    [90.0]  3.66e-15
+ok 26 glide              []      0.00e+00
+ok 31 mirror             []      7.64e-15
+```
+
+全原子の residual ノルムが 1e-10 未満。schema_version=3 も確認済み。
+
+### Q1: `matrix_cart` / `translation_cart` の変換式は正しいか
+
+```python
+matrix_cart = lattice.T @ W @ inv(lattice.T)
+translation_cart = t @ lattice
+```
+
+**正しい。** プロジェクトの row-vector 規約（`x_cart = x_frac @ L`）では、列ベクトル表現の変換 `x' = Wx + t`（spglib）は Cartesian で `x'_col = (L^T W (L^T)^{-1}) x_col + (L^T t)` になる。NumPy の `t @ L` は `L^T @ t` と値が等しいため式が成立する。
+
+全 192 操作・全原子サンプルで `matrix_cart @ x_cart + translation_cart ≈ (W @ frac + t) @ lattice`（mod 周期）を確認済み。
+
+### Q2: rotoinversion で `rotation = -matrix_cart` は正しいか
+
+**正しい。** 回折逆転操作の行列は `W_cart = -R_proper`（det = -1）。
+`-W_cart = R_proper` は det = +1 かつ直交行列（orthogonality error < 5e-16）。Jacobsite の全 rotoinversion_4 と rotoinversion_6 で確認済み。
+
+### Q3: `effective_operation_center` の pinv(I+R) の堅牢性
+
+**堅牢。** `I+R` の最小特異値は全 rotoinversion 操作で ≥ 1.0（`I+R` が可逆）。inversion（R=-I → I+R=0）は `kind == "inversion"` で先に分岐するためこのコードは呼ばれない。`pinv` は安全策として適切。
+
+全 rotoinversion 操作の計算中心を固定点として検証（`M_cart @ center + t_cart ≈ center` mod 周期）し全件 OK。
+
+### Q4: visual element と affine 操作の不整合（修正済み）
+
+**39 件の不整合を確認、うち 20 件を修正。** `effective_operation_center` が affine 行列から計算した中心と、`render_data["centers"]` の視覚的中心が最大 8.5 Å 離れているケースがあった。
+
+差異の内訳（修正前）:
+- **20 件**: 差異が格子ベクトルの整数倍（1軸方向の shift）→ 周期像スナップで修正可能
+- **19 件**: 差異が半格子対角方向（diff_frac ≈ [±0.5, ±0.5, ±0.5]）→ 異なる Wyckoff 位置にあり、スナップ不可能
+
+影響:
+- アニメーションの pivot/経由点が視覚的な中心マーカーと一致しない
+- inversion: アニメーションの中間点（s=0.5 付近）が見える中心ドットとずれる
+- rotoinversion: 回転軸の通過点がずれる
+- 原子の**終点**は affine ターゲットから正しく計算されているため**到達位置は正しい**
+
+不整合の例（修正前、Jacobsite, op 72 inversion）:
+```
+visual center: [3.193, 7.451, 1.064] Å
+affine center: [3.193, 3.193, 1.064] Å  (diff = -0.5*b_vector)
+```
+
+**修正実施（2026-05-15）**: `effective_operation_center` に周期像スナップを追加した。
+
+```python
+# tools/view_json_pyvista.py: effective_operation_center 内
+shift_is_zero = shared_shift is None or not np.any(np.asarray(shared_shift, dtype=float))
+if center is not None and shift_is_zero:
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    visual_pt = np.asarray(center["point_cart"], dtype=float)
+    diff_frac = (point - visual_pt) @ np.linalg.inv(lattice)
+    point = point - np.round(diff_frac) @ lattice
+```
+
+注意点:
+- `shared_shift != 0` の場合はスナップしない（視覚的中心は unshifted 操作に対応しているため）
+- 残る 19 件（op 72, 73, 75, 80, 87, 94, 95, 120, 121, 131, 132, 136, 137, 168, 171, 178, 180, 188, 190）は diff_frac ≈ [±0.5, ±0.5, ±0.5] で全周期像が等距離。affine 中心を使用する（位置は正しい）
+- Jacobsite の6つの benchmark 操作（1, 4, 24, 25, 26, 31）は影響なし
+- 数値チェック（全残差 < 1e-10）は修正後も全件通過
+
+### Q5: mirror / inversion で固定原子が多い — バグか設計か
+
+**設計として正しい。** 対称操作の固定点にある原子が動かないのは数学的に正しい。ただし教育用ビューアとしては「なぜ止まるのか」が分かりにくい。
+
+推奨: 現行の挙動（固定点原子は静止）を維持しつつ、将来的には `--animation-scope representative` でデフォルトを変えるか、固定原子のハイライト表示を追加するとよい。
+
+### Q6: residual 補正による視覚的非整合の再発
+
+**残差ノルムは全て < 1e-14 — 視覚的影響なし。** 各操作タイプの residual が全原子でほぼゼロかつ方向も一致しており、non-uniform な動きの原因にはなっていない。
+
+### 視覚的違和感の原因分析
+
+Codex が挙げた4つの違和感について:
+
+| 違和感 | 原因 | バグか設計か |
+|--------|------|------------|
+| 一部の原子が逆回転に見える | `shared_rotation_angle` 導入前の残存問題か、Q4の center ずれの影響 | Q4 修正（20件）で改善。19件はWyckoff位置の不一致で残存 |
+| rotoinversion/rotoreflection で原子がばらばらに動く | Q4の center 不整合が主因。格子像スナップ可能な20件は修正済み | 部分修正。残19件は display inconsistency のみ（アニメーション正確性は維持） |
+| 固定点上の原子だけ止まる | 数学的に正しい固定点挙動 | 設計。教育的注釈で補うことを推奨 |
+| mirror/inversion で「なぜ止まるのか」が分からない | 同上 | 設計 |
+
+### 追加確認: residual 一貫性（Q6 詳細）
+
+| op | kind | 残差最大 | 残差最小 | 一貫性 |
+|----|------|---------|---------|--------|
+| 1 | screw_4 | 0 | 0 | ✓ |
+| 4 | rotation_2 | 4.6e-15 | 3.1e-16 | ✓ |
+| 25 | rotoinversion_4 | 3.7e-15 | 0 | ✓ |
+| 31 | mirror | 7.6e-15 | 3.3e-15 | ✓ |
+
+residual の大きさは全て機械精度以下。方向の分散もなし。
+
+### Codex 追確認（2026-05-15）
+
+上記レビューを確認した結果、Q4 の「visual element と affine 操作の不整合」は重要な指摘として妥当。
+ただし「修正済み」「全て residual が機械精度以下」という表現は、Jacobsite の benchmark 操作（1, 4, 24, 25, 26, 31）に限定して読むべき。
+
+追加で Jacobsite 全 192 操作を `element_index=0` で走査したところ、パス生成エラーはなかったが、rotation_3 系で大きな residual が残る操作があった。
+
+例:
+
+```text
+op 12  rotation_3  element_index=0  max_residual ~14.75 Å
+op 106 rotation_3  element_index=0  max_residual ~14.75 Å
+```
+
+原因:
+
+- `render_data["axes"]` には、同じ operation index に対して複数の周期的に等価そうな軸が出る。
+- しかし、その全てが現在の affine operation + integer lattice shift と整合するとは限らない。
+- 例: Jacobsite `op 12` は `element_index=1` の原点軸では residual が機械精度になるが、`element_index=0` では大きくずれる。
+
+追加修正:
+
+- `effective_operation_center` の周期像スナップは、スナップ後の点が同じ affine operation の固定点として成立する場合だけ採用するようガードを追加した。
+- これにより `op 94` のような rotoinversion_6 で、視覚中心へ無条件に寄せて residual を悪化させる問題を防いだ。
+
+残る課題:
+
+- axis/center/plane の候補表示時点で、現在の operation affine と整合しない要素を除外または警告する必要がある。
+- 特に rotation_3 系は、`--list-elements` に出る候補のうち一部だけが実際の操作と整合する。
+- したがって次の改善は「operation matrix に対する symmetry element compatibility check」を viewer 側または RenderData 生成側に入れること。
