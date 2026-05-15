@@ -68,7 +68,7 @@ Crystal JSON also stores `asymmetric_atoms`, the atom sites written directly in 
 
 ## Jacobsite Check Notes
 
-`Jacobsite.cif` is a broader crystal symmetry sample:
+`examples/structures/jacobsite.cif` is a broader crystal symmetry sample:
 
 ```text
 space group: 227 Fd-3m

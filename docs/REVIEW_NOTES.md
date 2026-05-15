@@ -12,12 +12,12 @@ Claude によるレビュー結果をまとめています。
 ```bash
 .venv/bin/python tools/analyze_molecule.py examples/water.xyz     # C2v
 .venv/bin/python tools/analyze_molecule.py examples/methane.xyz   # Td
-.venv/bin/python tools/analyze_structure.py 'F2 Pd.cif'           # P2_13, 12 ops, 24 axes
-.venv/bin/python tools/inspect_render_data.py 'F2 Pd.cif' --mode crystal
+.venv/bin/python tools/analyze_structure.py examples/structures/f2_pd.cif           # P2_13, 12 ops, 24 axes
+.venv/bin/python tools/inspect_render_data.py examples/structures/f2_pd.cif --mode crystal
 .venv/bin/python tools/inspect_render_data.py examples/methane.xyz --mode molecule
-.venv/bin/python tools/inspect_atom_mapping.py 'F2 Pd.cif' --mode crystal
+.venv/bin/python tools/inspect_atom_mapping.py examples/structures/f2_pd.cif --mode crystal
 .venv/bin/python tools/inspect_atom_mapping.py examples/water.xyz --mode molecule
-.venv/bin/python tools/export_analysis_json.py 'F2 Pd.cif' --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
 .venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
 ```
 
@@ -194,7 +194,7 @@ UI 実装時に `kind` + `order` から表示文字列を組み立てる関数�
 ### 動作確認
 
 ```bash
-.venv/bin/python tools/export_analysis_json.py 'F2 Pd.cif' --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
 .venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
 ```
 
@@ -400,7 +400,7 @@ Codex に伝える際は「線形は一時的、すぐに arc へ切り替える
 ```bash
 .venv/bin/python -m py_compile crystal_viewer/render_data.py crystal_viewer/atom_mapping.py  # OK
 .venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
-.venv/bin/python tools/export_analysis_json.py 'F2 Pd.cif' --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
 .venv/bin/python tools/view_json_pyvista.py exports/water.json --list-operations   # 4 operations, all mapping=ok
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations   # 12 operations, all mapping=ok
 ```
@@ -586,7 +586,7 @@ glide:
 
 ## Jacobsite 追加確認（2026-05-15）
 
-`Jacobsite.cif` を追加し、F2 Pd 以外の高対称結晶でも JSON export と最小ビューアの代表操作を確認した。
+`examples/structures/jacobsite.cif` を追加し、F2 Pd 以外の高対称結晶でも JSON export と最小ビューアの代表操作を確認した。
 
 ### 解析結果
 
@@ -962,3 +962,219 @@ op114 rotation_3: auto ~1.1e-14, forced element_index=0 ~13.9 Å
 ```
 
 これにより、デフォルトでは異なる軸・面で対称操作しているように見える問題をかなり抑えられる。
+
+### Claude 独立検証（2026-05-15、commit `d73c554`）
+
+**全192操作で auto-select の max residual = 0 件 (> 0.1 Å) を確認。** 6 benchmark 操作も全件通過。
+
+`symmetry_element_shared_shift` の動作検証:
+
+| op | kind | 互換要素 | auto residual | element_index=0 residual |
+|----|------|---------|--------------|--------------------------|
+| 10 | rotation_3 | axis[1] のみ | 6.42e-15 Å | 13.905 Å |
+| 12 | rotation_3 | axis[1] のみ | 5.33e-15 Å | 14.748 Å |
+| 37 | mirror | plane[1] のみ | 2.32e-15 Å | 6.021 Å |
+| 57 | rotation_2 | axis[1,3] | 5.18e-15 Å | 6.021 Å |
+
+`symmetry_element_shared_shift` は `required = (p - (M @ p + t)) @ inv(L)` が整数ベクトルになる要素だけを「互換」と判定し、そのシフトを `shared_shift` として採用する。互換でない要素は None を返し、代表原子のシフトにフォールバックする。
+
+設計として正しい:
+- 互換要素の特定: `required` が整数ベクトルになる ↔ 選んだ visual element 上の点が affine 操作の固定点（mod 格子）である ✓
+- スコアリング: 全原子の最大 residual で評価 → 互換でない要素は大きな residual で自動排除 ✓
+- `--element-index N` 明示時はスキャンをスキップし従来通り動作 ✓
+- `max_count=0`（identity, pure_translation）は `element_index=None` を1候補として評価 ✓
+
+**軽微な観察（バグではない）**:
+
+1. `animation_paths` は `select_animation_context` から返った `axis` と `shared_angle` を受け取った後に `effective_rotation_axis` と `shared_rotation_angle` を再計算している。これらの呼び出しは idempotent なので結果は同じだが、冗長。
+
+2. パフォーマンス: 全192操作の auto-select で 2.64 秒（13.7 ms/op）。inversion 操作は 8 候補 × 56 原子のスコアリングが発生する。対話的操作切り替えでは目立つ可能性あり。スコアリングを全原子ではなく代表原子だけで行う最適化余地がある（正確性 vs 速度のトレードオフ）。
+
+3. `glide` は `symmetry_element_shared_shift` で非対応（kind チェックに含まれない）。glide 操作では plane 上の点が操作後に glide 成分分ずれるため返り値は常に None。これは意図的で正しい。
+
+---
+
+## 表示クローンのアニメーションバグ（Claude 診断）（2026-05-16）
+
+Codex の「アニメーション修正方針」相談に対するレビュー。
+
+### 根本原因の再診断
+
+Codex の診断（残差補正が主因）は部分的に正しいが、**実際の主因は `980684e` で導入した表示クローンの animation 計算**です。
+
+`d73c554` の auto-select + element_shift 適用後、benchmark 操作の全原子 residual は機械精度（< 2.2e-15 Å）。視覚的に意味のある residual はすでに存在しません。
+
+**本当の問題:** `update_animated_atoms` が表示クローンを `evaluate_path(primary_path, s) + display_shift_cart` で動かします。これは「主原子のアークを並進したもの」であり、シフトが回転軸に垂直な場合、クローンは選択した軸と `shift_cart` だけずれた別の等価軸の周りを回転しているように見えます。
+
+数値確認（s=0.5 でのアーク誤差、軸に垂直なシフトを持つクローンの例）:
+
+```text
+op 4  (rotation_2): 表示クローンのアーク誤差 最大 17.030 Å
+op 1  (screw_4):    表示クローンのアーク誤差 最大 15.465 Å
+op 31 (mirror):     表示クローンのアーク誤差 最大 12.042 Å
+```
+
+軸方向に並行なシフトのクローンは誤差 0（回転で軸方向成分は変化しないため）。垂直成分を持つシフトだけが問題になる。
+
+### 6 つの質問への回答
+
+**Q1 (教育的正当性):** 提案方針は正しい。全インスタンスに affine 変換を直接適用すれば、クローンも同じ軸/面の周りを正しく動く。
+
+**Q2 (atom mapping の役割分離):** 問題なし。atom mapping の役割は「どの原子を動かすか」と「代表原子の選択」に限定してよい。target 提供の役割は affine 変換が代替する。
+
+**Q3 (screw/glide の translation vector 導出):**
+affine translation から射影して導出すべき:
+- Screw: `v_screw = (t_total · axis_dir) * axis_dir`
+- Glide: `v_glide = t_total - (t_total · plane_normal) * plane_normal`
+
+ここで `t_total = t_cart + element_shift @ lattice`。全原子で同一の値になる（atom position 非依存）。
+
+**Q4 (回反/回映の分解):** 現行の `rotation = -matrix_cart → inversion` は正しい。変更不要。
+
+**Q5 (周期境界と連続座標):** 連続座標のまま動かすべき。現行実装もこの方針（affine target = `M @ x + t_total`）。表示クローンも同様に wrap せず連続軌跡で。
+
+**Q6 (等価な別軸への補正を避けるべきか):** Yes。現行で残っている問題は residual 補正（< 2e-15 Å）ではなく、表示クローンが並進されたアークを描く `display_shift_cart` 加算。これが「別の等価軸で動いているように見える」原因。
+
+### 推奨修正（優先度順）
+
+**最重要（視覚インパクト大）**: 表示クローンの animation を修正する。クローンの実際の開始位置（`start + display_shift_cart`）に対して同じ幾何操作を適用する。
+
+```python
+# evaluate_path の型情報があれば、axis_point/angle を取り出して clone_start = start + shift で回転
+# 最小実装: clone_start を path["start"] の代わりに使って同じ軸で回転
+```
+
+具体的には `evaluate_path` に `start_override` を渡すか、`build_operation_path` をクローンの開始位置で呼び出して個別 path を構築する。
+
+**次に重要（コード整理）**: residual フィールドと `+ residual * s` を除去。視覚的影響はほぼゼロだが、コードの意図を明確にする。
+
+**やや重要（設計整合）**: `animation_target` を `operation_affine_target` のみに統一し、atom_mapping の `transformed_cart` への依存を除去。`shared_periodic_shift` も不要になる（`element_shift` に一本化）。
+
+---
+
+## Codex 直近 2 コミット レビュー (2026-05-16)
+
+対象コミット: `d73c554` Auto-select compatible symmetry elements / `a23eb4c` Track asymmetric unit atom origins
+
+### バグなし — 全チェック通過
+
+**数値確認 (schema_version=4 で再実行):**
+
+```text
+ok 1  screw_4                     [90.0]  2.66e-15
+ok 4  rotation_2                  [180.0] 4.62e-15
+ok 24 inversion                   []      0.00e+00
+ok 25 rotoinversion_or_improper_4 [90.0]  2.18e-15
+ok 26 glide                       []      2.22e-15
+ok 31 mirror                      []      7.64e-15
+```
+
+全 192 操作を `element_index=None`（auto-select）で実行: **residual > 1e-6 の操作 0 件**。
+
+操作種別ごとの worst residual:
+
+```text
+glide:                       5.10e-15
+mirror:                      8.14e-15
+rotation_2:                  9.78e-15
+rotation_3:                  1.05e-14
+rotoinversion_or_improper_4: 5.02e-15
+rotoinversion_or_improper_6: 1.19e-14
+screw_2:                     5.02e-15
+screw_4:                     3.97e-15
+```
+
+**非対称単位追跡 (a23eb4c):**
+- `render_data["asymmetric_atoms"]`: 3 件 (Mn1, Fe1, O1)
+- 全 56 原子で `asymmetric_index` 割り当て済み（未割り当て 0 件）
+- サイト別: site 0 → 8, site 1 → 16, site 2 → 32（Fd-3m 空間群の Wyckoff 多重度と一致）
+
+**`evaluate_path` の `start_override` (表示クローン修正):**
+- 全パス型（rotation / screw / mirror / glide / inversion / rotoinversion / rotoreflection）で start_override が正しく適用されることを確認
+- 操作固有の幾何パラメータ（axis_point, plane_point, center）はすべての原子・クローンで共通なので、start だけ置き換えれば正確なアークが得られる
+- screw/glide の translation は操作固有量（原子位置非依存）であり、`shared_step_translation` が reference atom から正しく導出している
+
+**`shared_step_translation` の `center=None` 渡し:**
+- `animation_target` への `center=None` は意図的な防御処置
+- screw/glide 以外では `shared_step_translation` は `None` を返すため影響なし
+
+**冗長な再計算（バグではないが性能への影響あり）:**
+`animation_paths` の lines 461–470 で `effective_rotation_axis` と `shared_rotation_angle` を再計算しているが、`select_animation_context`（内部の `build_animation_context` line 603–612）がすでに同じ値を計算して返している。入力が変わらないため結果は同一だが無駄。
+
+### パフォーマンス計測（Jacobsite, 192 操作）
+
+```text
+select_animation_context 合計: 1330 ms （6.93 ms/op）
+  build_animation_context:      127 ms （0.66 ms/op）
+  animation_context_score:     1195 ms （6.22 ms/op） ← ボトルネック
+```
+
+候補数分布:
+
+```text
+1 candidate: 4 ops
+2 candidates: 92 ops
+3 candidates: 32 ops
+4 candidates: 60 ops
+8 candidates: 4 ops
+平均 2.9 候補/op
+```
+
+`animation_context_score` が全原子（56 件）× 全候補でパスを構築・評価することがボトルネック。
+
+### 安全な高速化案（3 件）
+
+**案 A: early exit when score = 0 （推定 ~40-60% 削減）**
+
+全 192 操作で最終 residual が機械精度であることを確認済み。多くの操作では最初の候補が score=0 になるはず。`select_animation_context` に以下を追加:
+
+```python
+for context in candidates:
+    score = animation_context_score(
+        render_data, operation, mapping, atoms_by_index, context,
+        threshold=best_score,   # 案 B と組み合わせる場合
+    )
+    if score < best_score:
+        best_score = score
+        best_context = context
+    if best_score == 0.0:
+        break  # これ以上試す必要なし
+```
+
+**案 B: `animation_context_score` に threshold 引数を追加 （案 A と組み合わせると効果的）**
+
+現在の best_score を超えた時点でその候補の評価を打ち切れる:
+
+```python
+def animation_context_score(..., threshold: float = float("inf")) -> float:
+    worst = 0.0
+    for entry in mapping["entries"]:
+        ...
+        worst = max(worst, max_path_residual(path))
+        if worst >= threshold:
+            return worst  # これ以上悪くなっても比較結果は変わらない
+    return worst
+```
+
+**案 C: `animation_paths` の冗長計算を除去 （微小だが確実）**
+
+`select_animation_context` が返す tuple の `axis`（index 0）と `shared_angle`（index 5）はすでに `effective_rotation_axis` と `shared_rotation_angle` を適用済み。`animation_paths` の lines 461–470 を除去し、tuple の値をそのまま使う:
+
+```python
+# 変更前 (animation_paths 内)
+axis, plane, center, reference_entry, shared_shift, shared_angle = select_animation_context(...)
+axis = effective_rotation_axis(operation, axis, center)   # 冗長
+shared_angle = shared_rotation_angle(...)                  # 冗長
+translation_override = shared_step_translation(...)
+
+# 変更後
+axis, plane, center, reference_entry, shared_shift, shared_angle = select_animation_context(...)
+translation_override = shared_step_translation(
+    render_data, operation, atoms_by_index, reference_entry,
+    axis, plane, shared_shift, shared_angle,
+)
+```
+
+### sequential パスは現在デッドコード
+
+`evaluate_path` と `max_path_residual` に "sequential" 型の処理があるが、`build_operation_path` は "sequential" 型を生成しない。将来用の準備コードとして問題はないが、現時点では未使用。

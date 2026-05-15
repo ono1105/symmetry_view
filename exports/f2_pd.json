@@ -4,7 +4,7 @@
   "render_data": {
     "metadata": {
       "mode": "crystal",
-      "source_file": "F2 Pd.cif",
+      "source_file": "examples/structures/f2_pd.cif",
       "formula": "PdF2",
       "symmetry_label": "198 P2_13",
       "operation_count": 12

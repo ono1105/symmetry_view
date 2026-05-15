@@ -62,15 +62,15 @@ tools/
 ## 動作確認コマンド
 
 ```bash
-.venv/bin/python tools/analyze_structure.py 'F2 Pd.cif'
+.venv/bin/python tools/analyze_structure.py examples/structures/f2_pd.cif
 .venv/bin/python tools/analyze_molecule.py examples/water.xyz
 .venv/bin/python tools/analyze_molecule.py examples/methane.xyz
-.venv/bin/python tools/inspect_render_data.py 'F2 Pd.cif' --mode crystal
+.venv/bin/python tools/inspect_render_data.py examples/structures/f2_pd.cif --mode crystal
 .venv/bin/python tools/inspect_render_data.py examples/methane.xyz --mode molecule
-.venv/bin/python tools/inspect_atom_mapping.py 'F2 Pd.cif' --mode crystal
+.venv/bin/python tools/inspect_atom_mapping.py examples/structures/f2_pd.cif --mode crystal
 .venv/bin/python tools/inspect_atom_mapping.py examples/water.xyz --mode molecule
 .venv/bin/python tools/inspect_atom_mapping.py examples/methane.xyz --mode molecule
-.venv/bin/python tools/export_analysis_json.py 'F2 Pd.cif' --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
 .venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations
@@ -85,7 +85,7 @@ tools/
 確認済みの代表結果:
 
 ```text
-F2 Pd.cif:
+examples/structures/f2_pd.cif:
   space group: 198 P2_13
   operations: 12
   axes: 24

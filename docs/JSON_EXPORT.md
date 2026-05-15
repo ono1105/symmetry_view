@@ -16,7 +16,7 @@ atom_mappings
 Crystal:
 
 ```bash
-.venv/bin/python tools/export_analysis_json.py 'F2 Pd.cif' --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
 ```
 
 Molecule:

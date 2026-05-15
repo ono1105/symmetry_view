@@ -4,7 +4,7 @@
   "render_data": {
     "metadata": {
       "mode": "crystal",
-      "source_file": "Jacobsite.cif",
+      "source_file": "examples/structures/jacobsite.cif",
       "formula": "Mn(FeO2)2",
       "symmetry_label": "227 Fd-3m",
       "operation_count": 192

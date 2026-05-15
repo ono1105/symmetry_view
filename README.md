@@ -23,8 +23,18 @@ tools/
   view_json_pyvista.py    JSONを読む最小PyVista表示
 
 examples/
+  structures/
+    f2_pd.cif
+    jacobsite.cif
+    mg2v2o7.cif
   water.xyz
   methane.xyz
+
+exports/
+  f2_pd.json
+  jacobsite.json
+  mg2v2o7.json
+  water.json
 
 docs/specs/
   仕様書・設計メモ
@@ -46,7 +56,7 @@ pip install -r requirements.txt
 結晶解析:
 
 ```bash
-.venv/bin/python tools/analyze_structure.py 'F2 Pd.cif'
+.venv/bin/python tools/analyze_structure.py examples/structures/f2_pd.cif
 ```
 
 分子解析:
@@ -58,22 +68,23 @@ pip install -r requirements.txt
 共通描画データ:
 
 ```bash
-.venv/bin/python tools/inspect_render_data.py 'F2 Pd.cif' --mode crystal
+.venv/bin/python tools/inspect_render_data.py examples/structures/f2_pd.cif --mode crystal
 .venv/bin/python tools/inspect_render_data.py examples/methane.xyz --mode molecule
 ```
 
 原子対応:
 
 ```bash
-.venv/bin/python tools/inspect_atom_mapping.py 'F2 Pd.cif' --mode crystal
+.venv/bin/python tools/inspect_atom_mapping.py examples/structures/f2_pd.cif --mode crystal
 .venv/bin/python tools/inspect_atom_mapping.py examples/water.xyz --mode molecule
 ```
 
 JSON export:
 
 ```bash
-.venv/bin/python tools/export_analysis_json.py 'F2 Pd.cif' --mode crystal -o exports/f2_pd.json
-.venv/bin/python tools/export_analysis_json.py Jacobsite.cif --mode crystal -o exports/jacobsite.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/jacobsite.cif --mode crystal -o exports/jacobsite.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/mg2v2o7.cif --mode crystal -o exports/mg2v2o7.json
 .venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
 ```
 

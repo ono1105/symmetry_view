@@ -21,7 +21,7 @@ git diff 76a1b2f..ed2ade7
 
 ## Current Baseline
 
-今後の検証基準は `Jacobsite.cif` / `exports/jacobsite.json` です。
+今後の検証基準は `examples/structures/jacobsite.cif` / `exports/jacobsite.json` です。
 
 ```text
 space group: 227 Fd-3m
@@ -64,7 +64,7 @@ exports/checks/current/jacobsite_op31_mirror_all.gif
 Added:
 
 ```text
-Jacobsite.cif
+examples/structures/jacobsite.cif
 exports/jacobsite.json
 ```
 

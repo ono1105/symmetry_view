@@ -115,6 +115,7 @@ def main() -> int:
         add_symmetry_elements(
             plotter,
             render_data,
+            atom_mappings,
             operation_index=args.operation,
             element_index=args.element_index,
         )
@@ -253,6 +254,7 @@ def add_unit_cell(plotter: pv.Plotter, unit_cell: dict) -> None:
 def add_symmetry_elements(
     plotter: pv.Plotter,
     render_data: dict,
+    atom_mappings: dict | None,
     *,
     operation_index: int | None,
     element_index: int | None = None,
@@ -261,13 +263,15 @@ def add_symmetry_elements(
     axis_length = max(span * 0.75, 1.0)
     plane_scale = max(span * 0.28, 0.5)
 
-    for axis in selected_elements(render_data["axes"], operation_index, element_index):
+    axes, planes, centers = display_symmetry_elements(render_data, atom_mappings, operation_index, element_index)
+
+    for axis in axes:
         point = np.asarray(axis["point_cart"], dtype=float)
         direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
         line = pv.Line(point - axis_length * direction, point + axis_length * direction)
         plotter.add_mesh(line, color="#58d68d", line_width=6)
 
-    for plane in selected_elements(render_data["planes"], operation_index, element_index):
+    for plane in planes:
         point = np.asarray(plane["point_cart"], dtype=float)
         basis1 = normalize(np.asarray(plane["basis1_cart"], dtype=float)) * plane_scale
         basis2 = normalize(np.asarray(plane["basis2_cart"], dtype=float)) * plane_scale
@@ -289,10 +293,42 @@ def add_symmetry_elements(
             edge_color="#aed6f1",
         )
 
-    for center in selected_elements(render_data["centers"], operation_index, element_index):
+    for center in centers:
         point = np.asarray(center["point_cart"], dtype=float)
         sphere = pv.Sphere(radius=max(span * 0.035, 0.08), center=point)
         plotter.add_mesh(sphere, color="#ff5f57", smooth_shading=True)
+
+
+def display_symmetry_elements(
+    render_data: dict,
+    atom_mappings: dict | None,
+    operation_index: int | None,
+    element_index: int | None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    if operation_index is not None and element_index is None and atom_mappings is not None:
+        operation = operation_by_index(render_data["operations"], operation_index)
+        mapping = selected_mapping(atom_mappings, operation_index)
+        if operation is not None and mapping is not None:
+            atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
+            axis, plane, center, _, _, _ = select_animation_context(
+                render_data,
+                operation,
+                mapping,
+                atoms_by_index,
+                element_index=None,
+                representative_atom=None,
+            )
+            return (
+                [axis] if axis is not None else [],
+                [plane] if plane is not None else [],
+                [center] if center is not None else [],
+            )
+
+    return (
+        selected_elements(render_data["axes"], operation_index, element_index),
+        selected_elements(render_data["planes"], operation_index, element_index),
+        selected_elements(render_data["centers"], operation_index, element_index),
+    )
 
 
 def add_displacements(
@@ -393,8 +429,10 @@ def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s:
     for item in animated_atoms:
         atom = item["atom"]
         path = paths.get(atom["index"])
-        center = np.asarray(atom["cart"], dtype=float) if path is None else evaluate_path(path, s)
-        center = center + item["display_shift_cart"]
+        display_shift = item["display_shift_cart"]
+        center = np.asarray(atom["cart"], dtype=float) + display_shift
+        if path is not None:
+            center = evaluate_path(path, s, start_override=np.asarray(atom["cart"], dtype=float) + display_shift)
         item["mesh"].points = item["base_points"] + center
 
 
@@ -420,15 +458,15 @@ def animation_paths(
     if reference_entry is None:
         return {}
 
-    axis = effective_rotation_axis(operation, axis, center)
-    shared_angle = shared_rotation_angle(
+    translation_override = shared_step_translation(
         render_data,
-        reference_entry,
         operation,
+        atoms_by_index,
+        reference_entry,
         axis,
         plane,
-        center,
         shared_shift,
+        shared_angle,
     )
 
     paths = {}
@@ -459,6 +497,7 @@ def animation_paths(
             plane=plane,
             center=center,
             angle_override=shared_angle,
+            translation_override=translation_override,
         )
     return paths
 
@@ -514,10 +553,19 @@ def select_animation_context(
     best_context = candidates[0]
     best_score = float("inf")
     for context in candidates:
-        score = animation_context_score(render_data, operation, mapping, atoms_by_index, context)
+        score = animation_context_score(
+            render_data,
+            operation,
+            mapping,
+            atoms_by_index,
+            context,
+            threshold=best_score,
+        )
         if score < best_score:
             best_score = score
             best_context = context
+        if best_score <= 1e-10:
+            break
     return best_context
 
 
@@ -570,8 +618,21 @@ def animation_context_score(
     mapping: dict,
     atoms_by_index: dict[int, dict],
     context: tuple[dict | None, dict | None, dict | None, dict | None, np.ndarray | None, float | None],
+    *,
+    threshold: float = float("inf"),
 ) -> float:
     axis, plane, center, _, shared_shift, shared_angle = context
+    reference_entry = context[3]
+    translation_override = shared_step_translation(
+        render_data,
+        operation,
+        atoms_by_index,
+        reference_entry,
+        axis,
+        plane,
+        shared_shift,
+        shared_angle,
+    )
     worst = 0.0
     for entry in mapping["entries"]:
         atom = atoms_by_index.get(entry["source_atom"])
@@ -596,8 +657,11 @@ def animation_context_score(
             plane=plane,
             center=center,
             angle_override=shared_angle,
+            translation_override=translation_override,
         )
         worst = max(worst, max_path_residual(path))
+        if worst >= threshold:
+            return worst
     return worst
 
 
@@ -608,8 +672,11 @@ def max_path_residual(path: dict) -> float:
         current = stack.pop()
         if current["type"] == "sequential":
             stack.extend(current["segments"])
-        if current["type"] in ("rotation", "mirror", "inversion"):
-            residual = max(residual, float(np.linalg.norm(current.get("residual", np.zeros(3)))))
+            continue
+        target = current.get("target")
+        if target is not None:
+            endpoint = evaluate_path(current, 1.0)
+            residual = max(residual, float(np.linalg.norm(np.asarray(target, dtype=float) - endpoint)))
     return residual
 
 
@@ -741,6 +808,59 @@ def shared_rotation_angle(
         shared_shift=shared_shift,
     )
     return signed_angle_to_target(start, target, axis_point, axis_direction, angle_deg)
+
+
+def shared_step_translation(
+    render_data: dict,
+    operation: dict,
+    atoms_by_index: dict[int, dict],
+    reference_entry: dict | None,
+    axis: dict | None,
+    plane: dict | None,
+    shared_shift: np.ndarray | None,
+    shared_angle: float | None,
+) -> np.ndarray | None:
+    if reference_entry is None:
+        return None
+    reference_atom = atoms_by_index.get(reference_entry["source_atom"])
+    if reference_atom is None:
+        return None
+
+    kind = str(operation["kind"])
+    start = np.asarray(reference_atom["cart"], dtype=float)
+    target = animation_target(
+        render_data,
+        start,
+        reference_entry,
+        operation,
+        axis,
+        plane,
+        None,
+        shared_shift=shared_shift,
+    )
+
+    if kind.startswith("screw"):
+        if axis is None or shared_angle is None:
+            return None
+        rotated_end = rotate_about_axis(
+            start,
+            np.asarray(axis["point_cart"], dtype=float),
+            normalize(np.asarray(axis["direction_cart"], dtype=float)),
+            shared_angle,
+        )
+        return target - rotated_end
+
+    if "glide" in kind:
+        if plane is None:
+            return None
+        mirrored_end = reflect_point(
+            start,
+            np.asarray(plane["point_cart"], dtype=float),
+            normalize(np.asarray(plane["normal_cart"], dtype=float)),
+        )
+        return target - mirrored_end
+
+    return None
 
 
 def animation_target(
@@ -981,15 +1101,31 @@ def build_operation_path(
     plane: dict | None,
     center: dict | None,
     angle_override: float | None = None,
+    translation_override: np.ndarray | None = None,
 ) -> dict:
     kind = str(operation["kind"])
     axis = effective_rotation_axis(operation, axis, center)
-    if np.linalg.norm(target - start) < 1e-10:
+    geometric_kind = (
+        kind.startswith(("rotation", "screw"))
+        or kind in ("mirror", "inversion")
+        or "glide" in kind
+        or "rotoinversion" in kind
+        or "rotoreflection" in kind
+        or "improper" in kind
+    )
+    if not geometric_kind and np.linalg.norm(target - start) < 1e-10:
         return translation_path(start, target)
     if kind.startswith("screw"):
-        return screw_path(start, target, operation, axis, angle_override=angle_override)
+        return screw_path(
+            start,
+            target,
+            operation,
+            axis,
+            angle_override=angle_override,
+            translation_override=translation_override,
+        )
     if "glide" in kind:
-        return glide_path(start, target, plane)
+        return glide_path(start, target, plane, translation_override=translation_override)
     if "rotoinversion" in kind or "rotoreflection" in kind or "improper" in kind:
         return improper_path(start, target, operation, axis, plane, center, angle_override=angle_override)
     if kind.startswith("rotation"):
@@ -1019,7 +1155,6 @@ def rotation_path(
         if angle_override is not None
         else signed_angle_to_target(start, target, axis_point, axis_direction, angle_deg)
     )
-    rotated = rotate_about_axis(start, axis_point, axis_direction, angle)
     return {
         "type": "rotation",
         "start": start,
@@ -1027,7 +1162,6 @@ def rotation_path(
         "axis_point": axis_point,
         "axis_direction": axis_direction,
         "angle": angle,
-        "residual": target - rotated,
     }
 
 
@@ -1038,6 +1172,7 @@ def screw_path(
     axis: dict | None,
     *,
     angle_override: float | None = None,
+    translation_override: np.ndarray | None = None,
 ) -> dict:
     rotated_path = rotation_path(start, target, operation, axis, angle_override=angle_override)
     if rotated_path["type"] != "rotation":
@@ -1049,11 +1184,13 @@ def screw_path(
         rotated_path["angle"],
     )
     return {
-        "type": "sequential",
-        "segments": (
-            {**rotated_path, "target": rotated_end, "residual": np.zeros(3)},
-            translation_path(rotated_end, target),
-        ),
+        "type": "screw",
+        "start": start,
+        "target": target,
+        "axis_point": rotated_path["axis_point"],
+        "axis_direction": rotated_path["axis_direction"],
+        "angle": rotated_path["angle"],
+        "translation": target - rotated_end if translation_override is None else np.asarray(translation_override, dtype=float),
     }
 
 
@@ -1062,28 +1199,33 @@ def mirror_path(start: np.ndarray, target: np.ndarray, plane: dict | None) -> di
         return translation_path(start, target)
     point = np.asarray(plane["point_cart"], dtype=float)
     normal = normalize(np.asarray(plane["normal_cart"], dtype=float))
-    mirrored = reflect_point(start, point, normal)
     return {
         "type": "mirror",
         "start": start,
         "target": target,
         "plane_point": point,
         "plane_normal": normal,
-        "residual": target - mirrored,
     }
 
 
-def glide_path(start: np.ndarray, target: np.ndarray, plane: dict | None) -> dict:
+def glide_path(
+    start: np.ndarray,
+    target: np.ndarray,
+    plane: dict | None,
+    *,
+    translation_override: np.ndarray | None = None,
+) -> dict:
     mirrored_path = mirror_path(start, target, plane)
     if mirrored_path["type"] != "mirror":
         return translation_path(start, target)
     mirrored_end = reflect_point(start, mirrored_path["plane_point"], mirrored_path["plane_normal"])
     return {
-        "type": "sequential",
-        "segments": (
-            {**mirrored_path, "target": mirrored_end, "residual": np.zeros(3)},
-            translation_path(mirrored_end, target),
-        ),
+        "type": "glide",
+        "start": start,
+        "target": target,
+        "plane_point": mirrored_path["plane_point"],
+        "plane_normal": mirrored_path["plane_normal"],
+        "translation": target - mirrored_end if translation_override is None else np.asarray(translation_override, dtype=float),
     }
 
 
@@ -1091,13 +1233,11 @@ def inversion_path(start: np.ndarray, target: np.ndarray, center: dict | None) -
     center_point = None if center is None else np.asarray(center["point_cart"], dtype=float)
     if center_point is None:
         return translation_path(start, target)
-    inverted = 2.0 * center_point - start
     return {
         "type": "inversion",
         "start": start,
         "target": target,
         "center": center_point,
-        "residual": target - inverted,
     }
 
 
@@ -1117,45 +1257,117 @@ def improper_path(
         if "rotoinversion" in str(operation["kind"]):
             return inversion_path(start, target, center)
         return mirror_path(start, target, plane)
-    rotated_end = rotate_about_axis(start, rotated["axis_point"], rotated["axis_direction"], rotated["angle"])
     if "rotoinversion" in str(operation["kind"]):
-        second = inversion_path(rotated_end, target, center)
+        if center is None:
+            return translation_path(start, target)
+        return {
+            "type": "rotoinversion",
+            "start": start,
+            "target": target,
+            "axis_point": rotated["axis_point"],
+            "axis_direction": rotated["axis_direction"],
+            "angle": rotated["angle"],
+            "center": np.asarray(center["point_cart"], dtype=float),
+        }
     else:
-        second = mirror_path(rotated_end, target, plane)
-    return {
-        "type": "sequential",
-        "segments": ({**rotated, "target": rotated_end, "residual": np.zeros(3)}, second),
-    }
+        if plane is None:
+            return translation_path(start, target)
+        return {
+            "type": "rotoreflection",
+            "start": start,
+            "target": target,
+            "axis_point": rotated["axis_point"],
+            "axis_direction": rotated["axis_direction"],
+            "angle": rotated["angle"],
+            "plane_point": np.asarray(plane["point_cart"], dtype=float),
+            "plane_normal": normalize(np.asarray(plane["normal_cart"], dtype=float)),
+        }
 
 
 def translation_path(start: np.ndarray, target: np.ndarray) -> dict:
     return {"type": "linear", "start": start, "target": target}
 
 
-def evaluate_path(path: dict, s: float) -> np.ndarray:
+def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None) -> np.ndarray:
     s = float(np.clip(s, 0.0, 1.0))
     path_type = path["type"]
+    start = np.asarray(path["start"], dtype=float) if start_override is None else np.asarray(start_override, dtype=float)
     if path_type == "sequential":
         segments = path["segments"]
         segment_count = len(segments)
         index = min(int(s * segment_count), segment_count - 1)
         local_s = (s - index / segment_count) * segment_count
-        return evaluate_path(segments[index], local_s)
+        return evaluate_path(segments[index], local_s, start_override=start_override if index == 0 else None)
     if path_type == "rotation":
         rotated = rotate_about_axis(
-            path["start"],
+            start,
             path["axis_point"],
             path["axis_direction"],
             path["angle"] * s,
         )
-        return rotated + path["residual"] * s
+        return rotated
+    if path_type == "screw":
+        if s <= 0.5:
+            return rotate_about_axis(
+                start,
+                path["axis_point"],
+                path["axis_direction"],
+                path["angle"] * (2.0 * s),
+            )
+        rotated_end = rotate_about_axis(
+            start,
+            path["axis_point"],
+            path["axis_direction"],
+            path["angle"],
+        )
+        return rotated_end + np.asarray(path["translation"], dtype=float) * (2.0 * s - 1.0)
     if path_type == "mirror":
-        mirrored = reflect_point(path["start"], path["plane_point"], path["plane_normal"])
-        return interpolate(path["start"], mirrored, s) + path["residual"] * s
+        mirrored = reflect_point(start, path["plane_point"], path["plane_normal"])
+        return interpolate(start, mirrored, s)
+    if path_type == "glide":
+        mirrored = reflect_point(start, path["plane_point"], path["plane_normal"])
+        if s <= 0.5:
+            return interpolate(start, mirrored, 2.0 * s)
+        return mirrored + np.asarray(path["translation"], dtype=float) * (2.0 * s - 1.0)
     if path_type == "inversion":
-        inverted = 2.0 * path["center"] - path["start"]
-        return interpolate(path["start"], inverted, s) + path["residual"] * s
-    return interpolate(path["start"], path["target"], s)
+        inverted = 2.0 * path["center"] - start
+        return interpolate(start, inverted, s)
+    if path_type == "rotoinversion":
+        if s <= 0.5:
+            return rotate_about_axis(
+                start,
+                path["axis_point"],
+                path["axis_direction"],
+                path["angle"] * (2.0 * s),
+            )
+        rotated_end = rotate_about_axis(
+            start,
+            path["axis_point"],
+            path["axis_direction"],
+            path["angle"],
+        )
+        inverted = 2.0 * path["center"] - rotated_end
+        return interpolate(rotated_end, inverted, 2.0 * s - 1.0)
+    if path_type == "rotoreflection":
+        if s <= 0.5:
+            return rotate_about_axis(
+                start,
+                path["axis_point"],
+                path["axis_direction"],
+                path["angle"] * (2.0 * s),
+            )
+        rotated_end = rotate_about_axis(
+            start,
+            path["axis_point"],
+            path["axis_direction"],
+            path["angle"],
+        )
+        mirrored = reflect_point(rotated_end, path["plane_point"], path["plane_normal"])
+        return interpolate(rotated_end, mirrored, 2.0 * s - 1.0)
+    target = np.asarray(path["target"], dtype=float)
+    if start_override is not None:
+        target = target + (start - np.asarray(path["start"], dtype=float))
+    return interpolate(start, target, s)
 
 
 def interpolate(start: np.ndarray, target: np.ndarray, s: float) -> np.ndarray:
