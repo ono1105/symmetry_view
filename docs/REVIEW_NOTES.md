@@ -451,40 +451,13 @@ Codex に伝える際は「線形は一時的、すぐに arc へ切り替える
 | GIF 出力パス | `open_gif` → `write_frame` ループ → `close` の順序が正しい ✓ |
 | residual 補正 | 各パスで `target - 純変換先` を保存し、`s` に比例して加算することで終点が必ず `transformed_cart` になる ✓ |
 
-### バグ（1件）: インタラクティブアニメーションが視覚的に機能しない
+### バグ（1件）: インタラクティブアニメーションが視覚的に機能しない → **修正済み**
 
-**場所:** [view_json_pyvista.py:263-267](tools/view_json_pyvista.py#L263-L267)
+Claude が指摘し、Codex が commit `8ac46e2` および `76a1b2f` で対応済み。
 
-```python
-# 現在のコード
-plotter.show(auto_close=False, interactive_update=True)  # ノンブロッキングで即返る
-for frame in range(frames):
-    update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
-    plotter.update()
-plotter.show()  # 最終フレームで静止
-```
-
-PyVista 0.48 のソースコードで確認: `interactive_update=True` のとき `iren.start()` がスキップされ、`show()` はノンブロッキングになる。
-その結果、フレームループが Python 速度（<1ms）で走りきり、ユーザーにはアニメーションが見えない。
-
-`--animation-output` で GIF 出力するパスは正常動作する（`write_frame()` でファイルに書くので速度無関係）。
-
-**影響範囲:** `--animate` のみ使用時（GIF 出力なし）。GIF 出力は影響なし。
-
-**修正案:**
-
-```python
-import time
-
-FPS = 24  # または引数化: --animation-fps N
-
-plotter.show(auto_close=False, interactive_update=True)
-for frame in range(frames):
-    update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
-    plotter.update()
-    time.sleep(1.0 / FPS)
-plotter.show()
-```
+- `--animation-fps` オプション（デフォルト 10.0）を追加
+- `time.sleep(1.0 / fps)` をフレームループに追加
+- `plotter.open_gif(..., fps=fps)` へ fps を渡すよう変更
 
 ### 軽微な観察（修正不要）
 
@@ -554,3 +527,96 @@ inversion:
 glide:
   start -> mirrored point -> translated target
 ```
+
+---
+
+## 直近3コミットレビュー（`a6897cf` / `8ac46e2` / `76a1b2f`）（2026-05-15）
+
+### 変更概要
+
+| コミット | 内容 |
+|---------|------|
+| `a6897cf` Add primitive symmetry animations | アニメーション基盤（`--animate`、全パスタイプ、GIF出力）を新規実装 |
+| `8ac46e2` Align crystal animation targets | 周期像選択の改善（`animation_target`）、インタラクティブ fps バグ修正 |
+| `76a1b2f` Add animation element selection | `--element-index` / `--list-elements` 追加、GIF fps 反映 |
+
+### ロジック検証（Claude による独立確認）
+
+以下をすべてパス:
+
+- `evaluate_path(path, 1.0)` の終点が、全パスタイプ（rotation/screw/mirror/glide/inversion）で正確に selected target に一致（誤差 < 1e-12）
+- `evaluate_path(path, 0.0)` が start と一致
+- sequential パス（screw/glide）の s=0.5 境界で連続性（diff < 1e-3）
+- 全フォールバック（軸なし/面なし/中心なし）で linear に降格 ✓
+- `s` クリッピング（<0 → 0、>1 → 1）✓
+- `animation_target` の返す周期像が `transformed_frac + [-1,0,1]^3` の有効な格子点であること — water/f2_pd 全原子で確認 ✓
+- `element_index=0/1` を指定しても終点がそれぞれ有効な周期像 ✓
+
+### 正常な部分
+
+| 項目 | 評価 |
+|------|------|
+| `animation_target`: rotation/screw | 純回転結果に対して垂直残差が最小の候補を選ぶ設計が正しい ✓ |
+| `animation_target`: mirror/glide | 鏡映結果に対して法線方向残差が最小の候補を選ぶ設計が正しい ✓ |
+| `animation_target`: molecule | `transformed_frac` が None のとき候補が1件だけ → `default_target` をそのまま返す ✓ |
+| `signed_angle_to_target` と `animation_target` の連携 | 角度符号決定に `default_target`（= `entry["transformed_cart"]`）を使い、その後最適周期像を選択する順序が正しい ✓ |
+| `--list-elements` の出力 | 軸・面・中心の各タイプごとにインデックスを表示し、`--element-index N` と対応している ✓ |
+| `--element-index` の validation | 全タイプで範囲外の場合は `parser.error` で終了 ✓ |
+| `_PERIODIC_SHIFTS` の重複定義 | `atom_mapping.py` と `view_json_pyvista.py` で同じ定数を別途定義。viewer が crystal_viewer を import しない設計なので意図的。バグではない |
+
+### 軽微な設計上の観察
+
+**`has_element_index` の検証範囲について:**
+
+`has_element_index` はいずれかのタイプ（axes/planes/centers）で `element_index` が範囲内なら True を返す。
+一方 `selected_elements` は各タイプごとに独立してインデックスを適用する。
+
+例：operation 1 に axes が 4 本、planes が 2 枚ある場合:
+- `--element-index 3` → 検証 True（4本の軸で有効）
+- 表示：axis[3] は選択されるが、planes は `element_index=3 >= 2` で空になる（planes 非表示）
+- `print_elements` がタイプ別インデックスを表示するため、ユーザーは使用前に確認可能
+
+バグではなく設計の選択。現在のサンプルデータ（screw軸のみ、面なし）では問題が顕在化しない。
+
+### バグなし・追加修正なし
+
+3コミットの変更について、動作上のバグは見つかりませんでした。
+
+---
+
+## Jacobsite 追加確認（2026-05-15）
+
+`Jacobsite.cif` を追加し、F2 Pd 以外の高対称結晶でも JSON export と最小ビューアの代表操作を確認した。
+
+### 解析結果
+
+| 項目 | 結果 |
+|------|------|
+| formula | `Mn(FeO2)2` |
+| space group | `227 Fd-3m` |
+| point group | `m-3m` |
+| sites | 56 |
+| operations | 192 |
+| centers / axes / planes | 48 / 144 / 36 |
+
+### 確認した代表操作
+
+| operation | kind | 確認内容 |
+|-----------|------|----------|
+| `1` | `screw_4` | `--element-index 0` で単一軸を表示し、sequential path を生成 |
+| `4` | `rotation_2` | 回転 path を生成。一部の不動原子は linear fallback |
+| `24` | `inversion` | inversion path を生成 |
+| `25` | `rotoinversion_or_improper_4` | centers のみ検出。軸情報がないため inversion-style fallback |
+| `26` | `glide` | `--element-index 0` で単一面を表示し、mirror -> translation の sequential path を生成 |
+| `31` | `mirror` | mirror path を生成。一部の面上/退避原子は linear fallback |
+
+### exports 整理
+
+- `exports/` 直下は共有用JSONのみ: `f2_pd.json`, `water.json`, `jacobsite.json`
+- 確認用GIF/PNGは `exports/checks/` に退避し、Git管理対象外にした
+
+### 残る設計メモ
+
+回反/回映系は、軸が `RenderData` に出ている場合は rotation -> inversion/mirror の分解アニメーションにできる。
+ただし Jacobsite の `op 25` のように中心だけが出て軸がない操作では、現在の viewer は直線一発にせず inversion/mirror 寄りにフォールバックする。
+今後、operation matrix から回転軸を復元するか、export 側で improper axis を明示する設計にすると仕様により近づく。

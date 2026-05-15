@@ -520,7 +520,9 @@ def improper_path(
 ) -> dict:
     rotated = rotation_path(start, target, operation, axis)
     if rotated["type"] != "rotation":
-        return translation_path(start, target)
+        if "rotoinversion" in str(operation["kind"]):
+            return inversion_path(start, target, center)
+        return mirror_path(start, target, plane)
     rotated_end = rotate_about_axis(start, rotated["axis_point"], rotated["axis_direction"], rotated["angle"])
     if "rotoinversion" in str(operation["kind"]):
         second = inversion_path(rotated_end, target, center)

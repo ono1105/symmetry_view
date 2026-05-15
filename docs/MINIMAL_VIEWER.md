@@ -10,6 +10,7 @@ Show all render elements:
 
 ```bash
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json
+.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json
 .venv/bin/python tools/view_json_pyvista.py exports/water.json
 ```
 
@@ -17,6 +18,7 @@ List operations:
 
 ```bash
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations
+.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --list-operations
 ```
 
 List symmetry elements for one operation:
@@ -43,15 +45,37 @@ Animate one operation:
 
 ```bash
 .venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/f2_pd_op1_axis0_slow.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/f2_pd_op1_axis0_slow.gif
+.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op1_screw4.gif
+.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op26_glide.gif
 ```
 
 Render a screenshot and exit:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/water.json --screenshot exports/water_view.png
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --screenshot exports/f2_pd_op1_view.png
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --screenshot exports/checks/water_view.png
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --screenshot exports/checks/f2_pd_op1_view.png
 ```
+
+`exports/` 直下は共有用のJSON本体、`exports/checks/` はローカル確認用のGIF/PNG置き場です。
+
+## Jacobsite Check Notes
+
+`Jacobsite.cif` is a broader crystal symmetry sample:
+
+```text
+space group: 227 Fd-3m
+operations: 192
+representative operations checked:
+  op 1  screw_4
+  op 4  rotation_2
+  op 24 inversion
+  op 25 rotoinversion_or_improper_4
+  op 26 glide
+  op 31 mirror
+```
+
+For `op 25`, current RenderData exposes centers but no rotation axis, so the viewer falls back to an inversion-style phase instead of a full rotation-plus-inversion animation. Full rotoinversion animation will need axis extraction from the operation matrix or richer element export.
 
 ## Scope
 

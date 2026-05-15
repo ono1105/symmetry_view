@@ -6,5 +6,6 @@ __pycache__/
 
 exports/*.png
 exports/*.gif
+exports/checks/
 
 .DS_Store

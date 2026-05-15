@@ -73,6 +73,7 @@ JSON export:
 
 ```bash
 .venv/bin/python tools/export_analysis_json.py 'F2 Pd.cif' --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/export_analysis_json.py Jacobsite.cif --mode crystal -o exports/jacobsite.json
 .venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
 ```
 
@@ -84,9 +85,12 @@ JSON export:
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --show-mapping --show-displacements
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/f2_pd_op1_axis0.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/f2_pd_op1_axis0.gif
+.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op26_glide.gif
 .venv/bin/python tools/view_json_pyvista.py exports/water.json
 ```
+
+`exports/` 直下は共有用のJSON本体だけを置き、確認用のGIF/PNGは `exports/checks/` に置く方針です。
 
 ## 現在の設計方針
 
