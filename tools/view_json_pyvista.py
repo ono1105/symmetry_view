@@ -47,8 +47,15 @@ def main() -> int:
     parser.add_argument("--show-displacements", action="store_true", help="Draw source-to-target displacement lines.")
     parser.add_argument("--animate", action="store_true", help="Animate atoms for --operation.")
     parser.add_argument("--animation-frames", type=int, default=48, help="Number of animation frames.")
-    parser.add_argument("--animation-fps", type=float, default=24.0, help="Interactive animation frames per second.")
+    parser.add_argument("--animation-fps", type=float, default=10.0, help="Animation frames per second.")
     parser.add_argument("--animation-output", type=Path, default=None, help="Write animation to a GIF file.")
+    parser.add_argument(
+        "--element-index",
+        type=int,
+        default=None,
+        help="Use one symmetry element by its index within axes/planes/centers.",
+    )
+    parser.add_argument("--list-elements", action="store_true", help="Print symmetry elements for --operation and exit.")
     parser.add_argument("--no-atoms", action="store_true")
     parser.add_argument("--no-cell", action="store_true")
     parser.add_argument("--no-elements", action="store_true")
@@ -63,12 +70,20 @@ def main() -> int:
     if args.list_operations:
         print_operations(render_data, atom_mappings)
         return 0
+    if args.list_elements:
+        print_elements(render_data, args.operation)
+        return 0
 
     if args.show_mapping:
         print_mapping(atom_mappings, args.operation)
 
     if args.animate and args.operation is None:
         parser.error("--animate requires --operation")
+    if args.element_index is not None:
+        if args.operation is None:
+            parser.error("--element-index requires --operation")
+        if not has_element_index(render_data, args.operation, args.element_index):
+            parser.error(f"--element-index {args.element_index} is not available for operation {args.operation}")
 
     plotter = pv.Plotter(
         off_screen=args.off_screen
@@ -85,7 +100,12 @@ def main() -> int:
     if not args.no_cell and render_data.get("unit_cell"):
         add_unit_cell(plotter, render_data["unit_cell"])
     if not args.no_elements:
-        add_symmetry_elements(plotter, render_data, operation_index=args.operation)
+        add_symmetry_elements(
+            plotter,
+            render_data,
+            operation_index=args.operation,
+            element_index=args.element_index,
+        )
     if args.show_displacements:
         add_displacements(plotter, render_data, atom_mappings, operation_index=args.operation)
 
@@ -103,6 +123,7 @@ def main() -> int:
             frame_count=args.animation_frames,
             fps=args.animation_fps,
             output_path=args.animation_output,
+            element_index=args.element_index,
         )
     elif args.screenshot is not None:
         args.screenshot.parent.mkdir(parents=True, exist_ok=True)
@@ -163,18 +184,19 @@ def add_symmetry_elements(
     render_data: dict,
     *,
     operation_index: int | None,
+    element_index: int | None = None,
 ) -> None:
     span = scene_span(render_data)
     axis_length = max(span * 0.75, 1.0)
     plane_scale = max(span * 0.28, 0.5)
 
-    for axis in filter_by_operation(render_data["axes"], operation_index):
+    for axis in selected_elements(render_data["axes"], operation_index, element_index):
         point = np.asarray(axis["point_cart"], dtype=float)
         direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
         line = pv.Line(point - axis_length * direction, point + axis_length * direction)
         plotter.add_mesh(line, color="#58d68d", line_width=6)
 
-    for plane in filter_by_operation(render_data["planes"], operation_index):
+    for plane in selected_elements(render_data["planes"], operation_index, element_index):
         point = np.asarray(plane["point_cart"], dtype=float)
         basis1 = normalize(np.asarray(plane["basis1_cart"], dtype=float)) * plane_scale
         basis2 = normalize(np.asarray(plane["basis2_cart"], dtype=float)) * plane_scale
@@ -196,7 +218,7 @@ def add_symmetry_elements(
             edge_color="#aed6f1",
         )
 
-    for center in filter_by_operation(render_data["centers"], operation_index):
+    for center in selected_elements(render_data["centers"], operation_index, element_index):
         point = np.asarray(center["point_cart"], dtype=float)
         sphere = pv.Sphere(radius=max(span * 0.035, 0.08), center=point)
         plotter.add_mesh(sphere, color="#ff5f57", smooth_shading=True)
@@ -245,6 +267,7 @@ def run_animation(
     frame_count: int,
     fps: float,
     output_path: Path | None,
+    element_index: int | None,
 ) -> None:
     if animated_atoms is None:
         print("Animation skipped because atoms are hidden.")
@@ -256,11 +279,11 @@ def run_animation(
         return
 
     frames = max(frame_count, 2)
-    paths = animation_paths(render_data, operation, mapping)
+    paths = animation_paths(render_data, operation, mapping, element_index=element_index)
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        plotter.open_gif(str(output_path))
+        plotter.open_gif(str(output_path), fps=max(float(fps), 1.0))
         plotter.show(auto_close=False, interactive_update=True)
         for frame in range(frames):
             update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
@@ -286,11 +309,17 @@ def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s:
         item["mesh"].points = item["base_points"] + center
 
 
-def animation_paths(render_data: dict, operation: dict, mapping: dict) -> dict[int, dict]:
+def animation_paths(
+    render_data: dict,
+    operation: dict,
+    mapping: dict,
+    *,
+    element_index: int | None = None,
+) -> dict[int, dict]:
     atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
-    axes = filter_by_operation(render_data["axes"], operation["index"])
-    planes = filter_by_operation(render_data["planes"], operation["index"])
-    centers = filter_by_operation(render_data["centers"], operation["index"])
+    axes = selected_elements(render_data["axes"], operation["index"], element_index)
+    planes = selected_elements(render_data["planes"], operation["index"], element_index)
+    centers = selected_elements(render_data["centers"], operation["index"], element_index)
     axis = axes[0] if axes else None
     plane = planes[0] if planes else None
     center = centers[0] if centers else None
@@ -611,6 +640,24 @@ def print_operations(render_data: dict, atom_mappings: dict | None) -> None:
         )
 
 
+def print_elements(render_data: dict, operation_index: int | None) -> None:
+    if operation_index is None:
+        print("Use --operation with --list-elements.")
+        return
+
+    print(f"=== Symmetry Elements for operation {operation_index} ===")
+    for kind, key in (("axis", "axes"), ("plane", "planes"), ("center", "centers")):
+        elements = filter_by_operation(render_data[key], operation_index)
+        if not elements:
+            continue
+        print(f"{key}:")
+        for index, element in enumerate(elements):
+            label = element.get("label", "?")
+            point = element.get("point_cart")
+            direction = element.get("direction_cart") or element.get("normal_cart")
+            print(f"  {index}: label={label} point={point} direction/normal={direction}")
+
+
 def print_mapping(atom_mappings: dict | None, operation_index: int | None) -> None:
     mapping = selected_mapping(atom_mappings, operation_index)
     if mapping is None:
@@ -647,6 +694,22 @@ def filter_by_operation(elements: list[dict], operation_index: int | None) -> li
         for element in elements
         if operation_index in element.get("operation_indices", [])
     ]
+
+
+def selected_elements(elements: list[dict], operation_index: int | None, element_index: int | None) -> list[dict]:
+    filtered = filter_by_operation(elements, operation_index)
+    if element_index is None:
+        return filtered
+    if element_index < 0 or element_index >= len(filtered):
+        return []
+    return [filtered[element_index]]
+
+
+def has_element_index(render_data: dict, operation_index: int, element_index: int) -> bool:
+    return any(
+        0 <= element_index < len(filter_by_operation(render_data[key], operation_index))
+        for key in ("axes", "planes", "centers")
+    )
 
 
 def operation_by_index(operations: list[dict], operation_index: int) -> dict | None:

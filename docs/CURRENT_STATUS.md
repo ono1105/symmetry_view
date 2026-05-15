@@ -50,8 +50,9 @@ Compound operations should not be represented as a single straight-line move unl
 Example:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate --animation-output exports/water_op0_animation.gif
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-output exports/f2_pd_op1_animation.gif
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate --animation-fps 6 --animation-output exports/water_op0_animation.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/f2_pd_op1_axis0.gif
 ```
 
 Detailed design:

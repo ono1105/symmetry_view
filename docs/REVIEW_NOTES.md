@@ -519,3 +519,38 @@ F2 Pd の screw_2 GIF で、原子ごとに別々の二回螺旋軸を使って�
 ```
 
 F2 Pd operation 1 では、全原子について「回転後の残差」の垂直成分が `1.4e-15` 以下になり、同じ選択screw軸に整合することを確認。
+
+### 追加修正（Element selection and speed）
+
+ユーザー確認で、アニメーション速度が速いこと、また「実際に使っている軸だけを表示したい」要望を確認。
+
+修正:
+
+- `--animation-fps` のデフォルトを `10` に変更。
+- GIF出力でも `plotter.open_gif(..., fps=...)` へ `--animation-fps` を渡すようにした。
+- `--list-elements` を追加し、指定operationに対応する軸・面・中心の候補を表示できるようにした。
+- `--element-index N` を追加し、複数軸/面/中心がある場合に、アニメーション基準となる要素を選べるようにした。
+- `--element-index` 指定時は、その要素だけを表示し、アニメーションパスも同じ要素を使う。
+- 存在しない `--element-index` はCLIエラーにする。
+
+確認:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 2 --screenshot exports/f2_pd_op1_axis2_only.png
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-frames 12 --animation-fps 6 --animation-output exports/f2_pd_op1_axis0_slow.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 2 --animate --animation-frames 12 --animation-fps 6 --animation-output exports/f2_pd_op1_axis2_slow.gif
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 1 --element-index 0 --animate --animation-frames 12 --animation-fps 6 --animation-output exports/water_op1_mirror_slow.gif
+```
+
+F2 Pd operation 1 の4本の候補軸すべてで、回転後の残差が選択軸方向に揃うことを確認（垂直成分最大 `1.7e-15` 未満）。
+
+反転と映進は現在のサンプルJSONに実操作がないため、関数レベルで確認:
+
+```text
+inversion:
+  start -> inversion center -> inverted target
+
+glide:
+  start -> mirrored point -> translated target
+```

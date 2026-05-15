@@ -46,17 +46,22 @@ Add these options to `tools/view_json_pyvista.py`:
 ```bash
 --animate
 --animation-frames N
+--animation-fps FPS
 --animation-output PATH
+--list-elements
+--element-index N
 ```
 
 Required usage:
 
 ```bash
 .venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-output exports/f2_pd_op1.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/f2_pd_op1_axis0.gif
 ```
 
 `--animate` requires `--operation`, because atom targets are operation-specific.
+`--element-index` selects one matching axis/plane/center for the operation. During animation, only that selected element is displayed and used for the motion path. This matters when one operation has multiple equivalent screw axes.
 
 ## Interpolation Policy
 

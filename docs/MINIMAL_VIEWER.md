@@ -19,10 +19,17 @@ List operations:
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations
 ```
 
+List symmetry elements for one operation:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
+```
+
 Show elements related to one operation:
 
 ```bash
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 2
 ```
 
 Show atom mapping and source-to-target displacement lines for one operation:
@@ -36,7 +43,7 @@ Animate one operation:
 
 ```bash
 .venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-output exports/f2_pd_op1_animation.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/f2_pd_op1_axis0_slow.gif
 ```
 
 Render a screenshot and exit:
@@ -58,6 +65,7 @@ planes
 centers
 operation-based element filtering
 operation list
+operation element list
 atom mapping printout
 source-to-target displacement lines
 operation animation

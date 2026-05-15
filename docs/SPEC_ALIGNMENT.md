@@ -83,3 +83,5 @@ rotoreflection/improper = rotation then mirror
 This keeps the prototype aligned with Section 16 of the final specification while preserving the current JSON-only, non-GUI architecture.
 
 For crystal screw/rotation/glide paths, the viewer may replace `transformed_cart` with an equivalent periodic image derived from `transformed_frac` when that image is more consistent with the selected symmetry element. This keeps the visual path tied to one operation/element instead of mixing nearest images from multiple equivalent elements.
+
+When an operation has multiple matching elements, `--element-index` selects which element is the animation reference. The viewer displays only that selected element during animation.
