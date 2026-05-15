@@ -367,6 +367,8 @@ def animation_paths(
         representative_atom,
     )
     shared_shift = shared_periodic_shift(render_data, reference_entry, operation, axis, plane, center)
+    center = effective_operation_center(render_data, operation, center, shared_shift)
+    axis = effective_rotation_axis(operation, axis, center)
     shared_angle = shared_rotation_angle(
         render_data,
         reference_entry,
@@ -478,7 +480,8 @@ def shared_rotation_angle(
         or "improper" in kind
     ):
         return None
-    if reference_entry is None or axis is None or operation.get("angle_deg") is None:
+    angle_deg = operation_angle_deg(operation)
+    if reference_entry is None or axis is None or angle_deg is None:
         return None
 
     atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
@@ -487,6 +490,11 @@ def shared_rotation_angle(
         return None
 
     start = np.asarray(reference_atom["cart"], dtype=float)
+    axis_point = np.asarray(axis["point_cart"], dtype=float)
+    axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
+    rotation = operation_rotation_matrix(operation)
+    if rotation is not None:
+        return signed_rotation_angle_from_matrix(rotation, axis_direction)
     target = animation_target(
         render_data,
         start,
@@ -497,9 +505,7 @@ def shared_rotation_angle(
         center,
         shared_shift=shared_shift,
     )
-    axis_point = np.asarray(axis["point_cart"], dtype=float)
-    axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
-    return signed_angle_to_target(start, target, axis_point, axis_direction, operation["angle_deg"])
+    return signed_angle_to_target(start, target, axis_point, axis_direction, angle_deg)
 
 
 def animation_target(
@@ -515,6 +521,9 @@ def animation_target(
 ) -> np.ndarray:
     default_target = np.asarray(entry["transformed_cart"], dtype=float)
     if shared_shift is not None and entry.get("transformed_frac") is not None:
+        affine_target = operation_affine_target(render_data, start, operation, shared_shift)
+        if affine_target is not None:
+            return affine_target
         unit_cell = render_data.get("unit_cell")
         if unit_cell is not None:
             lattice = np.asarray(unit_cell["lattice"], dtype=float)
@@ -525,10 +534,11 @@ def animation_target(
         return candidates[0]
 
     kind = str(operation["kind"])
-    if kind.startswith(("rotation", "screw")) and axis is not None and operation.get("angle_deg") is not None:
+    angle_deg = operation_angle_deg(operation)
+    if kind.startswith(("rotation", "screw")) and axis is not None and angle_deg is not None:
         axis_point = np.asarray(axis["point_cart"], dtype=float)
         axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
-        angle = signed_angle_to_target(start, default_target, axis_point, axis_direction, operation["angle_deg"])
+        angle = signed_angle_to_target(start, default_target, axis_point, axis_direction, angle_deg)
         rotated = rotate_about_axis(start, axis_point, axis_direction, angle)
         return best_axis_consistent_target(candidates, rotated, axis_direction)
     if "glide" in kind or kind == "mirror":
@@ -543,6 +553,38 @@ def animation_target(
         inverted = 2.0 * center_point - start
         return candidates[np.argmin(np.linalg.norm(candidates - inverted, axis=1))]
     return default_target
+
+
+def operation_affine_target(
+    render_data: dict,
+    start: np.ndarray,
+    operation: dict,
+    shared_shift: np.ndarray | None,
+) -> np.ndarray | None:
+    affine = operation_affine_matrix_translation(render_data, operation, shared_shift)
+    if affine is None:
+        return None
+    matrix, translation = affine
+    return matrix @ start + translation
+
+
+def operation_affine_matrix_translation(
+    render_data: dict,
+    operation: dict,
+    shared_shift: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    matrix = operation.get("matrix_cart")
+    translation = operation.get("translation_cart")
+    if matrix is None or translation is None:
+        return None
+    affine_matrix = np.asarray(matrix, dtype=float)
+    affine_translation = np.asarray(translation, dtype=float)
+    if shared_shift is not None and operation.get("matrix_frac") is not None:
+        unit_cell = render_data.get("unit_cell")
+        if unit_cell is not None:
+            lattice = np.asarray(unit_cell["lattice"], dtype=float)
+            affine_translation = affine_translation + np.asarray(shared_shift, dtype=float) @ lattice
+    return affine_matrix, affine_translation
 
 
 def periodic_target_candidates(render_data: dict, entry: dict) -> np.ndarray:
@@ -570,6 +612,113 @@ def best_plane_consistent_target(candidates: np.ndarray, mirrored: np.ndarray, p
     return candidates[np.argmin(scores)]
 
 
+def effective_rotation_axis(operation: dict, axis: dict | None, center: dict | None) -> dict | None:
+    if axis is not None:
+        return axis
+    kind = str(operation["kind"])
+    if "rotoinversion" not in kind or center is None:
+        return None
+    matrix = operation.get("matrix_cart")
+    if matrix is None:
+        return None
+    rotation = -np.asarray(matrix, dtype=float)
+    direction = rotation_axis_from_matrix(rotation)
+    if direction is None:
+        return None
+    return {
+        "point_cart": center["point_cart"],
+        "direction_cart": direction,
+    }
+
+
+def effective_operation_center(
+    render_data: dict,
+    operation: dict,
+    center: dict | None,
+    shared_shift: np.ndarray | None,
+) -> dict | None:
+    kind = str(operation["kind"])
+    affine = operation_affine_matrix_translation(render_data, operation, shared_shift)
+    if affine is None:
+        return center
+    matrix, translation = affine
+
+    point = None
+    if kind == "inversion":
+        point = 0.5 * translation
+    elif "rotoinversion" in kind:
+        rotation = -matrix
+        coeff = np.eye(3) + rotation
+        point = np.linalg.pinv(coeff) @ translation
+
+    if point is None:
+        return center
+    return {"point_cart": point}
+
+
+def operation_angle_deg(operation: dict) -> float | None:
+    angle = operation.get("angle_deg")
+    if angle is not None:
+        return float(angle)
+    kind = str(operation["kind"])
+    matrix = operation.get("matrix_cart")
+    if matrix is None:
+        return None
+    rotation = operation_rotation_matrix(operation)
+    if rotation is None:
+        return None
+    return rotation_angle_deg(rotation)
+
+
+def operation_rotation_matrix(operation: dict) -> np.ndarray | None:
+    kind = str(operation["kind"])
+    matrix = operation.get("matrix_cart")
+    if matrix is None:
+        return None
+    matrix = np.asarray(matrix, dtype=float)
+    if "rotoinversion" in kind:
+        return -matrix
+    if kind.startswith(("rotation", "screw")):
+        return matrix
+    return None
+
+
+def rotation_axis_from_matrix(rotation: np.ndarray) -> np.ndarray | None:
+    values, vectors = np.linalg.eig(np.asarray(rotation, dtype=float))
+    index = int(np.argmin(np.abs(values - 1.0)))
+    if np.abs(values[index] - 1.0) > 1e-5:
+        return None
+    return normalize(np.real(vectors[:, index]))
+
+
+def rotation_angle_deg(rotation: np.ndarray) -> float | None:
+    trace = float(np.trace(rotation))
+    cos_angle = np.clip((trace - 1.0) / 2.0, -1.0, 1.0)
+    angle = float(np.degrees(np.arccos(cos_angle)))
+    if abs(angle) < 1e-8:
+        return 0.0
+    return angle
+
+
+def signed_rotation_angle_from_matrix(rotation: np.ndarray, axis_direction: np.ndarray) -> float:
+    rotation = np.asarray(rotation, dtype=float)
+    axis = normalize(axis_direction)
+    sin_angle = 0.5 * np.dot(
+        axis,
+        np.array(
+            [
+                rotation[2, 1] - rotation[1, 2],
+                rotation[0, 2] - rotation[2, 0],
+                rotation[1, 0] - rotation[0, 1],
+            ]
+        ),
+    )
+    cos_angle = np.clip((np.trace(rotation) - 1.0) / 2.0, -1.0, 1.0)
+    if np.isclose(cos_angle, -1.0, atol=1e-8):
+        return float(np.pi)
+    return float(np.arctan2(sin_angle, cos_angle))
+
+
 def build_operation_path(
     start: np.ndarray,
     target: np.ndarray,
@@ -581,6 +730,7 @@ def build_operation_path(
     angle_override: float | None = None,
 ) -> dict:
     kind = str(operation["kind"])
+    axis = effective_rotation_axis(operation, axis, center)
     if np.linalg.norm(target - start) < 1e-10:
         return translation_path(start, target)
     if kind.startswith("screw"):
@@ -606,14 +756,15 @@ def rotation_path(
     *,
     angle_override: float | None = None,
 ) -> dict:
-    if axis is None or operation.get("angle_deg") is None:
+    angle_deg = operation_angle_deg(operation)
+    if axis is None or angle_deg is None:
         return translation_path(start, target)
     axis_point = np.asarray(axis["point_cart"], dtype=float)
     axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
     angle = (
         angle_override
         if angle_override is not None
-        else signed_angle_to_target(start, target, axis_point, axis_direction, operation["angle_deg"])
+        else signed_angle_to_target(start, target, axis_point, axis_direction, angle_deg)
     )
     rotated = rotate_about_axis(start, axis_point, axis_direction, angle)
     return {
@@ -707,6 +858,7 @@ def improper_path(
     *,
     angle_override: float | None = None,
 ) -> dict:
+    axis = effective_rotation_axis(operation, axis, center)
     rotated = rotation_path(start, target, operation, axis, angle_override=angle_override)
     if rotated["type"] != "rotation":
         if "rotoinversion" in str(operation["kind"]):

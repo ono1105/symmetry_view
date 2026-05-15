@@ -36,6 +36,10 @@ class RenderOperationData:
     order: int | None
     angle_deg: float | None
     symbol: str
+    matrix_frac: np.ndarray | None = None
+    translation_frac: np.ndarray | None = None
+    matrix_cart: np.ndarray | None = None
+    translation_cart: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +116,10 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
             order=op.order,
             angle_deg=op.angle_deg,
             symbol=op.international_symbol,
+            matrix_frac=np.asarray(op.W, dtype=float),
+            translation_frac=np.asarray(op.t, dtype=float),
+            matrix_cart=lattice.T @ np.asarray(op.W, dtype=float) @ np.linalg.inv(lattice.T),
+            translation_cart=np.asarray(op.t, dtype=float) @ lattice,
         )
         for op in result.operations
     )
@@ -186,6 +194,8 @@ def render_data_from_molecule(result: MoleculeAnalysisResult) -> RenderData:
             order=op.order,
             angle_deg=op.angle_deg,
             symbol=op.symbol,
+            matrix_cart=np.asarray(op.rotation, dtype=float),
+            translation_cart=np.asarray(op.translation, dtype=float),
         )
         for op in result.operations
     )

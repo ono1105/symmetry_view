@@ -35,9 +35,13 @@ kind
 order
 angle_deg
 symbol
+matrix_frac
+translation_frac
+matrix_cart
+translation_cart
 ```
 
-`angle_deg` is required for operation-aware rotation and screw animation. It is already computed during analysis, then copied into RenderData and JSON. JSON exports that contain this field use `schema_version = 2`.
+`angle_deg` is required for operation-aware rotation and screw animation. `matrix_cart` and `translation_cart` are required once animation needs to follow the actual operation exactly, especially for rotoinversion and other improper operations. JSON exports that contain operation matrices use `schema_version = 3`.
 
 ## CLI Scope
 
@@ -156,6 +160,8 @@ all atom targets      = W*x_i   + t + shared_integer_shift
 ```
 
 This keeps the all-atom animation visually tied to one symmetry operation instead of mixing equivalent periodic images atom by atom.
+
+When `matrix_cart` is present, final animation targets are computed from the operation affine transform plus the shared crystal lattice shift. Atom mappings are still used to choose the representative atom and validate correspondence, but they are no longer the only source of motion geometry.
 
 ## Frame Calculation
 

@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "source_kind": "molecule",
   "render_data": {
     "metadata": {
@@ -51,7 +51,31 @@
         "kind": "rotation_2",
         "order": 2,
         "angle_deg": 179.99999879258172,
-        "symbol": "C2"
+        "symbol": "C2",
+        "matrix_frac": null,
+        "translation_frac": null,
+        "matrix_cart": [
+          [
+            -0.24849906110845688,
+            0.9686321368962604,
+            0.0
+          ],
+          [
+            0.9686321368962604,
+            0.2484990611084572,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ]
+        ],
+        "translation_cart": [
+          -0.00015497459256370166,
+          0.0001202350690006071,
+          0.0
+        ]
       },
       {
         "index": 1,
@@ -59,7 +83,31 @@
         "kind": "mirror",
         "order": 2,
         "angle_deg": null,
-        "symbol": "sigma"
+        "symbol": "sigma",
+        "matrix_frac": null,
+        "translation_frac": null,
+        "matrix_cart": [
+          [
+            -0.25004050215412943,
+            0.9682353780370301,
+            0.0
+          ],
+          [
+            0.9682353780370301,
+            0.25004050215412976,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "translation_cart": [
+          -7.253601330549364e-05,
+          5.618372696173518e-05,
+          0.0
+        ]
       },
       {
         "index": 2,
@@ -67,7 +115,31 @@
         "kind": "identity",
         "order": 1,
         "angle_deg": null,
-        "symbol": "E"
+        "symbol": "E",
+        "matrix_frac": null,
+        "translation_frac": null,
+        "matrix_cart": [
+          [
+            1.0000000000000002,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0000000000000004,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "translation_cart": [
+          0.0,
+          0.0,
+          0.0
+        ]
       },
       {
         "index": 3,
@@ -75,7 +147,31 @@
         "kind": "mirror",
         "order": 2,
         "angle_deg": null,
-        "symbol": "sigma"
+        "symbol": "sigma",
+        "matrix_frac": null,
+        "translation_frac": null,
+        "matrix_cart": [
+          [
+            0.9999987332709552,
+            0.0015916835379749359,
+            0.0
+          ],
+          [
+            -0.0015916835379742864,
+            0.9999987332709555,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            -1.0
+          ]
+        ],
+        "translation_cart": [
+          -8.252809785500026e-05,
+          6.393595883013442e-05,
+          0.0
+        ]
       }
     ],
     "axes": [

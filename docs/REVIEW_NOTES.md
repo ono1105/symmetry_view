@@ -606,7 +606,7 @@ glide:
 | `1` | `screw_4` | `--element-index 0` で単一軸を表示し、sequential path を生成 |
 | `4` | `rotation_2` | 回転 path を生成。一部の不動原子は linear fallback |
 | `24` | `inversion` | inversion path を生成 |
-| `25` | `rotoinversion_or_improper_4` | centers のみ検出。軸情報がないため inversion-style fallback |
+| `25` | `rotoinversion_or_improper_4` | schema v3 では操作行列から軸・角度・中心を復元し、rotation -> inversion path を生成 |
 | `26` | `glide` | `--element-index 0` で単一面を表示し、mirror -> translation の sequential path を生成 |
 | `31` | `mirror` | mirror path を生成。一部の面上/退避原子は linear fallback |
 
@@ -617,9 +617,8 @@ glide:
 
 ### 残る設計メモ
 
-回反/回映系は、軸が `RenderData` に出ている場合は rotation -> inversion/mirror の分解アニメーションにできる。
-ただし Jacobsite の `op 25` のように中心だけが出て軸がない操作では、現在の viewer は直線一発にせず inversion/mirror 寄りにフォールバックする。
-今後、operation matrix から回転軸を復元するか、export 側で improper axis を明示する設計にすると仕様により近づく。
+回反/回映系は、schema v3 の操作行列を使って回転軸・角度・中心を復元できる。
+Jacobsite の `op 25` は中心だけが RenderData element として出ていたが、viewer 側で `matrix_cart` から rotoinversion の回転成分を取り出して rotation -> inversion に分解する。
 
 ---
 
@@ -646,3 +645,15 @@ Jacobsite を基準に再確認したところ、`op 4` (`rotation_2`) で周期
 - `op 4` (`rotation_2`): 全原子 `+180`
 - `op 26` (`glide`): 全原子で同じ整数格子シフト
 - 存在しない `--representative-atom` 指定時はアニメーションを中止
+
+### 操作行列ベースへの修正
+
+その後の Jacobsite 確認で、rotoinversion が中心フォールバックのため大きくばらつく問題が見つかった。
+`RenderOperationData` に `matrix_frac`, `translation_frac`, `matrix_cart`, `translation_cart` を追加し、JSON schema を v3 に更新した。
+
+確認結果:
+
+- `op 1` (`screw_4`): 全原子 `+90`, residual `0`
+- `op 4` (`rotation_2`): 全原子 `+180`, residual `~4.6e-15`
+- `op 25` (`rotoinversion_or_improper_4`): `rotation -> inversion`, 全原子 `+90`, residual `~3.7e-15`
+- `op 26` (`glide`): `mirror -> translation`, residual `0`

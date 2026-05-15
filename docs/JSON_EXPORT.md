@@ -35,7 +35,7 @@ Stdout export is also supported:
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "source_kind": "crystal",
   "render_data": {},
   "atom_mappings": {}
@@ -71,9 +71,13 @@ kind
 order
 angle_deg
 symbol
+matrix_frac
+translation_frac
+matrix_cart
+translation_cart
 ```
 
-`angle_deg` is included for operation-aware animation. Rotation direction can be decided by the viewer by comparing positive and negative candidate rotations against `atom_mappings.entries[].transformed_cart`.
+`angle_deg` is included for operation-aware animation. `matrix_cart` and `translation_cart` let the viewer animate the actual symmetry operation instead of reconstructing it only from atom mappings. For crystal exports, `matrix_frac` and `translation_frac` store the original fractional operation.
 
 ## `atom_mappings`
 
@@ -107,4 +111,5 @@ For molecule mappings, `transformed_cart` is the raw transformed Cartesian coord
 ```bash
 .venv/bin/python -m json.tool exports/f2_pd.json /tmp/f2_pd_checked.json
 .venv/bin/python -m json.tool exports/water.json /tmp/water_checked.json
+.venv/bin/python -m json.tool exports/jacobsite.json /tmp/jacobsite_checked.json
 ```

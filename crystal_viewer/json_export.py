@@ -11,7 +11,7 @@ from .atom_mapping import AtomMappingSet
 from .render_data import RenderData
 
 
-EXPORT_SCHEMA_VERSION = 2
+EXPORT_SCHEMA_VERSION = 3
 
 
 def export_payload(
