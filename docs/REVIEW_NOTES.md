@@ -850,3 +850,115 @@ O from O1: 32
 - アニメーション path は今のところ expanded atom 56個ぶん計算する。
 - CIF 代表原子3個だけの path を全 expanded atom に流用するのは、非並進対称操作が一般に可換ではないため危険。
 - ただし、将来の代表原子モード・orbit 選択・パズル化では、この asymmetric/expanded 対応を使える。
+
+---
+
+## 直近4コミットレビュー（Claude）（2026-05-15）
+
+対象: `2cf035b` → `0138694` → `980684e` → `a23eb4c`
+
+### commit `2cf035b` — Add Claude review request
+
+ドキュメントのみ（`docs/CLAUDE_REVIEW_REQUEST_JACOBSITE_ANIMATION.md` 新規作成）。コードなし。問題なし。
+
+### commit `0138694` — Review Jacobsite animation center handling
+
+Q4修正の実装を確認。
+
+```python
+# effective_operation_center 末尾の実装
+shift_is_zero = shared_shift is None or not np.any(np.asarray(shared_shift, dtype=float))
+if center is not None and shift_is_zero:
+    ...snapped = point - np.round(diff_frac) @ lattice
+    if np.linalg.norm(matrix @ snapped + translation - snapped) < 1e-8:
+        point = snapped
+```
+
+2段階のガードが正しく機能している:
+- `shift_is_zero` guard: `shared_shift != 0` 時はスナップ計算自体をスキップ
+- fixed-point validation: スナップ後の点が同じ affine operation の固定点として成立する場合だけ採用（19件の body-diagonal stuck ケースを正しく棄却）
+
+**数値確認: 6 benchmark 操作で残差 < 1e-10 ✓**
+
+### commit `980684e` — Show half-cell periodic atom images
+
+`display_fractional_shifts` が `[-0.5, 1.5]^3` の範囲で周期像を生成する設計を確認。
+
+| 原子位置 | display instances |
+|---------|-----------------|
+| frac=[0,0,0]（コーナー） | 8 |
+| frac=[0,0.5,0.5]（FCC面心） | 18 |
+| frac=[0.375,0.375,0.375]（一般位置） | 8 |
+| Jacobsite 全体 | 478（56原子から） |
+
+`update_animated_atoms` での `center = center + display_shift_cart` は正しい。DisplayClone は元原子の path に固定 lattice shift を加算するだけ（ANIMATION_DESIGN.md の設計通り ✓）。
+
+**観察（バグではない）**: FCC 面心原子が 18 インスタンスになるのは数学的に正しいが、視覚的に密集する可能性がある。将来的に上限を設けるか、ユーザーが表示范围を制御できるようにする余地がある。
+
+### commit `a23eb4c` — Track asymmetric unit atom origins
+
+`identify_asymmetric_source` の正確性を確認。Jacobsite 全 56 原子が正しく割り当てられた:
+
+```text
+asym 0 (Mn): 8 atoms  — 全て {'Mn'} ✓
+asym 1 (Fe): 16 atoms — 全て {'Fe'} ✓
+asym 2 (O):  32 atoms — 全て {'O'}  ✓
+total: 56/56 assigned
+```
+
+`parse_cif_float("0.375(1)")` → 0.375 ✓、`wrap_frac` の near-0/near-1 処理 ✓、schema_version=4 反映 ✓。
+
+軽微な観察:
+- CIF を pymatgen と `CifParser` で 2 回 parse している（低優先度）。
+- `wrap_frac(rotation @ source_frac + translation)` + `delta - round(delta)` の周期比較は通常の CIF 座標（有理数）で問題なし。
+
+---
+
+## Codex 既報の `rotation_3` residual 問題の追確認（Claude）（2026-05-15）
+
+Codex が「rotation_3 系で大きな residual が残る」と報告した件を全 192 操作で検証。
+
+**Jacobsite で `element_index=0` 使用時に residual > 0.1 Å の操作: 43 件。**
+
+代表例:
+
+| op | kind | element_index=0 の最大 residual | 正しい index での residual |
+|----|------|---------------------------------|---------------------------|
+| 12 | rotation_3 | 14.75 Å | `=1` で 0.00e+00 |
+| 10 | rotation_3 | 13.91 Å | — |
+| 37 | mirror | 6.02 Å | — |
+| 57 | rotation_2 | 6.02 Å | — |
+
+**原因**: `render_data["axes"]` に同じ operation index で複数の等価軸が登録されている。`element_index=0` が選ぶ軸が、代表原子の位置と整合しない場合に rotation 弧の pivot がずれて大きな residual が出る。
+
+**op 12 (rotation_3) の確認**:
+- `element_index=0`: max_residual = 14.75 Å（不整合な軸を選択）
+- `element_index=1`: max_residual = 0.00e+00（正しい軸）
+- `element_index=2`: max_residual = 8.52 Å（不整合）
+
+**現状の影響**: `--list-elements` + `--element-index` で手動選択すれば回避可能。デフォルト（`element_index=0`）では 192 操作のうち 43 件が不正確なアニメーションになる。6 benchmark 操作（1, 4, 24, 25, 26, 31）は影響なし。
+
+**推奨修正（次ステップ候補）**: `animation_paths` 内で、`element_index=None` かつ `animation_scope='all'` の場合、代表原子の residual が最小となる element_index を自動選択するロジックを追加する。
+
+### Codex 対応（2026-05-15）
+
+対応:
+
+- `element_index=None` の通常利用では、候補の axis/plane/center を全部試し、path residual が最小になる要素を自動選択するようにした。
+- rotation / screw / mirror / inversion / rotoinversion では、選択した要素上の点を固定するために必要な integer lattice shift を優先して使うようにした。
+- `--element-index N` を明示した場合は従来通りその要素を尊重する。つまり、ユーザーが不整合な候補を手動指定した場合は、その候補に基づく動きを表示する。
+
+確認:
+
+```text
+Jacobsite 全192操作, element_index=None:
+large residual count: 0
+
+op10  rotation_3: auto ~6.4e-15, forced element_index=0 ~13.9 Å
+op12  rotation_3: auto ~5.3e-15, forced element_index=0 ~14.7 Å
+op37  mirror:     auto ~2.3e-15, forced element_index=0 ~6.0 Å
+op57  rotation_2: auto ~5.2e-15, forced element_index=0 ~6.0 Å
+op114 rotation_3: auto ~1.1e-14, forced element_index=0 ~13.9 Å
+```
+
+これにより、デフォルトでは異なる軸・面で対称操作しているように見える問題をかなり抑えられる。

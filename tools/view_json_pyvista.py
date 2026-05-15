@@ -408,24 +408,18 @@ def animation_paths(
     representative_atom: int | None = None,
 ) -> dict[int, dict]:
     atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
-    axes = selected_elements(render_data["axes"], operation["index"], element_index)
-    planes = selected_elements(render_data["planes"], operation["index"], element_index)
-    centers = selected_elements(render_data["centers"], operation["index"], element_index)
-    axis = axes[0] if axes else None
-    plane = planes[0] if planes else None
-    center = centers[0] if centers else None
-    reference_entry = representative_mapping_entry(
+    axis, plane, center, reference_entry, shared_shift, shared_angle = select_animation_context(
         render_data,
         operation,
         mapping,
         atoms_by_index,
-        axis,
-        plane,
-        center,
-        representative_atom,
+        element_index=element_index,
+        representative_atom=representative_atom,
     )
-    shared_shift = shared_periodic_shift(render_data, reference_entry, operation, axis, plane, center)
-    center = effective_operation_center(render_data, operation, center, shared_shift)
+
+    if reference_entry is None:
+        return {}
+
     axis = effective_rotation_axis(operation, axis, center)
     shared_angle = shared_rotation_angle(
         render_data,
@@ -440,7 +434,7 @@ def animation_paths(
     paths = {}
     entries = mapping["entries"]
     if animation_scope == "representative":
-        entries = [reference_entry] if reference_entry is not None else []
+        entries = [reference_entry]
 
     for entry in entries:
         atom = atoms_by_index.get(entry["source_atom"])
@@ -467,6 +461,156 @@ def animation_paths(
             angle_override=shared_angle,
         )
     return paths
+
+
+def select_animation_context(
+    render_data: dict,
+    operation: dict,
+    mapping: dict,
+    atoms_by_index: dict[int, dict],
+    *,
+    element_index: int | None,
+    representative_atom: int | None,
+) -> tuple[dict | None, dict | None, dict | None, dict | None, np.ndarray | None, float | None]:
+    if element_index is not None:
+        return build_animation_context(
+            render_data,
+            operation,
+            mapping,
+            atoms_by_index,
+            element_index=element_index,
+            representative_atom=representative_atom,
+        )
+
+    candidates = []
+    max_count = max(
+        len(filter_by_operation(render_data[key], operation["index"]))
+        for key in ("axes", "planes", "centers")
+    )
+    if max_count == 0:
+        candidates.append(
+            build_animation_context(
+                render_data,
+                operation,
+                mapping,
+                atoms_by_index,
+                element_index=None,
+                representative_atom=representative_atom,
+            )
+        )
+    else:
+        for candidate_index in range(max_count):
+            candidates.append(
+                build_animation_context(
+                    render_data,
+                    operation,
+                    mapping,
+                    atoms_by_index,
+                    element_index=candidate_index,
+                    representative_atom=representative_atom,
+                )
+            )
+
+    best_context = candidates[0]
+    best_score = float("inf")
+    for context in candidates:
+        score = animation_context_score(render_data, operation, mapping, atoms_by_index, context)
+        if score < best_score:
+            best_score = score
+            best_context = context
+    return best_context
+
+
+def build_animation_context(
+    render_data: dict,
+    operation: dict,
+    mapping: dict,
+    atoms_by_index: dict[int, dict],
+    *,
+    element_index: int | None,
+    representative_atom: int | None,
+) -> tuple[dict | None, dict | None, dict | None, dict | None, np.ndarray | None, float | None]:
+    axes = selected_elements(render_data["axes"], operation["index"], element_index)
+    planes = selected_elements(render_data["planes"], operation["index"], element_index)
+    centers = selected_elements(render_data["centers"], operation["index"], element_index)
+    axis = axes[0] if axes else None
+    plane = planes[0] if planes else None
+    center = centers[0] if centers else None
+    reference_entry = representative_mapping_entry(
+        render_data,
+        operation,
+        mapping,
+        atoms_by_index,
+        axis,
+        plane,
+        center,
+        representative_atom,
+    )
+    shared_shift = shared_periodic_shift(render_data, reference_entry, operation, axis, plane, center)
+    element_shift = symmetry_element_shared_shift(render_data, operation, axis, plane, center)
+    if element_shift is not None:
+        shared_shift = element_shift
+    center = effective_operation_center(render_data, operation, center, shared_shift)
+    axis = effective_rotation_axis(operation, axis, center)
+    shared_angle = shared_rotation_angle(
+        render_data,
+        reference_entry,
+        operation,
+        axis,
+        plane,
+        center,
+        shared_shift,
+    )
+    return axis, plane, center, reference_entry, shared_shift, shared_angle
+
+
+def animation_context_score(
+    render_data: dict,
+    operation: dict,
+    mapping: dict,
+    atoms_by_index: dict[int, dict],
+    context: tuple[dict | None, dict | None, dict | None, dict | None, np.ndarray | None, float | None],
+) -> float:
+    axis, plane, center, _, shared_shift, shared_angle = context
+    worst = 0.0
+    for entry in mapping["entries"]:
+        atom = atoms_by_index.get(entry["source_atom"])
+        if atom is None:
+            continue
+        start = np.asarray(atom["cart"], dtype=float)
+        target = animation_target(
+            render_data,
+            start,
+            entry,
+            operation,
+            axis,
+            plane,
+            center,
+            shared_shift=shared_shift,
+        )
+        path = build_operation_path(
+            start,
+            target,
+            operation,
+            axis=axis,
+            plane=plane,
+            center=center,
+            angle_override=shared_angle,
+        )
+        worst = max(worst, max_path_residual(path))
+    return worst
+
+
+def max_path_residual(path: dict) -> float:
+    residual = 0.0
+    stack = [path]
+    while stack:
+        current = stack.pop()
+        if current["type"] == "sequential":
+            stack.extend(current["segments"])
+        if current["type"] in ("rotation", "mirror", "inversion"):
+            residual = max(residual, float(np.linalg.norm(current.get("residual", np.zeros(3)))))
+    return residual
 
 
 def representative_mapping_entry(
@@ -519,6 +663,39 @@ def shared_periodic_shift(
     target_frac = target @ np.linalg.inv(lattice)
     raw_frac = np.asarray(reference_entry["transformed_frac"], dtype=float)
     return np.rint(target_frac - raw_frac)
+
+
+def symmetry_element_shared_shift(
+    render_data: dict,
+    operation: dict,
+    axis: dict | None,
+    plane: dict | None,
+    center: dict | None,
+) -> np.ndarray | None:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None or operation.get("matrix_cart") is None or operation.get("translation_cart") is None:
+        return None
+
+    kind = str(operation["kind"])
+    point = None
+    if kind.startswith(("rotation", "screw")) and axis is not None:
+        point = np.asarray(axis["point_cart"], dtype=float)
+    elif (kind == "inversion" or "rotoinversion" in kind) and center is not None:
+        point = np.asarray(center["point_cart"], dtype=float)
+    elif kind == "mirror" and plane is not None:
+        point = np.asarray(plane["point_cart"], dtype=float)
+
+    if point is None:
+        return None
+
+    matrix = np.asarray(operation["matrix_cart"], dtype=float)
+    translation = np.asarray(operation["translation_cart"], dtype=float)
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    required = (point - (matrix @ point + translation)) @ np.linalg.inv(lattice)
+    rounded = np.rint(required)
+    if np.linalg.norm(required - rounded) > 1e-5:
+        return None
+    return rounded
 
 
 def shared_rotation_angle(
