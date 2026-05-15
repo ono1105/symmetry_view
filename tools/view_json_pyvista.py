@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +32,11 @@ ELEMENT_COLORS = {
     "Pd": "#8aa6c1",
 }
 
+_PERIODIC_SHIFTS = np.array(
+    [(i, j, k) for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)],
+    dtype=float,
+)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Minimal PyVista viewer for exported symmetry JSON.")
@@ -41,6 +47,7 @@ def main() -> int:
     parser.add_argument("--show-displacements", action="store_true", help="Draw source-to-target displacement lines.")
     parser.add_argument("--animate", action="store_true", help="Animate atoms for --operation.")
     parser.add_argument("--animation-frames", type=int, default=48, help="Number of animation frames.")
+    parser.add_argument("--animation-fps", type=float, default=24.0, help="Interactive animation frames per second.")
     parser.add_argument("--animation-output", type=Path, default=None, help="Write animation to a GIF file.")
     parser.add_argument("--no-atoms", action="store_true")
     parser.add_argument("--no-cell", action="store_true")
@@ -94,6 +101,7 @@ def main() -> int:
             operation_index=args.operation,
             animated_atoms=animated_atoms,
             frame_count=args.animation_frames,
+            fps=args.animation_fps,
             output_path=args.animation_output,
         )
     elif args.screenshot is not None:
@@ -235,6 +243,7 @@ def run_animation(
     operation_index: int | None,
     animated_atoms: list[dict] | None,
     frame_count: int,
+    fps: float,
     output_path: Path | None,
 ) -> None:
     if animated_atoms is None:
@@ -261,9 +270,11 @@ def run_animation(
         return
 
     plotter.show(auto_close=False, interactive_update=True)
+    delay = 1.0 / max(float(fps), 1.0)
     for frame in range(frames):
         update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
         plotter.update()
+        time.sleep(delay)
     plotter.show()
 
 
@@ -290,7 +301,7 @@ def animation_paths(render_data: dict, operation: dict, mapping: dict) -> dict[i
         if atom is None:
             continue
         start = np.asarray(atom["cart"], dtype=float)
-        target = np.asarray(entry["transformed_cart"], dtype=float)
+        target = animation_target(render_data, start, entry, operation, axis, plane, center)
         paths[entry["source_atom"]] = build_operation_path(
             start,
             target,
@@ -300,6 +311,66 @@ def animation_paths(render_data: dict, operation: dict, mapping: dict) -> dict[i
             center=center,
         )
     return paths
+
+
+def animation_target(
+    render_data: dict,
+    start: np.ndarray,
+    entry: dict,
+    operation: dict,
+    axis: dict | None,
+    plane: dict | None,
+    center: dict | None,
+) -> np.ndarray:
+    default_target = np.asarray(entry["transformed_cart"], dtype=float)
+    candidates = periodic_target_candidates(render_data, entry)
+    if len(candidates) == 1:
+        return candidates[0]
+
+    kind = str(operation["kind"])
+    if kind.startswith(("rotation", "screw")) and axis is not None and operation.get("angle_deg") is not None:
+        axis_point = np.asarray(axis["point_cart"], dtype=float)
+        axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
+        angle = signed_angle_to_target(start, default_target, axis_point, axis_direction, operation["angle_deg"])
+        rotated = rotate_about_axis(start, axis_point, axis_direction, angle)
+        return best_axis_consistent_target(candidates, rotated, axis_direction)
+    if "glide" in kind or kind == "mirror":
+        if plane is None:
+            return default_target
+        plane_point = np.asarray(plane["point_cart"], dtype=float)
+        plane_normal = normalize(np.asarray(plane["normal_cart"], dtype=float))
+        mirrored = reflect_point(start, plane_point, plane_normal)
+        return best_plane_consistent_target(candidates, mirrored, plane_normal)
+    if kind == "inversion" and center is not None:
+        center_point = np.asarray(center["point_cart"], dtype=float)
+        inverted = 2.0 * center_point - start
+        return candidates[np.argmin(np.linalg.norm(candidates - inverted, axis=1))]
+    return default_target
+
+
+def periodic_target_candidates(render_data: dict, entry: dict) -> np.ndarray:
+    frac = entry.get("transformed_frac")
+    unit_cell = render_data.get("unit_cell")
+    if frac is None or unit_cell is None:
+        return np.asarray([entry["transformed_cart"]], dtype=float)
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    frac = np.asarray(frac, dtype=float)
+    return (frac + _PERIODIC_SHIFTS) @ lattice
+
+
+def best_axis_consistent_target(candidates: np.ndarray, rotated: np.ndarray, axis_direction: np.ndarray) -> np.ndarray:
+    residuals = candidates - rotated
+    parallel = np.outer(residuals @ axis_direction, axis_direction)
+    perpendicular = residuals - parallel
+    scores = np.linalg.norm(perpendicular, axis=1) + 1e-6 * np.linalg.norm(residuals, axis=1)
+    return candidates[np.argmin(scores)]
+
+
+def best_plane_consistent_target(candidates: np.ndarray, mirrored: np.ndarray, plane_normal: np.ndarray) -> np.ndarray:
+    residuals = candidates - mirrored
+    normal_distance = np.abs(residuals @ plane_normal)
+    scores = normal_distance + 1e-6 * np.linalg.norm(residuals, axis=1)
+    return candidates[np.argmin(scores)]
 
 
 def build_operation_path(

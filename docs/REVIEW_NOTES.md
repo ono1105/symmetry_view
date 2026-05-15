@@ -415,3 +415,107 @@ Codex に伝える際は「線形は一時的、すぐに arc へ切り替える
 - `bounds_min`/`bounds_max` の計算結果は変更なし ✓
 - `render_data_from_crystal` / `render_data_from_molecule` の出力 schema は変更なし ✓
 - `RenderData` の全フィールドが正しく埋まっていることを `--list-operations` 出力で確認 ✓
+
+---
+
+## アニメーションレビュー（`tools/view_json_pyvista.py`）（2026-05-15）
+
+### 動作確認
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate --animation-output exports/water_op0_animation.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-output exports/f2_pd_op1_animation.gif
+```
+
+両 GIF とも正常生成（water: 465 KB、f2_pd: 707 KB）。
+
+### ロジックテスト（全パス OK）
+
+以下を確認:
+
+- `evaluate_path(path, 1.0) == entry["transformed_cart"]` — water op0/op1、f2_pd op1/op4 の全原子（誤差 < 1e-6）
+- `evaluate_path(path, 0.0) == start` — rotation / screw / mirror / glide / inversion 全タイプ
+- sequential パスの s=0.5 境界での連続性（diff < 1e-3）
+- フォールバック: 軸なし→ linear、平面なし→ linear、中心なし→ linear
+- `s` のクリッピング: s<0 → 0、s>1 → 1 に補正される
+
+### 正常な部分
+
+| 項目 | 評価 |
+|------|------|
+| `build_operation_path` の種別分岐順序 | `screw` が `rotation` より先に評価される ✓ |
+| `signed_angle_to_target` の符号決定 | +/-angle を試して target に近い方を選ぶ ✓ |
+| screw 分解（回転→平行移動） | `ANIMATION_DESIGN.md` Section「Screw operations」通り ✓ |
+| glide 分解（鏡映→平行移動） | 仕様通り ✓ |
+| improper 分岐（rotoinversion/rotoreflection） | 設計上適切 ✓ |
+| GIF 出力パス | `open_gif` → `write_frame` ループ → `close` の順序が正しい ✓ |
+| residual 補正 | 各パスで `target - 純変換先` を保存し、`s` に比例して加算することで終点が必ず `transformed_cart` になる ✓ |
+
+### バグ（1件）: インタラクティブアニメーションが視覚的に機能しない
+
+**場所:** [view_json_pyvista.py:263-267](tools/view_json_pyvista.py#L263-L267)
+
+```python
+# 現在のコード
+plotter.show(auto_close=False, interactive_update=True)  # ノンブロッキングで即返る
+for frame in range(frames):
+    update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
+    plotter.update()
+plotter.show()  # 最終フレームで静止
+```
+
+PyVista 0.48 のソースコードで確認: `interactive_update=True` のとき `iren.start()` がスキップされ、`show()` はノンブロッキングになる。
+その結果、フレームループが Python 速度（<1ms）で走りきり、ユーザーにはアニメーションが見えない。
+
+`--animation-output` で GIF 出力するパスは正常動作する（`write_frame()` でファイルに書くので速度無関係）。
+
+**影響範囲:** `--animate` のみ使用時（GIF 出力なし）。GIF 出力は影響なし。
+
+**修正案:**
+
+```python
+import time
+
+FPS = 24  # または引数化: --animation-fps N
+
+plotter.show(auto_close=False, interactive_update=True)
+for frame in range(frames):
+    update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
+    plotter.update()
+    time.sleep(1.0 / FPS)
+plotter.show()
+```
+
+### 軽微な観察（修正不要）
+
+- `evaluate_path` の `mirror` タイプで `reflect_point` を毎フレーム再計算している。`s` に依存しない定数なので `build_path` 時に保存すれば効率化できるが、パフォーマンス上の影響は小さい。
+- `improper_path` は現在のテストデータ（water C2v、F2Pd P2₁3）では実行されない。今後 Sn 操作を持つ点群でテストが必要。
+- インタラクティブパスで `plotter.show()` が2回呼ばれているが（263行目と267行目）、PyVista 0.48 ではエラーにならない。
+
+### 追加修正（Codex）
+
+F2 Pd の screw_2 GIF で、原子ごとに別々の二回螺旋軸を使っているように見える問題を確認。
+
+原因:
+
+- `AtomMappingEntry.transformed_cart` は最近接周期像。
+- screw操作では、最近接像を原子ごとに選ぶと、選択した1本のscrew軸と整合しない周期像になることがある。
+- その結果、回転後の残差が軸方向だけでなく横方向にも出て、同じ対称操作に見えにくい。
+
+修正:
+
+- crystal animationでは `transformed_frac + [-1,0,1]^3` から周期像候補を作る。
+- rotation/screwでは、選択した軸まわりに回転した後の残差が軸方向に最も近い候補を選ぶ。
+- mirror/glideでは、鏡映後の残差が面内方向に最も近い候補を選ぶ。
+- インタラクティブ再生用に `--animation-fps` と `time.sleep()` を追加。
+
+確認:
+
+```bash
+.venv/bin/python -m py_compile tools/view_json_pyvista.py
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-frames 8 --animation-output exports/f2_pd_op1_animation_fixed.gif
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate --animation-frames 8 --animation-output exports/water_op0_animation_fixed.gif
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 1 --animate --animation-frames 8 --animation-output exports/water_op1_mirror_animation_fixed.gif
+```
+
+F2 Pd operation 1 では、全原子について「回転後の残差」の垂直成分が `1.4e-15` 以下になり、同じ選択screw軸に整合することを確認。

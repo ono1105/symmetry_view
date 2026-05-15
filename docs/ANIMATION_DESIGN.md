@@ -22,6 +22,8 @@ atom_mappings.mappings[].entries[].transformed_cart
 For crystals, `transformed_cart` is the nearest periodic animation image, computed from `animation_frac @ lattice`.
 For molecules, `transformed_cart` is the raw transformed Cartesian coordinate.
 
+For crystal animation, the viewer may choose a different periodic image from `transformed_frac + integer shifts` when a selected symmetry element requires it. This is important for screw/rotation/glide-style paths: the nearest periodic image can make each atom appear to use a different equivalent axis. Animation should prefer the periodic image that is consistent with the selected axis or plane.
+
 ## Operation Data
 
 `RenderOperationData` includes:
@@ -65,7 +67,7 @@ operation kind starts with rotation_ or screw_:
   arc interpolation around the selected operation axis
 
 mirror, glide, inversion, translation, identity, fallback:
-  linear interpolation from start_cart to transformed_cart
+  linear interpolation from start_cart to the operation target image
 ```
 
 Animation should be built from primitive motions rather than collapsing every operation into a single straight-line movement:
@@ -115,7 +117,7 @@ axis.direction_cart
 operation.angle_deg
 ```
 
-There can be multiple equivalent axes for one operation in a periodic crystal. The first matching axis is acceptable for the first prototype, because the target position check still comes from `transformed_cart`.
+There can be multiple equivalent axes for one operation in a periodic crystal. The first matching axis is acceptable for the first prototype, but crystal target images must be chosen to match that axis.
 
 ## Rotation Direction
 
@@ -124,7 +126,7 @@ There can be multiple equivalent axes for one operation in a periodic crystal. T
 ```text
 candidate +angle
 candidate -angle
-choose the candidate closer to transformed_cart
+choose the candidate closer to the operation target image
 ```
 
 For screw operations, first implement:
@@ -133,7 +135,9 @@ For screw operations, first implement:
 rotation phase + translation phase
 ```
 
-That keeps the motion readable as a composition of basic operations and keeps the end frame exactly equal to `transformed_cart`.
+That keeps the motion readable as a composition of basic operations and keeps the end frame exactly equal to the selected operation target image.
+
+For crystals, the final animation target may be an equivalent periodic image rather than `transformed_cart` if that image better matches the selected screw axis. The atom mapping remains the same; only the displayed path image changes.
 
 ## Frame Calculation
 
@@ -141,7 +145,7 @@ For each frame parameter `s` in `[0, 1]`:
 
 ```text
 start = atom.cart
-target = mapping_entry.transformed_cart
+target = selected operation target image
 
 if operation uses arc and axis exists:
   pos = arc_path(start, target, axis, angle_deg, s)
