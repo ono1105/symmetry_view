@@ -7,7 +7,8 @@
 1. `README.md`
 2. `docs/CURRENT_STATUS.md`
 3. `docs/REVIEW_NOTES.md`
-4. 必要に応じて `docs/specs/codex_final_spec_crystal_symmetry_viewer.md`
+4. Jacobsite アニメーション変更レビューなら `docs/CLAUDE_REVIEW_REQUEST_JACOBSITE_ANIMATION.md`
+5. 必要に応じて `docs/specs/codex_final_spec_crystal_symmetry_viewer.md`
 
 ## 現在の目的
 
@@ -31,11 +32,10 @@ GUI/3D表示は一度失敗したので、現在は段階的に作り直して�
 
 ```text
 GUI
-アニメーション再生
 パズルUI
 ```
 
-最小3D表示だけは `tools/view_json_pyvista.py` として追加済み。GUI/Qt埋め込みではなく、JSONを読むPyVista単体ツール。
+最小3D表示とアニメーションは `tools/view_json_pyvista.py` として追加済み。GUI/Qt埋め込みではなく、JSONを読むPyVista単体ツール。
 
 ## Active Code
 
@@ -174,7 +174,8 @@ DEFAULT_LEGACY_CORE = Path("/home/ken/work/kouzoukaiseki/symmetry_core.py")
 7. ~~最小PyVista表示プロトタイプの実装レビュー~~ → 操作一覧、操作絞り込み、mapping表示、変位線表示まで実装済み
 8. ~~最初のアニメーション設計レビュー~~ → 操作別dispatcherを最初から作り、線形補間は短期デバッグ用に限定。`RenderOperationData.angle_deg` を追加する方針
 9. ~~`tools/view_json_pyvista.py --animate` の実装~~ → rotation/mirror/inversion/translation を基本操作として実装。screw は回転後に並進、glide は鏡映後に並進する合成アニメーション
-10. **次の相談**: screw/glide/improper の合成アニメーションが学習用途として十分か、次に Selected atoms mode か GUI 化のどちらへ進むべきか
+10. ~~screw/glide/improper の合成アニメーション~~ → Jacobsite を基準に検証中。詳細は `docs/CLAUDE_REVIEW_REQUEST_JACOBSITE_ANIMATION.md`
+11. **次の相談**: Jacobsite 基準の operation matrix animation にバグや設計上の無理がないか。特に rotoinversion / rotoreflection / periodic crystal target の扱い。
 
 ## Claudeへの依頼文例
 
