@@ -1,0 +1,58 @@
+# This file is exported from "ReciPro"
+# https://github.com/seto77/
+data_global
+_chemical_name 'Tenorite'
+loop_
+_publ_author_name
+'Asbrink S'
+'Waskowska A'
+_journal_name 'Journal of Physics: Condensed Matter 3 (1991) 8173-8180'
+_publ_section_title
+;
+ CuO: x-ray single-crystal structure determination at 196 K and room
+ temperature
+Note: T = 196 K
+Locality: synthetic
+
+AMCSD: 0018823
+;
+_chemical_formula_sum 'Cu O'
+_cell_length_a 4.689300
+_cell_length_b 3.426800
+_cell_length_c 5.132100
+_cell_angle_alpha 90.000000
+_cell_angle_beta 99.653000
+_cell_angle_gamma 90.000000
+_cell_volume 81.301567
+_exptl_crystal_density_diffrn 6.498713
+_space_group_IT_number 9
+_symmetry_Int_Tables_number 9
+_symmetry_cell_setting 'monoclinic'
+_symmetry_space_group_name_H-M 'Cc=C1c1'
+_symmetry_space_group_name_Hall 'C-2yc'
+loop_
+_symmetry_equiv_pos_as_xyz
+  'x,y,z'
+  'x+1/2,y+1/2,z'
+  'x,-y,z+1/2'
+  'x+1/2,-y+1/2,z+1/2'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_U_iso_or_equiv
+ Cu Cu 0.250000 0.246800 0.000000 1.000000 0.000000
+ O O -0.011500 0.417100 0.253700 1.000000 0.000000
+loop_
+_atom_site_aniso_label
+_atom_site_aniso_U_11
+_atom_site_aniso_U_22
+_atom_site_aniso_U_33
+_atom_site_aniso_U_23
+_atom_site_aniso_U_13
+_atom_site_aniso_U_12
+ Cu 0.005500 0.007500 0.004100 0.001800 0.000500 0.001500
+ O 0.005500 0.011300 0.004300 0.002100 -0.000500 -0.000500

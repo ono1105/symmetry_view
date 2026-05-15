@@ -1178,3 +1178,122 @@ translation_override = shared_step_translation(
 ### sequential パスは現在デッドコード
 
 `evaluate_path` と `max_path_residual` に "sequential" 型の処理があるが、`build_operation_path` は "sequential" 型を生成しない。将来用の準備コードとして問題はないが、現時点では未使用。
+
+---
+
+## 32 CIF サンプル 全件検証 (2026-05-16)
+
+`examples/cif/` の 32 CIF ファイルを全件 JSON export してアニメーション residual を確認した。
+
+### エクスポート
+
+全 32 件エラーなしでエクスポート成功。
+
+```text
+32 OK, 0 FAIL
+```
+
+### 空間群・点群カバレッジ
+
+| 点群 | 件数 | 結晶 |
+|------|------|------|
+| 1 | 1 | Babefphite |
+| -1 | 1 | O9 V5 |
+| m | 1 | Tenorite |
+| 2/m | 2 | AgCl, Hydrohematite |
+| mm2 | 1 | C12H14N4 |
+| 222 | 1 | Tridymite |
+| mmm | 1 | Bromine |
+| 4 | 1 | Pb(Al,Si)4O8 |
+| -4 | 1 | SiO2 |
+| 4/m | 1 | Ge Hf O4 |
+| 4mm | 1 | Cl H4 N O2 |
+| -42m | 1 | Adamantane |
+| 4/mmm | 2 | NbP, Tin |
+| 3 | — | **未収録** |
+| -3 | 2 | Bi I3, H11 I N2 O6 |
+| 32 | 1 | Tellurium |
+| 3m | 1 | Tellurobismuthite |
+| -3m | 1 | Antimony |
+| 6 | 1 | Thaumasite |
+| -6 | — | **未収録** |
+| 6/m | 1 | Ho2Rh12As7 |
+| 622 | 1 | Edgarite |
+| 6mm | — | **未収録** |
+| -6m2 | 2 | Ge I2, Qusongite |
+| 6/mmm | 2 | Helium, LiI3H2O |
+| 23 | 1 | N2 O4 |
+| m-3 | 1 | Cl2 H6 N2 |
+| 432 | — | **未収録** |
+| -43m | 1 | Co H18 I N6 O4 S |
+| m-3m | 2 | F4 Si, Halite |
+
+**カバー 26 / 32 点群**。未収録の 6 点群: `2`, `3`, `-6`, `422`, `432`, `6mm`。
+
+### アニメーション残差チェック
+
+全 32 CIF のすべての操作を `element_index=None`（auto-select）で実行:
+
+```text
+Name                     Ops  Bad>1e-6    MaxRes
+Adamantane                 8         0  2.85e-15
+AgCl                       4         0  2.04e-15
+Antimony                  36         0  6.66e-15
+Babefphite                 4         0  0.00e+00
+Bi I3                      6         0  1.37e-14
+Bromine                   16         0  3.64e-15
+C12H14N4                  16         0  1.12e-14
+Cl H4 N O2                16         0  4.70e-15
+Cl2 H6 N2                 24         0  1.24e-14
+Co H18 I N6 O4 S          96         0  1.20e-14
+Edgarite                  12         0  7.82e-15
+F4 Si                     48         0  7.17e-15
+Ge Hf O4                  16         0  2.44e-15
+Ge I2                     12         0  5.43e-15
+H11 I N2 O6               18         0  1.09e-14
+Halite                   192         0  9.39e-15
+Helium                    24         0  3.27e-15
+Ho2Rh12As7                12         0  6.06e-15
+Hydrohematite              8         0  3.58e-15
+LiI3H2O                   24         0  7.23e-15
+N2 O4                     24         0  1.15e-14
+NbP                       32         0  3.67e-15
+O9 V5                      4         0  1.28e-15
+Pb(Al,Si)4O8               8         0  3.32e-15
+Qusongite                 12         0  3.88e-15
+SiO2                       8         0  3.90e-15
+Tellurium                  6         0  2.72e-15
+Tellurobismuthite         18         0  7.27e-15
+Tenorite                   4         0  1.09e-15
+Thaumasite                 6         0  5.69e-15
+Tin                       32         0  5.35e-15
+Tridymite                  8         0  4.07e-15
+```
+
+**全件 residual ≤ 1e-6（すべて機械精度）。バグなし。**
+
+### Codex 検証との比較
+
+Codex は格子系（7 種）の代表 CIF を選び GIF を生成して目視確認した（`exports/checks/lattice_systems/`）。同じ 7 ファイルを数値確認すると一致:
+
+```text
+triclinic    (O9 V5)        4 ops  0 bad  1.28e-15
+monoclinic   (AgCl)         4 ops  0 bad  2.04e-15
+orthorhombic (Bromine)     16 ops  0 bad  3.64e-15
+tetragonal   (Cl H4 N O2)  16 ops  0 bad  4.70e-15
+trigonal     (Antimony)    36 ops  0 bad  6.66e-15
+hexagonal    (LiI3H2O)     24 ops  0 bad  7.23e-15
+cubic        (F4 Si)       48 ops  0 bad  7.17e-15
+```
+
+Codex の GIF 確認と私の数値確認は矛盾なし。Codex は目視のみ・私は全操作の残差。
+
+### mapping 完全性 + asymmetric_index
+
+全 32 CIF で:
+- `atom_mappings.complete = True`（全件）
+- `asymmetric_index` 未割り当て原子 = 0（全件）
+
+### 次の対応提案
+
+6 つの未収録点群（`2`, `3`, `-6`, `422`, `432`, `6mm`）は今すぐ追加が必須ではないが、点群コレクションとして完全にしたい場合は CIF を追加するだけで対応できる。残差チェックが通れば自動でカバー扱いにできる。

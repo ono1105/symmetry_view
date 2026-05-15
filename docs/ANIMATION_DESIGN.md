@@ -51,6 +51,7 @@ Add these options to `tools/view_json_pyvista.py`:
 --animate
 --animation-frames N
 --animation-fps FPS
+--animation-speed FACTOR
 --animation-output PATH
 --animation-scope all|representative
 --representative-atom INDEX
@@ -69,6 +70,7 @@ Required usage:
 
 `--animate` requires `--operation`, because atom targets are operation-specific.
 `--element-index` selects one matching axis/plane/center for the operation. During animation, only that selected element is displayed and used for the motion path. This matters when one operation has multiple equivalent screw axes.
+`--animation-speed` multiplies playback speed without changing the generated path. Use `0.5` for half speed or `2.0` for double speed.
 `--animation-scope representative` animates only the representative source atom. `--animation-scope all` animates all atoms, using the representative atom to choose one periodic image shift for the whole operation.
 
 ## Interpolation Policy

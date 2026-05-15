@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -44,7 +45,7 @@ def analyze_cif(
         raise AnalysisError(f"CIF file not found: {cif_path}")
 
     structure = Structure.from_file(str(cif_path))
-    cell = core.structure_to_spglib_cell(structure)
+    cell = structure_to_spglib_cell(structure)
     dataset = spglib.get_symmetry_dataset(
         cell,
         symprec=symprec,
@@ -106,6 +107,13 @@ def load_legacy_core(path: str | Path) -> ModuleType:
     return module
 
 
+def structure_to_spglib_cell(structure: Structure) -> tuple[np.ndarray, np.ndarray, list[int]]:
+    lattice = np.asarray(structure.lattice.matrix, dtype=float)
+    positions = np.asarray([site.frac_coords for site in structure], dtype=float)
+    numbers = [primary_site_element(site)[1] for site in structure]
+    return lattice, positions, numbers
+
+
 def convert_structure(
     cif_path: Path,
     structure: Structure,
@@ -116,9 +124,10 @@ def convert_structure(
 ) -> StructureSummary:
     atoms = []
     for index, site in enumerate(structure):
+        element, atomic_number = primary_site_element(site)
         asymmetric_index, generation_operation_index = identify_asymmetric_source(
             np.asarray(site.frac_coords, dtype=float),
-            site.specie.symbol,
+            element,
             asymmetric_atoms,
             rotations,
             translations,
@@ -126,8 +135,8 @@ def convert_structure(
         atoms.append(
             AtomSite(
                 index=index,
-                element=site.specie.symbol,
-                atomic_number=int(site.specie.Z),
+                element=element,
+                atomic_number=atomic_number,
                 frac=np.asarray(site.frac_coords, dtype=float),
                 cart=np.asarray(site.coords, dtype=float),
                 asymmetric_index=asymmetric_index,
@@ -159,7 +168,7 @@ def read_asymmetric_unit_sites(cif_path: Path, lattice: np.ndarray) -> tuple[Asy
     count = min(len(labels), len(symbols), len(xs), len(ys), len(zs))
     sites = []
     for index in range(count):
-        element = str(symbols[index])
+        element = normalize_element_symbol(symbols[index], labels[index])
         frac = np.asarray(
             [
                 parse_cif_float(xs[index]),
@@ -179,6 +188,67 @@ def read_asymmetric_unit_sites(cif_path: Path, lattice: np.ndarray) -> tuple[Asy
             )
         )
     return tuple(sites)
+
+
+def primary_site_element(site) -> tuple[str, int]:
+    specie = getattr(site, "specie", None)
+    if specie is not None:
+        return str(specie.symbol), int(specie.Z)
+
+    species = getattr(site, "species", None)
+    if species is None:
+        species = getattr(site, "species_and_occu", None)
+    if species is None:
+        raise AnalysisError(f"could not determine element for site: {site}")
+
+    items = list(species.items())
+    if not items:
+        raise AnalysisError(f"empty species composition for site: {site}")
+
+    selected_species, _ = max(
+        items,
+        key=lambda item: (float(item[1]), species_symbol(item[0])),
+    )
+    symbol = species_symbol(selected_species)
+    atomic_number = species_atomic_number(selected_species, symbol)
+    return symbol, atomic_number
+
+
+def species_symbol(species) -> str:
+    symbol = getattr(species, "symbol", None)
+    if symbol is not None:
+        return normalize_element_symbol(symbol)
+    element = getattr(species, "element", None)
+    if element is not None and getattr(element, "symbol", None) is not None:
+        return normalize_element_symbol(element.symbol)
+    return normalize_element_symbol(str(species))
+
+
+def species_atomic_number(species, symbol: str) -> int:
+    z_value = getattr(species, "Z", None)
+    if z_value is not None:
+        return int(z_value)
+    element = getattr(species, "element", None)
+    if element is not None and getattr(element, "Z", None) is not None:
+        return int(element.Z)
+    return int(Element(symbol).Z)
+
+
+def normalize_element_symbol(value, label=None) -> str:
+    text = str(value).strip()
+    if "," in text:
+        text = text.split(",", 1)[0].strip()
+    text = re.sub(r"[^A-Za-z].*$", "", text)
+    if text:
+        return str(Element(text).symbol)
+
+    if label is not None:
+        label_text = str(label).strip()
+        match = re.match(r"([A-Z][a-z]?)", label_text)
+        if match:
+            return str(Element(match.group(1)).symbol)
+
+    raise AnalysisError(f"could not parse element symbol from {value!r}")
 
 
 def parse_cif_float(value) -> float:

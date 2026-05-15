@@ -1,0 +1,140 @@
+# This file is exported from "ReciPro"
+# https://github.com/seto77/
+data_global
+_chemical_name 'Co H18 I N6 O4 S'
+loop_
+_publ_author_name
+'Hassel O'
+_journal_name 'Norsk Geologisk Tidsskrift 10 (1928) 92-96'
+_publ_section_title
+;
+ Weitere Beobachtungen ueber Isomorphie bei kubischen Kristallen von
+Hexammine-
+ und Pentammin-Aquokomplexsalzen
+
+COD: 1010781
+_database_code_amcsd 0017538
+;
+_chemical_formula_sum 'Co S I'
+_cell_length_a 10.710000
+_cell_length_b 10.710000
+_cell_length_c 10.710000
+_cell_angle_alpha 90.000000
+_cell_angle_beta 90.000000
+_cell_angle_gamma 90.000000
+_cell_volume 1228.480911
+_exptl_crystal_density_diffrn 1.178167
+_space_group_IT_number 216
+_symmetry_Int_Tables_number 216
+_symmetry_cell_setting 'cubic'
+_symmetry_space_group_name_H-M 'F-43m'
+_symmetry_space_group_name_Hall 'F-423'
+loop_
+_symmetry_equiv_pos_as_xyz
+  'x,y,z'
+  'x,y+1/2,z+1/2'
+  'x+1/2,y,z+1/2'
+  'x+1/2,y+1/2,z'
+  '-x,-y,z'
+  '-x,-y+1/2,z+1/2'
+  '-x+1/2,-y,z+1/2'
+  '-x+1/2,-y+1/2,z'
+  '-x,y,-z'
+  '-x,y+1/2,-z+1/2'
+  '-x+1/2,y,-z+1/2'
+  '-x+1/2,y+1/2,-z'
+  'x,-y,-z'
+  'x,-y+1/2,-z+1/2'
+  'x+1/2,-y,-z+1/2'
+  'x+1/2,-y+1/2,-z'
+  'z,x,y'
+  'z,x+1/2,y+1/2'
+  'z+1/2,x,y+1/2'
+  'z+1/2,x+1/2,y'
+  'z,-x,-y'
+  'z,-x+1/2,-y+1/2'
+  'z+1/2,-x,-y+1/2'
+  'z+1/2,-x+1/2,-y'
+  '-z,-x,y'
+  '-z,-x+1/2,y+1/2'
+  '-z+1/2,-x,y+1/2'
+  '-z+1/2,-x+1/2,y'
+  '-z,x,-y'
+  '-z,x+1/2,-y+1/2'
+  '-z+1/2,x,-y+1/2'
+  '-z+1/2,x+1/2,-y'
+  'y,z,x'
+  'y,z+1/2,x+1/2'
+  'y+1/2,z,x+1/2'
+  'y+1/2,z+1/2,x'
+  '-y,z,-x'
+  '-y,z+1/2,-x+1/2'
+  '-y+1/2,z,-x+1/2'
+  '-y+1/2,z+1/2,-x'
+  'y,-z,-x'
+  'y,-z+1/2,-x+1/2'
+  'y+1/2,-z,-x+1/2'
+  'y+1/2,-z+1/2,-x'
+  '-y,-z,x'
+  '-y,-z+1/2,x+1/2'
+  '-y+1/2,-z,x+1/2'
+  '-y+1/2,-z+1/2,x'
+  'y,x,z'
+  'y,x+1/2,z+1/2'
+  'y+1/2,x,z+1/2'
+  'y+1/2,x+1/2,z'
+  '-y,-x,z'
+  '-y,-x+1/2,z+1/2'
+  '-y+1/2,-x,z+1/2'
+  '-y+1/2,-x+1/2,z'
+  'y,-x,-z'
+  'y,-x+1/2,-z+1/2'
+  'y+1/2,-x,-z+1/2'
+  'y+1/2,-x+1/2,-z'
+  '-y,x,-z'
+  '-y,x+1/2,-z+1/2'
+  '-y+1/2,x,-z+1/2'
+  '-y+1/2,x+1/2,-z'
+  'x,z,y'
+  'x,z+1/2,y+1/2'
+  'x+1/2,z,y+1/2'
+  'x+1/2,z+1/2,y'
+  '-x,z,-y'
+  '-x,z+1/2,-y+1/2'
+  '-x+1/2,z,-y+1/2'
+  '-x+1/2,z+1/2,-y'
+  '-x,-z,y'
+  '-x,-z+1/2,y+1/2'
+  '-x+1/2,-z,y+1/2'
+  '-x+1/2,-z+1/2,y'
+  'x,-z,-y'
+  'x,-z+1/2,-y+1/2'
+  'x+1/2,-z,-y+1/2'
+  'x+1/2,-z+1/2,-y'
+  'z,y,x'
+  'z,y+1/2,x+1/2'
+  'z+1/2,y,x+1/2'
+  'z+1/2,y+1/2,x'
+  'z,-y,-x'
+  'z,-y+1/2,-x+1/2'
+  'z+1/2,-y,-x+1/2'
+  'z+1/2,-y+1/2,-x'
+  '-z,y,-x'
+  '-z,y+1/2,-x+1/2'
+  '-z+1/2,y,-x+1/2'
+  '-z+1/2,y+1/2,-x'
+  '-z,-y,x'
+  '-z,-y+1/2,x+1/2'
+  '-z+1/2,-y,x+1/2'
+  '-z+1/2,-y+1/2,x'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_U_iso_or_equiv
+ Co1 Co 0.000000 0.000000 0.000000 1.000000 0.000000
+ S1 S 0.250000 0.250000 0.250000 1.000000 0.000000
+ I1 I 0.750000 0.750000 0.750000 1.000000 0.000000

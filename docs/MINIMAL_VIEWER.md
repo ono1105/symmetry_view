@@ -51,6 +51,12 @@ Animate one operation:
 .venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op26_glide.gif
 ```
 
+Use `--animation-speed` to change playback speed without changing the path:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 31 --animate --animation-speed 0.5 --animation-output exports/checks/jacobsite_op31_slow.gif
+```
+
 Render a screenshot and exit:
 
 ```bash

@@ -48,6 +48,12 @@ def main() -> int:
     parser.add_argument("--animate", action="store_true", help="Animate atoms for --operation.")
     parser.add_argument("--animation-frames", type=int, default=48, help="Number of animation frames.")
     parser.add_argument("--animation-fps", type=float, default=10.0, help="Animation frames per second.")
+    parser.add_argument(
+        "--animation-speed",
+        type=float,
+        default=1.0,
+        help="Playback speed multiplier. Use 0.5 for half speed or 2.0 for double speed.",
+    )
     parser.add_argument("--animation-output", type=Path, default=None, help="Write animation to a GIF file.")
     parser.add_argument(
         "--animation-scope",
@@ -135,6 +141,7 @@ def main() -> int:
             animated_atoms=animated_atoms,
             frame_count=args.animation_frames,
             fps=args.animation_fps,
+            speed=args.animation_speed,
             output_path=args.animation_output,
             element_index=args.element_index,
             animation_scope=args.animation_scope,
@@ -261,7 +268,7 @@ def add_symmetry_elements(
 ) -> None:
     span = scene_span(render_data)
     axis_length = max(span * 0.75, 1.0)
-    plane_scale = max(span * 0.28, 0.5)
+    plane_scale = max(span * 0.45, 0.8)
 
     axes, planes, centers = display_symmetry_elements(render_data, atom_mappings, operation_index, element_index)
 
@@ -373,6 +380,7 @@ def run_animation(
     animated_atoms: list[dict] | None,
     frame_count: int,
     fps: float,
+    speed: float,
     output_path: Path | None,
     element_index: int | None,
     animation_scope: str,
@@ -393,6 +401,7 @@ def run_animation(
         return
 
     frames = max(frame_count, 2)
+    playback_fps = effective_animation_fps(fps, speed)
     paths = animation_paths(
         render_data,
         operation,
@@ -407,7 +416,7 @@ def run_animation(
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        plotter.open_gif(str(output_path), fps=max(float(fps), 1.0))
+        plotter.open_gif(str(output_path), fps=playback_fps)
         plotter.show(auto_close=False, interactive_update=True)
         for frame in range(frames):
             update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
@@ -417,12 +426,16 @@ def run_animation(
         return
 
     plotter.show(auto_close=False, interactive_update=True)
-    delay = 1.0 / max(float(fps), 1.0)
+    delay = 1.0 / playback_fps
     for frame in range(frames):
         update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
         plotter.update()
         time.sleep(delay)
     plotter.show()
+
+
+def effective_animation_fps(fps: float, speed: float) -> float:
+    return max(float(fps), 1.0) * max(float(speed), 0.05)
 
 
 def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s: float) -> None:
