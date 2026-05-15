@@ -24,7 +24,7 @@ GUI/3D表示は一度失敗したので、現在は段階的に作り直して�
 4. AtomMapping
 5. JSON export
 6. 最小JSON表示
-7. アニメーション設計
+7. 最小アニメーション
 ```
 
 まだやらないもの:
@@ -76,8 +76,10 @@ tools/
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --show-mapping --show-displacements
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-output exports/f2_pd_op1_animation.gif
 .venv/bin/python tools/view_json_pyvista.py exports/water.json
 .venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --show-mapping --show-displacements
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate --animation-output exports/water_op0_animation.gif
 ```
 
 確認済みの代表結果:
@@ -171,7 +173,8 @@ DEFAULT_LEGACY_CORE = Path("/home/ken/work/kouzoukaiseki/symmetry_core.py")
 6. スクリュー軸ラベル `2_?` 問題 → 表示層まで保留でよい（Q5参照）
 7. ~~最小PyVista表示プロトタイプの実装レビュー~~ → 操作一覧、操作絞り込み、mapping表示、変位線表示まで実装済み
 8. ~~最初のアニメーション設計レビュー~~ → 操作別dispatcherを最初から作り、線形補間は短期デバッグ用に限定。`RenderOperationData.angle_deg` を追加する方針
-9. **次の相談**: `docs/ANIMATION_DESIGN.md` の方針で `tools/view_json_pyvista.py --animate` を実装してよいか。特に screw 操作の「arc + residual-to-target correction」の扱いが妥当か
+9. ~~`tools/view_json_pyvista.py --animate` の実装~~ → rotation/mirror/inversion/translation を基本操作として実装。screw は回転後に並進、glide は鏡映後に並進する合成アニメーション
+10. **次の相談**: screw/glide/improper の合成アニメーションが学習用途として十分か、次に Selected atoms mode か GUI 化のどちらへ進むべきか
 
 ## Claudeへの依頼文例
 

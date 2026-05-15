@@ -83,6 +83,7 @@ JSON export:
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --show-mapping --show-displacements
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-output exports/f2_pd_op1_animation.gif
 .venv/bin/python tools/view_json_pyvista.py exports/water.json
 ```
 
@@ -95,5 +96,5 @@ JSON export:
 - `RenderData` と `AtomMapping` はJSON出力できる。
 - JSONを入力にした最小PyVista表示を追加済み。操作一覧、操作ごとの要素絞り込み、原子対応表示、変位線表示に対応。
 - 仕様書との現在の整合性は `docs/SPEC_ALIGNMENT.md` に記録。
-- 次の実装対象はJSONビューア上の対称操作アニメーション。設計は `docs/ANIMATION_DESIGN.md` に記録。
+- JSONビューア上の対称操作アニメーションを追加済み。設計は `docs/ANIMATION_DESIGN.md` に記録。
 - GUI/Qt埋め込みはまだ再実装しない。

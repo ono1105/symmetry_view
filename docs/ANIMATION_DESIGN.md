@@ -68,7 +68,35 @@ mirror, glide, inversion, translation, identity, fallback:
   linear interpolation from start_cart to transformed_cart
 ```
 
-For the very first debugging pass, the arc interpolation function may temporarily call linear interpolation internally. That temporary state should be short-lived, because the final specification expects rotation and screw operations to move along arcs.
+Animation should be built from primitive motions rather than collapsing every operation into a single straight-line movement:
+
+```text
+rotation:
+  rotate around the selected axis
+
+inversion:
+  move through the inversion center
+
+mirror:
+  move toward the reflected position through the mirror plane
+
+translation:
+  linear translation
+
+screw:
+  rotation phase, then translation phase
+
+glide:
+  mirror phase, then translation phase
+
+rotoinversion:
+  rotation phase, then inversion phase
+
+rotoreflection / improper:
+  rotation phase, then mirror phase
+```
+
+Compound operations should not be represented as a single straight-line move unless the required symmetry element is missing from the exported JSON and the viewer must fall back.
 
 ## Axis Lookup
 
@@ -102,10 +130,10 @@ choose the candidate closer to transformed_cart
 For screw operations, first implement:
 
 ```text
-arc rotation component + linear residual-to-target correction
+rotation phase + translation phase
 ```
 
-That keeps the end frame exactly equal to `transformed_cart` while preserving a visibly rotational path.
+That keeps the motion readable as a composition of basic operations and keeps the end frame exactly equal to `transformed_cart`.
 
 ## Frame Calculation
 

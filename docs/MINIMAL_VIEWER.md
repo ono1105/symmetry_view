@@ -32,6 +32,13 @@ Show atom mapping and source-to-target displacement lines for one operation:
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --show-mapping --show-displacements
 ```
 
+Animate one operation:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-output exports/f2_pd_op1_animation.gif
+```
+
 Render a screenshot and exit:
 
 ```bash
@@ -53,6 +60,7 @@ operation-based element filtering
 operation list
 atom mapping printout
 source-to-target displacement lines
+operation animation
 screenshots
 ```
 
@@ -61,7 +69,6 @@ Not implemented yet:
 ```text
 GUI controls
 atom selection
-animation
 puzzle interactions
 ```
 

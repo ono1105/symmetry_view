@@ -22,24 +22,37 @@ archive/old_gui_attempt/
 
 Do not use it as the basis for new work unless explicitly requested. It was kept only as reference for ideas and failures.
 
-## Next Recommended Step
+## Current Animation Prototype
 
-Add the first animation prototype on top of the JSON viewer.
+The first animation prototype is implemented in the JSON viewer.
 
-`AtomMapping`, JSON export, and a minimal JSON PyVista viewer are now implemented. The viewer can list operations, filter symmetry elements by operation, print atom mappings, and draw source-to-target displacement lines.
+`AtomMapping`, JSON export, and a minimal JSON PyVista viewer are now implemented. The viewer can list operations, filter symmetry elements by operation, print atom mappings, draw source-to-target displacement lines, and animate a selected operation.
 
-The next useful step is an operation-aware animation prototype:
+The animation uses operation primitives:
 
 ```text
-selected operation
-  + RenderOperationData.angle_deg
-  + matching RenderAxisData when needed
-  + AtomMappingEntry.transformed_cart
-  -> interpolate atom positions
-  -> play in the PyVista window or save a short GIF
+rotation:
+  arc around an axis
+inversion:
+  through the inversion center
+mirror:
+  through the mirror plane
+translation:
+  linear movement
+screw:
+  rotation phase, then translation phase
+glide:
+  mirror phase, then translation phase
 ```
 
-Use an operation-aware dispatcher from the start. Linear interpolation is acceptable only as a short debugging fallback; rotation and screw operations should move along arcs to match the specification.
+Compound operations should not be represented as a single straight-line move unless the required symmetry element is missing and the viewer must fall back.
+
+Example:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate --animation-output exports/water_op0_animation.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --animate --animation-output exports/f2_pd_op1_animation.gif
+```
 
 Detailed design:
 

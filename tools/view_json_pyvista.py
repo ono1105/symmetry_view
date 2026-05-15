@@ -39,6 +39,9 @@ def main() -> int:
     parser.add_argument("--list-operations", action="store_true", help="Print operation list and exit.")
     parser.add_argument("--show-mapping", action="store_true", help="Print atom mapping for --operation.")
     parser.add_argument("--show-displacements", action="store_true", help="Draw source-to-target displacement lines.")
+    parser.add_argument("--animate", action="store_true", help="Animate atoms for --operation.")
+    parser.add_argument("--animation-frames", type=int, default=48, help="Number of animation frames.")
+    parser.add_argument("--animation-output", type=Path, default=None, help="Write animation to a GIF file.")
     parser.add_argument("--no-atoms", action="store_true")
     parser.add_argument("--no-cell", action="store_true")
     parser.add_argument("--no-elements", action="store_true")
@@ -57,10 +60,20 @@ def main() -> int:
     if args.show_mapping:
         print_mapping(atom_mappings, args.operation)
 
-    plotter = pv.Plotter(off_screen=args.off_screen or args.screenshot is not None)
+    if args.animate and args.operation is None:
+        parser.error("--animate requires --operation")
+
+    plotter = pv.Plotter(
+        off_screen=args.off_screen
+        or args.screenshot is not None
+        or args.animation_output is not None
+    )
     plotter.set_background("#101216")
 
-    if not args.no_atoms:
+    animated_atoms = None
+    if args.animate and not args.no_atoms:
+        animated_atoms = add_animated_atoms(plotter, render_data)
+    elif not args.no_atoms:
         add_atoms(plotter, render_data)
     if not args.no_cell and render_data.get("unit_cell"):
         add_unit_cell(plotter, render_data["unit_cell"])
@@ -73,7 +86,17 @@ def main() -> int:
     plotter.add_axes()
     plotter.reset_camera()
 
-    if args.screenshot is not None:
+    if args.animate:
+        run_animation(
+            plotter,
+            render_data,
+            atom_mappings,
+            operation_index=args.operation,
+            animated_atoms=animated_atoms,
+            frame_count=args.animation_frames,
+            output_path=args.animation_output,
+        )
+    elif args.screenshot is not None:
         args.screenshot.parent.mkdir(parents=True, exist_ok=True)
         plotter.show(screenshot=str(args.screenshot), auto_close=True)
         print(f"Wrote {args.screenshot}")
@@ -96,6 +119,26 @@ def add_atoms(plotter: pv.Plotter, render_data: dict) -> None:
             phi_resolution=16,
         )
         plotter.add_mesh(sphere, color=color, smooth_shading=True)
+
+
+def add_animated_atoms(plotter: pv.Plotter, render_data: dict) -> list[dict]:
+    animated = []
+    bounds_span = scene_span(render_data)
+    for atom in render_data["atoms"]:
+        center = np.asarray(atom["cart"], dtype=float)
+        radius = atom_radius(atom["atomic_number"], bounds_span)
+        color = ELEMENT_COLORS.get(atom["element"], "#9aa5b1")
+        base = pv.Sphere(
+            radius=radius,
+            center=(0.0, 0.0, 0.0),
+            theta_resolution=16,
+            phi_resolution=10,
+        )
+        mesh = base.copy()
+        mesh.points = base.points + center
+        plotter.add_mesh(mesh, color=color, smooth_shading=True)
+        animated.append({"atom": atom, "base_points": base.points.copy(), "mesh": mesh})
+    return animated
 
 
 def add_unit_cell(plotter: pv.Plotter, unit_cell: dict) -> None:
@@ -182,6 +225,281 @@ def add_displacements(
         plotter.add_mesh(tube, color="#f4d03f", opacity=0.8)
         marker = pv.Sphere(radius=endpoint_radius, center=end, theta_resolution=16, phi_resolution=10)
         plotter.add_mesh(marker, color="#f7dc6f", opacity=0.85, smooth_shading=True)
+
+
+def run_animation(
+    plotter: pv.Plotter,
+    render_data: dict,
+    atom_mappings: dict | None,
+    *,
+    operation_index: int | None,
+    animated_atoms: list[dict] | None,
+    frame_count: int,
+    output_path: Path | None,
+) -> None:
+    if animated_atoms is None:
+        print("Animation skipped because atoms are hidden.")
+        return
+    operation = operation_by_index(render_data["operations"], operation_index)
+    mapping = selected_mapping(atom_mappings, operation_index)
+    if operation is None or mapping is None:
+        print("Animation requires a valid --operation with atom mapping.")
+        return
+
+    frames = max(frame_count, 2)
+    paths = animation_paths(render_data, operation, mapping)
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        plotter.open_gif(str(output_path))
+        plotter.show(auto_close=False, interactive_update=True)
+        for frame in range(frames):
+            update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
+            plotter.write_frame()
+        plotter.close()
+        print(f"Wrote {output_path}")
+        return
+
+    plotter.show(auto_close=False, interactive_update=True)
+    for frame in range(frames):
+        update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
+        plotter.update()
+    plotter.show()
+
+
+def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s: float) -> None:
+    for item in animated_atoms:
+        atom = item["atom"]
+        path = paths.get(atom["index"])
+        center = np.asarray(atom["cart"], dtype=float) if path is None else evaluate_path(path, s)
+        item["mesh"].points = item["base_points"] + center
+
+
+def animation_paths(render_data: dict, operation: dict, mapping: dict) -> dict[int, dict]:
+    atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
+    axes = filter_by_operation(render_data["axes"], operation["index"])
+    planes = filter_by_operation(render_data["planes"], operation["index"])
+    centers = filter_by_operation(render_data["centers"], operation["index"])
+    axis = axes[0] if axes else None
+    plane = planes[0] if planes else None
+    center = centers[0] if centers else None
+
+    paths = {}
+    for entry in mapping["entries"]:
+        atom = atoms_by_index.get(entry["source_atom"])
+        if atom is None:
+            continue
+        start = np.asarray(atom["cart"], dtype=float)
+        target = np.asarray(entry["transformed_cart"], dtype=float)
+        paths[entry["source_atom"]] = build_operation_path(
+            start,
+            target,
+            operation,
+            axis=axis,
+            plane=plane,
+            center=center,
+        )
+    return paths
+
+
+def build_operation_path(
+    start: np.ndarray,
+    target: np.ndarray,
+    operation: dict,
+    *,
+    axis: dict | None,
+    plane: dict | None,
+    center: dict | None,
+) -> dict:
+    kind = str(operation["kind"])
+    if np.linalg.norm(target - start) < 1e-10:
+        return translation_path(start, target)
+    if kind.startswith("screw"):
+        return screw_path(start, target, operation, axis)
+    if "glide" in kind:
+        return glide_path(start, target, plane)
+    if "rotoinversion" in kind or "rotoreflection" in kind or "improper" in kind:
+        return improper_path(start, target, operation, axis, plane, center)
+    if kind.startswith("rotation"):
+        return rotation_path(start, target, operation, axis)
+    if kind == "mirror":
+        return mirror_path(start, target, plane)
+    if kind == "inversion":
+        return inversion_path(start, target, center)
+    return translation_path(start, target)
+
+
+def rotation_path(start: np.ndarray, target: np.ndarray, operation: dict, axis: dict | None) -> dict:
+    if axis is None or operation.get("angle_deg") is None:
+        return translation_path(start, target)
+    axis_point = np.asarray(axis["point_cart"], dtype=float)
+    axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
+    angle = signed_angle_to_target(start, target, axis_point, axis_direction, operation["angle_deg"])
+    rotated = rotate_about_axis(start, axis_point, axis_direction, angle)
+    return {
+        "type": "rotation",
+        "start": start,
+        "target": target,
+        "axis_point": axis_point,
+        "axis_direction": axis_direction,
+        "angle": angle,
+        "residual": target - rotated,
+    }
+
+
+def screw_path(start: np.ndarray, target: np.ndarray, operation: dict, axis: dict | None) -> dict:
+    rotated_path = rotation_path(start, target, operation, axis)
+    if rotated_path["type"] != "rotation":
+        return translation_path(start, target)
+    rotated_end = rotate_about_axis(
+        start,
+        rotated_path["axis_point"],
+        rotated_path["axis_direction"],
+        rotated_path["angle"],
+    )
+    return {
+        "type": "sequential",
+        "segments": (
+            {**rotated_path, "target": rotated_end, "residual": np.zeros(3)},
+            translation_path(rotated_end, target),
+        ),
+    }
+
+
+def mirror_path(start: np.ndarray, target: np.ndarray, plane: dict | None) -> dict:
+    if plane is None:
+        return translation_path(start, target)
+    point = np.asarray(plane["point_cart"], dtype=float)
+    normal = normalize(np.asarray(plane["normal_cart"], dtype=float))
+    mirrored = reflect_point(start, point, normal)
+    return {
+        "type": "mirror",
+        "start": start,
+        "target": target,
+        "plane_point": point,
+        "plane_normal": normal,
+        "residual": target - mirrored,
+    }
+
+
+def glide_path(start: np.ndarray, target: np.ndarray, plane: dict | None) -> dict:
+    mirrored_path = mirror_path(start, target, plane)
+    if mirrored_path["type"] != "mirror":
+        return translation_path(start, target)
+    mirrored_end = reflect_point(start, mirrored_path["plane_point"], mirrored_path["plane_normal"])
+    return {
+        "type": "sequential",
+        "segments": (
+            {**mirrored_path, "target": mirrored_end, "residual": np.zeros(3)},
+            translation_path(mirrored_end, target),
+        ),
+    }
+
+
+def inversion_path(start: np.ndarray, target: np.ndarray, center: dict | None) -> dict:
+    center_point = None if center is None else np.asarray(center["point_cart"], dtype=float)
+    if center_point is None:
+        return translation_path(start, target)
+    inverted = 2.0 * center_point - start
+    return {
+        "type": "inversion",
+        "start": start,
+        "target": target,
+        "center": center_point,
+        "residual": target - inverted,
+    }
+
+
+def improper_path(
+    start: np.ndarray,
+    target: np.ndarray,
+    operation: dict,
+    axis: dict | None,
+    plane: dict | None,
+    center: dict | None,
+) -> dict:
+    rotated = rotation_path(start, target, operation, axis)
+    if rotated["type"] != "rotation":
+        return translation_path(start, target)
+    rotated_end = rotate_about_axis(start, rotated["axis_point"], rotated["axis_direction"], rotated["angle"])
+    if "rotoinversion" in str(operation["kind"]):
+        second = inversion_path(rotated_end, target, center)
+    else:
+        second = mirror_path(rotated_end, target, plane)
+    return {
+        "type": "sequential",
+        "segments": ({**rotated, "target": rotated_end, "residual": np.zeros(3)}, second),
+    }
+
+
+def translation_path(start: np.ndarray, target: np.ndarray) -> dict:
+    return {"type": "linear", "start": start, "target": target}
+
+
+def evaluate_path(path: dict, s: float) -> np.ndarray:
+    s = float(np.clip(s, 0.0, 1.0))
+    path_type = path["type"]
+    if path_type == "sequential":
+        segments = path["segments"]
+        segment_count = len(segments)
+        index = min(int(s * segment_count), segment_count - 1)
+        local_s = (s - index / segment_count) * segment_count
+        return evaluate_path(segments[index], local_s)
+    if path_type == "rotation":
+        rotated = rotate_about_axis(
+            path["start"],
+            path["axis_point"],
+            path["axis_direction"],
+            path["angle"] * s,
+        )
+        return rotated + path["residual"] * s
+    if path_type == "mirror":
+        mirrored = reflect_point(path["start"], path["plane_point"], path["plane_normal"])
+        return interpolate(path["start"], mirrored, s) + path["residual"] * s
+    if path_type == "inversion":
+        inverted = 2.0 * path["center"] - path["start"]
+        return interpolate(path["start"], inverted, s) + path["residual"] * s
+    return interpolate(path["start"], path["target"], s)
+
+
+def interpolate(start: np.ndarray, target: np.ndarray, s: float) -> np.ndarray:
+    return (1.0 - s) * start + s * target
+
+
+def rotate_about_axis(
+    point: np.ndarray,
+    axis_point: np.ndarray,
+    axis_direction: np.ndarray,
+    angle_rad: float,
+) -> np.ndarray:
+    direction = normalize(axis_direction)
+    relative = point - axis_point
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+    rotated = (
+        relative * cos_a
+        + np.cross(direction, relative) * sin_a
+        + direction * np.dot(direction, relative) * (1.0 - cos_a)
+    )
+    return axis_point + rotated
+
+
+def signed_angle_to_target(
+    start: np.ndarray,
+    target: np.ndarray,
+    axis_point: np.ndarray,
+    axis_direction: np.ndarray,
+    angle_deg: float,
+) -> float:
+    angle = np.deg2rad(float(angle_deg))
+    plus = rotate_about_axis(start, axis_point, axis_direction, angle)
+    minus = rotate_about_axis(start, axis_point, axis_direction, -angle)
+    return angle if np.linalg.norm(target - plus) <= np.linalg.norm(target - minus) else -angle
+
+
+def reflect_point(point: np.ndarray, plane_point: np.ndarray, plane_normal: np.ndarray) -> np.ndarray:
+    normal = normalize(plane_normal)
+    return point - 2.0 * np.dot(point - plane_point, normal) * normal
 
 
 def add_title(

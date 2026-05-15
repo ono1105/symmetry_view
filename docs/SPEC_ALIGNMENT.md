@@ -44,7 +44,7 @@ These are known and intentional at this stage:
 PyVistaQt GUI is not active yet.
 Open CIF / Analyze Symmetry buttons are not implemented yet.
 Selected atoms mode is not implemented yet.
-Animation playback is not implemented yet.
+Animation playback exists in the JSON viewer, but not yet in a PyVistaQt GUI.
 Puzzle UI is not implemented yet.
 Molecular analysis is implemented even though the original final spec listed it as deferred.
 ```
@@ -60,9 +60,9 @@ crystal analysis still depends on /home/ken/work/kouzoukaiseki/symmetry_core.py
 
 Both are already documented in `docs/REVIEW_NOTES.md` and do not block animation logic, because animation uses `kind`, `order`, `angle_deg`, `operation_indices`, and `AtomMapping`.
 
-## Animation Readiness
+## Animation Status
 
-The next implementation should follow `docs/ANIMATION_DESIGN.md`:
+The JSON viewer animation follows `docs/ANIMATION_DESIGN.md`:
 
 ```text
 --animate requires --operation
@@ -71,4 +71,13 @@ mirror/inversion/glide/translation/fallback use linear interpolation
 crystal targets use transformed_cart from the nearest periodic animation image
 ```
 
-This keeps the next step aligned with Section 16 of the final specification.
+Compound operations are represented as compositions of primitive motions where possible:
+
+```text
+screw = rotation then translation
+glide = mirror then translation
+rotoinversion = rotation then inversion
+rotoreflection/improper = rotation then mirror
+```
+
+This keeps the prototype aligned with Section 16 of the final specification while preserving the current JSON-only, non-GUI architecture.
