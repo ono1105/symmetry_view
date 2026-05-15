@@ -165,6 +165,18 @@ When `matrix_cart` is present, final animation targets are computed from the ope
 
 ## Periodic Display Images
 
+Crystal data distinguishes three concepts:
+
+```text
+AsymmetricUnitAtom: atom sites written directly in the CIF
+ExpandedAtom: atoms generated from the asymmetric unit by space-group operations
+DisplayClone: lattice-translation copies used only for viewing across boundaries
+```
+
+Animation paths are computed for `ExpandedAtom` entries. This is deliberately more conservative than computing only for asymmetric-unit atoms, because non-translation space-group operations do not generally commute with the animated operation.
+
+Only `DisplayClone` entries reuse the exact same path as their source atom.
+
 For crystal viewing, the atom display should include periodic images in the fractional window:
 
 ```text

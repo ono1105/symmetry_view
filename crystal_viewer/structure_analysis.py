@@ -7,9 +7,11 @@ from types import ModuleType
 
 import numpy as np
 import spglib
-from pymatgen.core import Structure
+from pymatgen.core import Element, Structure
+from pymatgen.io.cif import CifParser
 
 from .analysis_models import (
+    AsymmetricUnitSite,
     AtomSite,
     AxisElement,
     CenterElement,
@@ -65,8 +67,16 @@ def analyze_cif(
         for index, (W, t) in enumerate(zip(rotations, translations))
     )
 
+    asymmetric_atoms = read_asymmetric_unit_sites(cif_path, np.asarray(structure.lattice.matrix, dtype=float))
+
     return StructureAnalysisResult(
-        structure=convert_structure(cif_path, structure),
+        structure=convert_structure(
+            cif_path,
+            structure,
+            asymmetric_atoms=asymmetric_atoms,
+            rotations=rotations,
+            translations=translations,
+        ),
         space_group=convert_space_group(dataset),
         operations=operations,
         axes=tuple(convert_axis(axis) for axis in merged["axes"]),
@@ -96,9 +106,23 @@ def load_legacy_core(path: str | Path) -> ModuleType:
     return module
 
 
-def convert_structure(cif_path: Path, structure: Structure) -> StructureSummary:
+def convert_structure(
+    cif_path: Path,
+    structure: Structure,
+    *,
+    asymmetric_atoms: tuple[AsymmetricUnitSite, ...] = (),
+    rotations: np.ndarray | None = None,
+    translations: np.ndarray | None = None,
+) -> StructureSummary:
     atoms = []
     for index, site in enumerate(structure):
+        asymmetric_index, generation_operation_index = identify_asymmetric_source(
+            np.asarray(site.frac_coords, dtype=float),
+            site.specie.symbol,
+            asymmetric_atoms,
+            rotations,
+            translations,
+        )
         atoms.append(
             AtomSite(
                 index=index,
@@ -106,6 +130,8 @@ def convert_structure(cif_path: Path, structure: Structure) -> StructureSummary:
                 atomic_number=int(site.specie.Z),
                 frac=np.asarray(site.frac_coords, dtype=float),
                 cart=np.asarray(site.coords, dtype=float),
+                asymmetric_index=asymmetric_index,
+                generation_operation_index=generation_operation_index,
             )
         )
 
@@ -115,7 +141,90 @@ def convert_structure(cif_path: Path, structure: Structure) -> StructureSummary:
         site_count=len(structure),
         lattice=np.asarray(structure.lattice.matrix, dtype=float),
         atoms=tuple(atoms),
+        asymmetric_atoms=asymmetric_atoms,
     )
+
+
+def read_asymmetric_unit_sites(cif_path: Path, lattice: np.ndarray) -> tuple[AsymmetricUnitSite, ...]:
+    parser = CifParser(str(cif_path))
+    cif_dict = parser.as_dict()
+    if not cif_dict:
+        return ()
+    block = next(iter(cif_dict.values()))
+    labels = block.get("_atom_site_label", [])
+    symbols = block.get("_atom_site_type_symbol", [])
+    xs = block.get("_atom_site_fract_x", [])
+    ys = block.get("_atom_site_fract_y", [])
+    zs = block.get("_atom_site_fract_z", [])
+    count = min(len(labels), len(symbols), len(xs), len(ys), len(zs))
+    sites = []
+    for index in range(count):
+        element = str(symbols[index])
+        frac = np.asarray(
+            [
+                parse_cif_float(xs[index]),
+                parse_cif_float(ys[index]),
+                parse_cif_float(zs[index]),
+            ],
+            dtype=float,
+        )
+        sites.append(
+            AsymmetricUnitSite(
+                index=index,
+                label=str(labels[index]),
+                element=element,
+                atomic_number=int(Element(element).Z),
+                frac=frac,
+                cart=frac @ lattice,
+            )
+        )
+    return tuple(sites)
+
+
+def parse_cif_float(value) -> float:
+    text = str(value).strip()
+    if "(" in text:
+        text = text.split("(", 1)[0]
+    return float(text)
+
+
+def identify_asymmetric_source(
+    frac: np.ndarray,
+    element: str,
+    asymmetric_atoms: tuple[AsymmetricUnitSite, ...],
+    rotations: np.ndarray | None,
+    translations: np.ndarray | None,
+) -> tuple[int | None, int | None]:
+    if not asymmetric_atoms or rotations is None or translations is None:
+        return None, None
+
+    best_distance = float("inf")
+    best_asymmetric_index = None
+    best_operation_index = None
+    for asymmetric_atom in asymmetric_atoms:
+        if asymmetric_atom.element != element:
+            continue
+        source_frac = np.asarray(asymmetric_atom.frac, dtype=float)
+        for operation_index, (rotation, translation) in enumerate(zip(rotations, translations)):
+            generated = wrap_frac(rotation @ source_frac + translation)
+            delta = generated - frac
+            delta = delta - np.round(delta)
+            distance = float(np.linalg.norm(delta))
+            if distance < best_distance:
+                best_distance = distance
+                best_asymmetric_index = asymmetric_atom.index
+                best_operation_index = operation_index
+
+    if best_distance > 1e-5:
+        return None, None
+    return best_asymmetric_index, best_operation_index
+
+
+def wrap_frac(frac: np.ndarray) -> np.ndarray:
+    wrapped = np.mod(np.asarray(frac, dtype=float), 1.0)
+    wrapped[np.abs(wrapped) < 1e-12] = 0.0
+    wrapped[np.abs(wrapped - 1.0) < 1e-12] = 0.0
+    return wrapped
 
 
 def convert_space_group(dataset) -> SpaceGroupInfo:

@@ -824,3 +824,29 @@ animation paths for op25: 56
 
 この方法なら境界上の等価点が見えるため、原点だけが孤立して固定されているように見える問題を軽減できる。
 一方、非並進の対称操作で等価な別原子に同じ path を流用するのは、軸・面からの距離が異なるため一般には正しくない。今回共有しているのは lattice translation による表示クローンのみ。
+
+### 非対称単位と展開原子の対応
+
+ユーザーの指摘通り、Jacobsite の CIF には Mn/Fe/O が1つずつしか書かれておらず、残りの原子は空間群操作から生成される。
+
+対応:
+
+- `AsymmetricUnitSite` を追加し、CIF に直接書かれた atom_site を保持する。
+- `AtomSite.asymmetric_index` と `AtomSite.generation_operation_index` を追加し、展開原子がどの CIF 代表原子・どの空間群操作から生成されたか記録する。
+- `RenderData.asymmetric_atoms` と JSON schema v4 に反映する。
+
+Jacobsite の確認結果:
+
+```text
+asymmetric atoms: 3  (Mn1, Fe1, O1)
+expanded atoms: 56
+Mn from Mn1: 8
+Fe from Fe1: 16
+O from O1: 32
+```
+
+設計判断:
+
+- アニメーション path は今のところ expanded atom 56個ぶん計算する。
+- CIF 代表原子3個だけの path を全 expanded atom に流用するのは、非並進対称操作が一般に可換ではないため危険。
+- ただし、将来の代表原子モード・orbit 選択・パズル化では、この asymmetric/expanded 対応を使える。

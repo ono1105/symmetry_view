@@ -11,7 +11,7 @@ from .atom_mapping import AtomMappingSet
 from .render_data import RenderData
 
 
-EXPORT_SCHEMA_VERSION = 3
+EXPORT_SCHEMA_VERSION = 4
 
 
 def export_payload(
@@ -47,6 +47,7 @@ def render_data_to_dict(data: RenderData) -> dict[str, Any]:
     return {
         "metadata": to_jsonable(data.metadata),
         "atoms": [to_jsonable(atom) for atom in data.atoms],
+        "asymmetric_atoms": [to_jsonable(atom) for atom in data.asymmetric_atoms],
         "operations": [to_jsonable(operation) for operation in data.operations],
         "axes": [to_jsonable(axis) for axis in data.axes],
         "planes": [to_jsonable(plane) for plane in data.planes],

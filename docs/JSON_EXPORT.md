@@ -35,7 +35,7 @@ Stdout export is also supported:
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "source_kind": "crystal",
   "render_data": {},
   "atom_mappings": {}
@@ -51,6 +51,7 @@ It contains:
 ```text
 metadata
 atoms
+asymmetric_atoms
 operations
 axes
 planes
@@ -61,6 +62,15 @@ bounds_max
 ```
 
 All geometry in `render_data` is Cartesian. For crystals, fractional geometry is converted before export.
+
+For crystal exports, `asymmetric_atoms` stores the atom sites written directly in the CIF asymmetric unit. `atoms` stores the expanded structure used for display, mapping, and animation. Each expanded atom has:
+
+```text
+asymmetric_index
+generation_operation_index
+```
+
+This records which CIF atom site and which space-group operation generated the expanded atom.
 
 Each render operation contains:
 

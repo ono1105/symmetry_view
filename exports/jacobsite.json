@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -23,7 +23,9 @@
           0.0,
           0.0,
           0.0
-        ]
+        ],
+        "asymmetric_index": 0,
+        "generation_operation_index": 0
       },
       {
         "index": 1,
@@ -38,7 +40,9 @@
           0.0,
           0.5,
           0.5
-        ]
+        ],
+        "asymmetric_index": 0,
+        "generation_operation_index": 2
       },
       {
         "index": 2,
@@ -53,7 +57,9 @@
           0.5,
           0.0,
           0.5
-        ]
+        ],
+        "asymmetric_index": 0,
+        "generation_operation_index": 10
       },
       {
         "index": 3,
@@ -68,7 +74,9 @@
           0.5,
           0.5,
           0.0
-        ]
+        ],
+        "asymmetric_index": 0,
+        "generation_operation_index": 48
       },
       {
         "index": 4,
@@ -83,7 +91,9 @@
           0.75,
           0.25,
           0.75
-        ]
+        ],
+        "asymmetric_index": 0,
+        "generation_operation_index": 53
       },
       {
         "index": 5,
@@ -98,7 +108,9 @@
           0.75,
           0.75,
           0.25
-        ]
+        ],
+        "asymmetric_index": 0,
+        "generation_operation_index": 147
       },
       {
         "index": 6,
@@ -113,7 +125,9 @@
           0.25,
           0.25,
           0.25
-        ]
+        ],
+        "asymmetric_index": 0,
+        "generation_operation_index": 99
       },
       {
         "index": 7,
@@ -128,7 +142,9 @@
           0.25,
           0.75,
           0.75
-        ]
+        ],
+        "asymmetric_index": 0,
+        "generation_operation_index": 51
       },
       {
         "index": 8,
@@ -143,7 +159,9 @@
           0.625,
           0.625,
           0.625
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 0
       },
       {
         "index": 9,
@@ -158,7 +176,9 @@
           0.625,
           0.125,
           0.125
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 29
       },
       {
         "index": 10,
@@ -173,7 +193,9 @@
           0.125,
           0.625,
           0.125
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 37
       },
       {
         "index": 11,
@@ -188,7 +210,9 @@
           0.125,
           0.125,
           0.625
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 48
       },
       {
         "index": 12,
@@ -203,7 +227,9 @@
           0.375,
           0.875,
           0.125
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 2
       },
       {
         "index": 13,
@@ -218,7 +244,9 @@
           0.375,
           0.375,
           0.625
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 20
       },
       {
         "index": 14,
@@ -233,7 +261,9 @@
           0.875,
           0.875,
           0.625
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 68
       },
       {
         "index": 15,
@@ -248,7 +278,9 @@
           0.875,
           0.375,
           0.125
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 14
       },
       {
         "index": 16,
@@ -263,7 +295,9 @@
           0.875,
           0.125,
           0.375
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 51
       },
       {
         "index": 17,
@@ -278,7 +312,9 @@
           0.875,
           0.625,
           0.875
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 27
       },
       {
         "index": 18,
@@ -293,7 +329,9 @@
           0.375,
           0.125,
           0.875
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 6
       },
       {
         "index": 19,
@@ -308,7 +346,9 @@
           0.375,
           0.625,
           0.375
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 3
       },
       {
         "index": 20,
@@ -323,7 +363,9 @@
           0.125,
           0.375,
           0.875
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 10
       },
       {
         "index": 21,
@@ -338,7 +380,9 @@
           0.125,
           0.875,
           0.375
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 52
       },
       {
         "index": 22,
@@ -353,7 +397,9 @@
           0.625,
           0.375,
           0.375
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 4
       },
       {
         "index": 23,
@@ -368,7 +414,9 @@
           0.625,
           0.875,
           0.875
-        ]
+        ],
+        "asymmetric_index": 1,
+        "generation_operation_index": 39
       },
       {
         "index": 24,
@@ -383,7 +431,9 @@
           0.375,
           0.375,
           0.375
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 0
       },
       {
         "index": 25,
@@ -398,7 +448,9 @@
           0.375,
           0.875,
           0.875
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 85
       },
       {
         "index": 26,
@@ -413,7 +465,9 @@
           0.875,
           0.375,
           0.875
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 37
       },
       {
         "index": 27,
@@ -428,7 +482,9 @@
           0.875,
           0.875,
           0.375
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 48
       },
       {
         "index": 28,
@@ -443,7 +499,9 @@
           0.625,
           0.125,
           0.875
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 2
       },
       {
         "index": 29,
@@ -458,7 +516,9 @@
           0.625,
           0.625,
           0.375
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 20
       },
       {
         "index": 30,
@@ -473,7 +533,9 @@
           0.125,
           0.125,
           0.375
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 68
       },
       {
         "index": 31,
@@ -488,7 +550,9 @@
           0.125,
           0.625,
           0.875
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 14
       },
       {
         "index": 32,
@@ -503,7 +567,9 @@
           0.125,
           0.875,
           0.625
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 60
       },
       {
         "index": 33,
@@ -518,7 +584,9 @@
           0.125,
           0.375,
           0.125
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 27
       },
       {
         "index": 34,
@@ -533,7 +601,9 @@
           0.625,
           0.875,
           0.125
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 6
       },
       {
         "index": 35,
@@ -548,7 +618,9 @@
           0.625,
           0.375,
           0.625
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 12
       },
       {
         "index": 36,
@@ -563,7 +635,9 @@
           0.875,
           0.625,
           0.125
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 10
       },
       {
         "index": 37,
@@ -578,7 +652,9 @@
           0.875,
           0.125,
           0.625
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 52
       },
       {
         "index": 38,
@@ -593,7 +669,9 @@
           0.375,
           0.625,
           0.625
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 4
       },
       {
         "index": 39,
@@ -608,7 +686,9 @@
           0.375,
           0.125,
           0.125
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 58
       },
       {
         "index": 40,
@@ -623,7 +703,9 @@
           0.125,
           0.625,
           0.375
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 38
       },
       {
         "index": 41,
@@ -638,7 +720,9 @@
           0.125,
           0.125,
           0.875
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 65
       },
       {
         "index": 42,
@@ -653,7 +737,9 @@
           0.625,
           0.625,
           0.875
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 134
       },
       {
         "index": 43,
@@ -668,7 +754,9 @@
           0.625,
           0.125,
           0.375
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 86
       },
       {
         "index": 44,
@@ -683,7 +771,9 @@
           0.875,
           0.875,
           0.875
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 109
       },
       {
         "index": 45,
@@ -698,7 +788,9 @@
           0.875,
           0.375,
           0.375
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 61
       },
       {
         "index": 46,
@@ -713,7 +805,9 @@
           0.375,
           0.875,
           0.375
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 13
       },
       {
         "index": 47,
@@ -728,7 +822,9 @@
           0.375,
           0.375,
           0.875
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 72
       },
       {
         "index": 48,
@@ -743,7 +839,9 @@
           0.625,
           0.375,
           0.125
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 51
       },
       {
         "index": 49,
@@ -758,7 +856,9 @@
           0.625,
           0.875,
           0.625
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 99
       },
       {
         "index": 50,
@@ -773,7 +873,9 @@
           0.125,
           0.375,
           0.625
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 57
       },
       {
         "index": 51,
@@ -788,7 +890,9 @@
           0.125,
           0.875,
           0.125
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 3
       },
       {
         "index": 52,
@@ -803,7 +907,9 @@
           0.375,
           0.125,
           0.625
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 49
       },
       {
         "index": 53,
@@ -818,7 +924,9 @@
           0.375,
           0.625,
           0.125
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 34
       },
       {
         "index": 54,
@@ -833,7 +941,9 @@
           0.875,
           0.125,
           0.125
-        ]
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 82
       },
       {
         "index": 55,
@@ -848,6 +958,58 @@
           0.875,
           0.625,
           0.625
+        ],
+        "asymmetric_index": 2,
+        "generation_operation_index": 130
+      }
+    ],
+    "asymmetric_atoms": [
+      {
+        "index": 0,
+        "label": "Mn1",
+        "element": "Mn",
+        "atomic_number": 25,
+        "cart": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "frac": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "index": 1,
+        "label": "Fe1",
+        "element": "Fe",
+        "atomic_number": 26,
+        "cart": [
+          5.321875000000001,
+          5.321875,
+          5.321875000000001
+        ],
+        "frac": [
+          0.625,
+          0.625,
+          0.625
+        ]
+      },
+      {
+        "index": 2,
+        "label": "O1",
+        "element": "O",
+        "atomic_number": 8,
+        "cart": [
+          3.1931250000000007,
+          3.193125,
+          3.1931250000000007
+        ],
+        "frac": [
+          0.375,
+          0.375,
+          0.375
         ]
       }
     ],

@@ -64,6 +64,8 @@ Render a screenshot and exit:
 
 For crystal JSON, the viewer shows periodic display images in a half-cell expanded fractional window `[-0.5, 1.5]`. These images are display clones only; animation paths are still computed once per source atom and copied with a constant lattice shift.
 
+Crystal JSON also stores `asymmetric_atoms`, the atom sites written directly in the CIF, and records `asymmetric_index` / `generation_operation_index` on each expanded atom. Jacobsite therefore keeps the CIF representatives Mn1/Fe1/O1 separately from the 56 expanded atoms.
+
 ## Jacobsite Check Notes
 
 `Jacobsite.cif` is a broader crystal symmetry sample:

@@ -7,6 +7,7 @@ from typing import Literal
 import numpy as np
 
 from .analysis_models import (
+    AsymmetricUnitSite,
     AtomSite,
     MoleculeAnalysisResult,
     MolecularAxisElement,
@@ -26,6 +27,18 @@ class RenderAtomData:
     atomic_number: int
     cart: np.ndarray
     frac: np.ndarray | None = None
+    asymmetric_index: int | None = None
+    generation_operation_index: int | None = None
+
+
+@dataclass(frozen=True)
+class RenderAsymmetricAtomData:
+    index: int
+    label: str
+    element: str
+    atomic_number: int
+    cart: np.ndarray
+    frac: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -87,6 +100,7 @@ class RenderMetadata:
 class RenderData:
     metadata: RenderMetadata
     atoms: tuple[RenderAtomData, ...]
+    asymmetric_atoms: tuple[RenderAsymmetricAtomData, ...]
     operations: tuple[RenderOperationData, ...]
     axes: tuple[RenderAxisData, ...]
     planes: tuple[RenderPlaneData, ...]
@@ -107,6 +121,7 @@ def render_data_from_analysis(result: StructureAnalysisResult | MoleculeAnalysis
 def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
     lattice = np.asarray(result.structure.lattice, dtype=float)
     atoms = tuple(render_atom_from_site(atom) for atom in result.structure.atoms)
+    asymmetric_atoms = tuple(render_asymmetric_atom(site) for site in result.structure.asymmetric_atoms)
     unit_cell = unit_cell_from_lattice(lattice)
     operations = tuple(
         RenderOperationData(
@@ -174,6 +189,7 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
             operation_count=result.space_group.operation_count,
         ),
         atoms=atoms,
+        asymmetric_atoms=asymmetric_atoms,
         operations=operations,
         axes=axes,
         planes=tuple(planes),
@@ -219,6 +235,7 @@ def render_data_from_molecule(result: MoleculeAnalysisResult) -> RenderData:
             operation_count=result.point_group.operation_count,
         ),
         atoms=atoms,
+        asymmetric_atoms=(),
         operations=operations,
         axes=axes,
         planes=planes,
@@ -236,6 +253,19 @@ def render_atom_from_site(atom: AtomSite) -> RenderAtomData:
         atomic_number=atom.atomic_number,
         frac=None if atom.frac is None else np.asarray(atom.frac, dtype=float),
         cart=np.asarray(atom.cart, dtype=float),
+        asymmetric_index=atom.asymmetric_index,
+        generation_operation_index=atom.generation_operation_index,
+    )
+
+
+def render_asymmetric_atom(site: AsymmetricUnitSite) -> RenderAsymmetricAtomData:
+    return RenderAsymmetricAtomData(
+        index=site.index,
+        label=site.label,
+        element=site.element,
+        atomic_number=site.atomic_number,
+        frac=np.asarray(site.frac, dtype=float),
+        cart=np.asarray(site.cart, dtype=float),
     )
 
 

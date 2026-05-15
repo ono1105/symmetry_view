@@ -13,6 +13,18 @@ class AtomSite:
     atomic_number: int
     frac: np.ndarray | None
     cart: np.ndarray
+    asymmetric_index: int | None = None
+    generation_operation_index: int | None = None
+
+
+@dataclass(frozen=True)
+class AsymmetricUnitSite:
+    index: int
+    label: str
+    element: str
+    atomic_number: int
+    frac: np.ndarray
+    cart: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -22,6 +34,7 @@ class StructureSummary:
     site_count: int
     lattice: np.ndarray
     atoms: tuple[AtomSite, ...]
+    asymmetric_atoms: tuple[AsymmetricUnitSite, ...] = ()
 
 
 @dataclass(frozen=True)

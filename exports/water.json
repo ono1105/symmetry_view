@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "source_kind": "molecule",
   "render_data": {
     "metadata": {
@@ -19,7 +19,9 @@
           0.0,
           0.0
         ],
-        "frac": null
+        "frac": null,
+        "asymmetric_index": null,
+        "generation_operation_index": null
       },
       {
         "index": 1,
@@ -30,7 +32,9 @@
           0.0,
           0.0
         ],
-        "frac": null
+        "frac": null,
+        "asymmetric_index": null,
+        "generation_operation_index": null
       },
       {
         "index": 2,
@@ -41,9 +45,12 @@
           0.927297,
           0.0
         ],
-        "frac": null
+        "frac": null,
+        "asymmetric_index": null,
+        "generation_operation_index": null
       }
     ],
+    "asymmetric_atoms": [],
     "operations": [
       {
         "index": 0,
