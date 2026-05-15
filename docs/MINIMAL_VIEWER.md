@@ -62,6 +62,8 @@ Render a screenshot and exit:
 
 `--animation-scope representative` animates one representative atom only. `--animation-scope all` animates every atom, but the crystal periodic image is chosen once from the representative atom and then applied to all atoms as the same integer lattice shift. Use `--representative-atom N` when a specific atom should define that shared movement.
 
+For crystal JSON, the viewer shows periodic display images in a half-cell expanded fractional window `[-0.5, 1.5]`. These images are display clones only; animation paths are still computed once per source atom and copied with a constant lattice shift.
+
 ## Jacobsite Check Notes
 
 `Jacobsite.cif` is a broader crystal symmetry sample:

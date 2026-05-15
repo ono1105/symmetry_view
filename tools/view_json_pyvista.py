@@ -151,8 +151,9 @@ def main() -> int:
 
 def add_atoms(plotter: pv.Plotter, render_data: dict) -> None:
     bounds_span = scene_span(render_data)
-    for atom in render_data["atoms"]:
-        center = np.asarray(atom["cart"], dtype=float)
+    for item in display_atom_instances(render_data):
+        atom = item["atom"]
+        center = item["cart"]
         radius = atom_radius(atom["atomic_number"], bounds_span)
         color = ELEMENT_COLORS.get(atom["element"], "#9aa5b1")
         sphere = pv.Sphere(
@@ -167,8 +168,9 @@ def add_atoms(plotter: pv.Plotter, render_data: dict) -> None:
 def add_animated_atoms(plotter: pv.Plotter, render_data: dict) -> list[dict]:
     animated = []
     bounds_span = scene_span(render_data)
-    for atom in render_data["atoms"]:
-        center = np.asarray(atom["cart"], dtype=float)
+    for item in display_atom_instances(render_data):
+        atom = item["atom"]
+        center = item["cart"]
         radius = atom_radius(atom["atomic_number"], bounds_span)
         color = ELEMENT_COLORS.get(atom["element"], "#9aa5b1")
         base = pv.Sphere(
@@ -180,8 +182,63 @@ def add_animated_atoms(plotter: pv.Plotter, render_data: dict) -> list[dict]:
         mesh = base.copy()
         mesh.points = base.points + center
         plotter.add_mesh(mesh, color=color, smooth_shading=True)
-        animated.append({"atom": atom, "base_points": base.points.copy(), "mesh": mesh})
+        animated.append(
+            {
+                "atom": atom,
+                "display_shift_cart": item["display_shift_cart"],
+                "base_points": base.points.copy(),
+                "mesh": mesh,
+            }
+        )
     return animated
+
+
+def display_atom_instances(render_data: dict) -> list[dict]:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return [
+            {
+                "atom": atom,
+                "cart": np.asarray(atom["cart"], dtype=float),
+                "display_shift_cart": np.zeros(3),
+            }
+            for atom in render_data["atoms"]
+        ]
+
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    instances = []
+    for atom in render_data["atoms"]:
+        frac = atom.get("frac")
+        if frac is None:
+            instances.append(
+                {
+                    "atom": atom,
+                    "cart": np.asarray(atom["cart"], dtype=float),
+                    "display_shift_cart": np.zeros(3),
+                }
+            )
+            continue
+
+        frac = np.asarray(frac, dtype=float)
+        for shift in display_fractional_shifts(frac):
+            shift_cart = shift @ lattice
+            instances.append(
+                {
+                    "atom": atom,
+                    "cart": np.asarray(atom["cart"], dtype=float) + shift_cart,
+                    "display_shift_cart": shift_cart,
+                }
+            )
+    return instances
+
+
+def display_fractional_shifts(frac: np.ndarray) -> list[np.ndarray]:
+    shifts = []
+    for shift in _PERIODIC_SHIFTS:
+        image_frac = frac + shift
+        if np.all(image_frac >= -0.5 - 1e-9) and np.all(image_frac <= 1.5 + 1e-9):
+            shifts.append(shift)
+    return shifts
 
 
 def add_unit_cell(plotter: pv.Plotter, unit_cell: dict) -> None:
@@ -337,6 +394,7 @@ def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s:
         atom = item["atom"]
         path = paths.get(atom["index"])
         center = np.asarray(atom["cart"], dtype=float) if path is None else evaluate_path(path, s)
+        center = center + item["display_shift_cart"]
         item["mesh"].points = item["base_points"] + center
 
 

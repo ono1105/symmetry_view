@@ -163,6 +163,24 @@ This keeps the all-atom animation visually tied to one symmetry operation instea
 
 When `matrix_cart` is present, final animation targets are computed from the operation affine transform plus the shared crystal lattice shift. Atom mappings are still used to choose the representative atom and validate correspondence, but they are no longer the only source of motion geometry.
 
+## Periodic Display Images
+
+For crystal viewing, the atom display should include periodic images in the fractional window:
+
+```text
+[-0.5, 1.5] along a, b, and c
+```
+
+This is a display-only expansion. It prevents atoms on cell boundaries from looking isolated or uniquely fixed when their equivalent periodic images are just outside the drawn unit cell.
+
+Animation paths are still computed once per source atom. Each periodic display image reuses the source atom path plus a constant lattice shift:
+
+```text
+display_pos_i(s) = source_path_i(s) + lattice_shift
+```
+
+Do not duplicate AtomMapping or operation-path calculations for these display images.
+
 ## Frame Calculation
 
 For each frame parameter `s` in `[0, 1]`:

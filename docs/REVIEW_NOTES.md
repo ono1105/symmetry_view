@@ -801,3 +801,26 @@ op 106 rotation_3  element_index=0  max_residual ~14.75 Å
 - axis/center/plane の候補表示時点で、現在の operation affine と整合しない要素を除外または警告する必要がある。
 - 特に rotation_3 系は、`--list-elements` に出る候補のうち一部だけが実際の操作と整合する。
 - したがって次の改善は「operation matrix に対する symmetry element compatibility check」を viewer 側または RenderData 生成側に入れること。
+
+---
+
+## 周期境界表示の改善（2026-05-15）
+
+ユーザー確認で、原点や周期境界上の原子だけが固定されて見える違和感の一因として、単位格子外の等価な周期像が表示されていないことが分かった。
+
+対応:
+
+- 結晶では表示用原子を fractional window `[-0.5, 1.5]` に拡張した。
+- これは表示だけの拡張で、AtomMapping や animation path は元の source atom ごとに1回だけ計算する。
+- 周期像として複製された表示原子は、元原子の path に一定の lattice shift を足して同じ動きをする。
+
+確認:
+
+```text
+Jacobsite source atoms: 56
+display instances: 478
+animation paths for op25: 56
+```
+
+この方法なら境界上の等価点が見えるため、原点だけが孤立して固定されているように見える問題を軽減できる。
+一方、非並進の対称操作で等価な別原子に同じ path を流用するのは、軸・面からの距離が異なるため一般には正しくない。今回共有しているのは lattice translation による表示クローンのみ。
