@@ -48,6 +48,8 @@ Add these options to `tools/view_json_pyvista.py`:
 --animation-frames N
 --animation-fps FPS
 --animation-output PATH
+--animation-scope all|representative
+--representative-atom INDEX
 --list-elements
 --element-index N
 ```
@@ -57,11 +59,13 @@ Required usage:
 ```bash
 .venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/f2_pd_op1_axis0.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/checks/f2_pd_op1_rep.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/checks/f2_pd_op1_all.gif
 ```
 
 `--animate` requires `--operation`, because atom targets are operation-specific.
 `--element-index` selects one matching axis/plane/center for the operation. During animation, only that selected element is displayed and used for the motion path. This matters when one operation has multiple equivalent screw axes.
+`--animation-scope representative` animates only the representative source atom. `--animation-scope all` animates all atoms, using the representative atom to choose one periodic image shift for the whole operation.
 
 ## Interpolation Policy
 
@@ -144,6 +148,15 @@ That keeps the motion readable as a composition of basic operations and keeps th
 
 For crystals, the final animation target may be an equivalent periodic image rather than `transformed_cart` if that image better matches the selected screw axis. The atom mapping remains the same; only the displayed path image changes.
 
+The periodic image must be chosen per operation, not independently per atom. The viewer first chooses a representative atom target that is consistent with the selected axis/plane/center, converts that choice to one integer lattice shift, and applies the same shift to every atom:
+
+```text
+representative target = W*x_ref + t + shared_integer_shift
+all atom targets      = W*x_i   + t + shared_integer_shift
+```
+
+This keeps the all-atom animation visually tied to one symmetry operation instead of mixing equivalent periodic images atom by atom.
+
 ## Frame Calculation
 
 For each frame parameter `s` in `[0, 1]`:
@@ -185,7 +198,6 @@ F2 Pd operation 1:
 
 ```text
 GUI controls
-selected-atom-only animation
 wrapping final crystal positions back into the unit cell
 high-quality operation labels for screw axes
 puzzle interactions

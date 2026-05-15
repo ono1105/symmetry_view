@@ -50,6 +50,18 @@ def main() -> int:
     parser.add_argument("--animation-fps", type=float, default=10.0, help="Animation frames per second.")
     parser.add_argument("--animation-output", type=Path, default=None, help="Write animation to a GIF file.")
     parser.add_argument(
+        "--animation-scope",
+        choices=("all", "representative"),
+        default="all",
+        help="Animate all atoms with one shared periodic image choice, or only one representative atom.",
+    )
+    parser.add_argument(
+        "--representative-atom",
+        type=int,
+        default=None,
+        help="Source atom index used to choose the shared animation target image.",
+    )
+    parser.add_argument(
         "--element-index",
         type=int,
         default=None,
@@ -124,6 +136,8 @@ def main() -> int:
             fps=args.animation_fps,
             output_path=args.animation_output,
             element_index=args.element_index,
+            animation_scope=args.animation_scope,
+            representative_atom=args.representative_atom,
         )
     elif args.screenshot is not None:
         args.screenshot.parent.mkdir(parents=True, exist_ok=True)
@@ -268,6 +282,8 @@ def run_animation(
     fps: float,
     output_path: Path | None,
     element_index: int | None,
+    animation_scope: str,
+    representative_atom: int | None,
 ) -> None:
     if animated_atoms is None:
         print("Animation skipped because atoms are hidden.")
@@ -279,7 +295,17 @@ def run_animation(
         return
 
     frames = max(frame_count, 2)
-    paths = animation_paths(render_data, operation, mapping, element_index=element_index)
+    paths = animation_paths(
+        render_data,
+        operation,
+        mapping,
+        element_index=element_index,
+        animation_scope=animation_scope,
+        representative_atom=representative_atom,
+    )
+    if not paths:
+        print("Animation skipped because no atom path could be built. Check --representative-atom.")
+        return
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -315,6 +341,8 @@ def animation_paths(
     mapping: dict,
     *,
     element_index: int | None = None,
+    animation_scope: str = "all",
+    representative_atom: int | None = None,
 ) -> dict[int, dict]:
     atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
     axes = selected_elements(render_data["axes"], operation["index"], element_index)
@@ -323,14 +351,38 @@ def animation_paths(
     axis = axes[0] if axes else None
     plane = planes[0] if planes else None
     center = centers[0] if centers else None
+    reference_entry = representative_mapping_entry(
+        render_data,
+        operation,
+        mapping,
+        atoms_by_index,
+        axis,
+        plane,
+        center,
+        representative_atom,
+    )
+    shared_shift = shared_periodic_shift(render_data, reference_entry, operation, axis, plane, center)
 
     paths = {}
-    for entry in mapping["entries"]:
+    entries = mapping["entries"]
+    if animation_scope == "representative":
+        entries = [reference_entry] if reference_entry is not None else []
+
+    for entry in entries:
         atom = atoms_by_index.get(entry["source_atom"])
         if atom is None:
             continue
         start = np.asarray(atom["cart"], dtype=float)
-        target = animation_target(render_data, start, entry, operation, axis, plane, center)
+        target = animation_target(
+            render_data,
+            start,
+            entry,
+            operation,
+            axis,
+            plane,
+            center,
+            shared_shift=shared_shift,
+        )
         paths[entry["source_atom"]] = build_operation_path(
             start,
             target,
@@ -342,6 +394,58 @@ def animation_paths(
     return paths
 
 
+def representative_mapping_entry(
+    render_data: dict,
+    operation: dict,
+    mapping: dict,
+    atoms_by_index: dict[int, dict],
+    axis: dict | None,
+    plane: dict | None,
+    center: dict | None,
+    representative_atom: int | None,
+) -> dict | None:
+    entries = list(mapping["entries"])
+    if representative_atom is not None:
+        return next((entry for entry in entries if entry["source_atom"] == representative_atom), None)
+
+    for entry in entries:
+        atom = atoms_by_index.get(entry["source_atom"])
+        if atom is None:
+            continue
+        start = np.asarray(atom["cart"], dtype=float)
+        target = animation_target(render_data, start, entry, operation, axis, plane, center)
+        if np.linalg.norm(target - start) > 1e-8:
+            return entry
+    return entries[0] if entries else None
+
+
+def shared_periodic_shift(
+    render_data: dict,
+    reference_entry: dict | None,
+    operation: dict,
+    axis: dict | None,
+    plane: dict | None,
+    center: dict | None,
+) -> np.ndarray | None:
+    if reference_entry is None or reference_entry.get("transformed_frac") is None:
+        return None
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return None
+
+    atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
+    reference_atom = atoms_by_index.get(reference_entry["source_atom"])
+    if reference_atom is None:
+        return None
+
+    start = np.asarray(reference_atom["cart"], dtype=float)
+    target = animation_target(render_data, start, reference_entry, operation, axis, plane, center)
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    target_frac = target @ np.linalg.inv(lattice)
+    raw_frac = np.asarray(reference_entry["transformed_frac"], dtype=float)
+    return np.rint(target_frac - raw_frac)
+
+
 def animation_target(
     render_data: dict,
     start: np.ndarray,
@@ -350,8 +454,16 @@ def animation_target(
     axis: dict | None,
     plane: dict | None,
     center: dict | None,
+    *,
+    shared_shift: np.ndarray | None = None,
 ) -> np.ndarray:
     default_target = np.asarray(entry["transformed_cart"], dtype=float)
+    if shared_shift is not None and entry.get("transformed_frac") is not None:
+        unit_cell = render_data.get("unit_cell")
+        if unit_cell is not None:
+            lattice = np.asarray(unit_cell["lattice"], dtype=float)
+            return (np.asarray(entry["transformed_frac"], dtype=float) + shared_shift) @ lattice
+
     candidates = periodic_target_candidates(render_data, entry)
     if len(candidates) == 1:
         return candidates[0]

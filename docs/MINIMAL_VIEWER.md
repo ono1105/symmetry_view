@@ -45,7 +45,8 @@ Animate one operation:
 
 ```bash
 .venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/f2_pd_op1_axis0_slow.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/checks/f2_pd_op1_rep.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/checks/f2_pd_op1_all.gif
 .venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op1_screw4.gif
 .venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op26_glide.gif
 ```
@@ -58,6 +59,8 @@ Render a screenshot and exit:
 ```
 
 `exports/` 直下は共有用のJSON本体、`exports/checks/` はローカル確認用のGIF/PNG置き場です。
+
+`--animation-scope representative` animates one representative atom only. `--animation-scope all` animates every atom, but the crystal periodic image is chosen once from the representative atom and then applied to all atoms as the same integer lattice shift. Use `--representative-atom N` when a specific atom should define that shared movement.
 
 ## Jacobsite Check Notes
 

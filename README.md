@@ -85,7 +85,8 @@ JSON export:
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --show-mapping --show-displacements
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/f2_pd_op1_axis0.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/checks/f2_pd_op1_rep.gif
+.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/checks/f2_pd_op1_all.gif
 .venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op26_glide.gif
 .venv/bin/python tools/view_json_pyvista.py exports/water.json
 ```
@@ -102,4 +103,5 @@ JSON export:
 - JSONを入力にした最小PyVista表示を追加済み。操作一覧、操作ごとの要素絞り込み、原子対応表示、変位線表示に対応。
 - 仕様書との現在の整合性は `docs/SPEC_ALIGNMENT.md` に記録。
 - JSONビューア上の対称操作アニメーションを追加済み。設計は `docs/ANIMATION_DESIGN.md` に記録。
+- 結晶アニメーションでは、代表原子で決めた周期像シフトを全原子に共有して、1つの対称操作として見える動きを優先する。
 - GUI/Qt埋め込みはまだ再実装しない。
