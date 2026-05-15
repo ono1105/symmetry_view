@@ -293,6 +293,11 @@ def run_animation(
     if operation is None or mapping is None:
         print("Animation requires a valid --operation with atom mapping.")
         return
+    if representative_atom is not None and not any(
+        entry["source_atom"] == representative_atom for entry in mapping["entries"]
+    ):
+        print(f"Animation skipped because --representative-atom {representative_atom} is not in this mapping.")
+        return
 
     frames = max(frame_count, 2)
     paths = animation_paths(
@@ -362,6 +367,15 @@ def animation_paths(
         representative_atom,
     )
     shared_shift = shared_periodic_shift(render_data, reference_entry, operation, axis, plane, center)
+    shared_angle = shared_rotation_angle(
+        render_data,
+        reference_entry,
+        operation,
+        axis,
+        plane,
+        center,
+        shared_shift,
+    )
 
     paths = {}
     entries = mapping["entries"]
@@ -390,6 +404,7 @@ def animation_paths(
             axis=axis,
             plane=plane,
             center=center,
+            angle_override=shared_angle,
         )
     return paths
 
@@ -444,6 +459,47 @@ def shared_periodic_shift(
     target_frac = target @ np.linalg.inv(lattice)
     raw_frac = np.asarray(reference_entry["transformed_frac"], dtype=float)
     return np.rint(target_frac - raw_frac)
+
+
+def shared_rotation_angle(
+    render_data: dict,
+    reference_entry: dict | None,
+    operation: dict,
+    axis: dict | None,
+    plane: dict | None,
+    center: dict | None,
+    shared_shift: np.ndarray | None,
+) -> float | None:
+    kind = str(operation["kind"])
+    if not (
+        kind.startswith(("rotation", "screw"))
+        or "rotoinversion" in kind
+        or "rotoreflection" in kind
+        or "improper" in kind
+    ):
+        return None
+    if reference_entry is None or axis is None or operation.get("angle_deg") is None:
+        return None
+
+    atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
+    reference_atom = atoms_by_index.get(reference_entry["source_atom"])
+    if reference_atom is None:
+        return None
+
+    start = np.asarray(reference_atom["cart"], dtype=float)
+    target = animation_target(
+        render_data,
+        start,
+        reference_entry,
+        operation,
+        axis,
+        plane,
+        center,
+        shared_shift=shared_shift,
+    )
+    axis_point = np.asarray(axis["point_cart"], dtype=float)
+    axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
+    return signed_angle_to_target(start, target, axis_point, axis_direction, operation["angle_deg"])
 
 
 def animation_target(
@@ -522,18 +578,19 @@ def build_operation_path(
     axis: dict | None,
     plane: dict | None,
     center: dict | None,
+    angle_override: float | None = None,
 ) -> dict:
     kind = str(operation["kind"])
     if np.linalg.norm(target - start) < 1e-10:
         return translation_path(start, target)
     if kind.startswith("screw"):
-        return screw_path(start, target, operation, axis)
+        return screw_path(start, target, operation, axis, angle_override=angle_override)
     if "glide" in kind:
         return glide_path(start, target, plane)
     if "rotoinversion" in kind or "rotoreflection" in kind or "improper" in kind:
-        return improper_path(start, target, operation, axis, plane, center)
+        return improper_path(start, target, operation, axis, plane, center, angle_override=angle_override)
     if kind.startswith("rotation"):
-        return rotation_path(start, target, operation, axis)
+        return rotation_path(start, target, operation, axis, angle_override=angle_override)
     if kind == "mirror":
         return mirror_path(start, target, plane)
     if kind == "inversion":
@@ -541,12 +598,23 @@ def build_operation_path(
     return translation_path(start, target)
 
 
-def rotation_path(start: np.ndarray, target: np.ndarray, operation: dict, axis: dict | None) -> dict:
+def rotation_path(
+    start: np.ndarray,
+    target: np.ndarray,
+    operation: dict,
+    axis: dict | None,
+    *,
+    angle_override: float | None = None,
+) -> dict:
     if axis is None or operation.get("angle_deg") is None:
         return translation_path(start, target)
     axis_point = np.asarray(axis["point_cart"], dtype=float)
     axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
-    angle = signed_angle_to_target(start, target, axis_point, axis_direction, operation["angle_deg"])
+    angle = (
+        angle_override
+        if angle_override is not None
+        else signed_angle_to_target(start, target, axis_point, axis_direction, operation["angle_deg"])
+    )
     rotated = rotate_about_axis(start, axis_point, axis_direction, angle)
     return {
         "type": "rotation",
@@ -559,8 +627,15 @@ def rotation_path(start: np.ndarray, target: np.ndarray, operation: dict, axis: 
     }
 
 
-def screw_path(start: np.ndarray, target: np.ndarray, operation: dict, axis: dict | None) -> dict:
-    rotated_path = rotation_path(start, target, operation, axis)
+def screw_path(
+    start: np.ndarray,
+    target: np.ndarray,
+    operation: dict,
+    axis: dict | None,
+    *,
+    angle_override: float | None = None,
+) -> dict:
+    rotated_path = rotation_path(start, target, operation, axis, angle_override=angle_override)
     if rotated_path["type"] != "rotation":
         return translation_path(start, target)
     rotated_end = rotate_about_axis(
@@ -629,8 +704,10 @@ def improper_path(
     axis: dict | None,
     plane: dict | None,
     center: dict | None,
+    *,
+    angle_override: float | None = None,
 ) -> dict:
-    rotated = rotation_path(start, target, operation, axis)
+    rotated = rotation_path(start, target, operation, axis, angle_override=angle_override)
     if rotated["type"] != "rotation":
         if "rotoinversion" in str(operation["kind"]):
             return inversion_path(start, target, center)
