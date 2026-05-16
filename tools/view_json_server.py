@@ -908,8 +908,13 @@ function buildCopPayload() {
   return {type, params, tolerance, request_id: Date.now()};
 }
 
+let copMatrix = null;        // {W_frac, t_frac} from last check result
+let copSelectedAtoms = new Set(); // atom indices ticked for animation
+
 function displayCopResult(result) {
   const div = document.getElementById("cop-result");
+  copMatrix = null;
+  copSelectedAtoms = new Set();
   if (!result) { div.hidden = true; return; }
   if (result.error) {
     div.className = "cop-result fail";
@@ -922,17 +927,57 @@ function displayCopResult(result) {
   let html = ok
     ? `<strong>✓ All ${result.total} atoms map correctly — this IS a symmetry operation</strong>`
     : `<strong>✗ ${result.unmapped_count} / ${result.total} atoms do not map — NOT a symmetry operation</strong>`;
+
   if (!ok && result.unmapped && result.unmapped.length > 0) {
-    html += `<div class="unmapped-list">`;
-    html += `<div style="color:#fca5a5;margin-bottom:4px">Unmapped atoms (shown in red in PyVista):</div>`;
+    copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac};
+    html += `<div style="margin:8px 0 4px;font-size:12px;color:#94a3b8">Check atoms to animate them with this operation (Play button plays the animation):</div>`;
+    html += `<div class="unmapped-list" id="cop-unmapped-list">`;
     for (const u of result.unmapped) {
       const frac = u.frac ? u.frac.map(v => v.toFixed(3)).join(", ") : "—";
-      html += `<div>atom ${u.source}: ${u.element}  →  (${frac})  nearest same-element: ${u.distance.toFixed(3)} Å</div>`;
+      html += `<label style="display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer">`;
+      html += `<input type="checkbox" class="cop-atom-cb" value="${u.source}">`;
+      html += `<span>atom ${u.source}: <b>${u.element}</b>  →  (${frac})  nearest: ${u.distance.toFixed(3)} Å</span>`;
+      html += `</label>`;
     }
+    html += `</div>`;
+    html += `<div class="button-row flush" style="margin-top:8px">`;
+    html += `<button class="secondary" style="font-size:12px;padding:6px 10px" id="cop-anim-sel">Animate selected</button>`;
+    html += `<button class="secondary" style="font-size:12px;padding:6px 10px" id="cop-anim-all">Animate all unmapped</button>`;
     html += `</div>`;
   }
   div.innerHTML = html;
   div.hidden = false;
+
+  if (!ok && result.unmapped && result.unmapped.length > 0) {
+    document.getElementById("cop-anim-sel").addEventListener("click", () => {
+      const indices = [...copSelectedAtoms];
+      if (indices.length === 0) return;
+      sendCopAnimate(indices);
+    });
+    document.getElementById("cop-anim-all").addEventListener("click", () => {
+      sendCopAnimate(result.unmapped.map(u => u.source));
+    });
+    for (const cb of document.querySelectorAll(".cop-atom-cb")) {
+      cb.addEventListener("change", () => {
+        const idx = Number(cb.value);
+        if (cb.checked) copSelectedAtoms.add(idx);
+        else copSelectedAtoms.delete(idx);
+      });
+    }
+  }
+}
+
+function sendCopAnimate(atomIndices) {
+  if (!copMatrix) return;
+  postState({
+    custom_op_animate: {
+      atom_indices: atomIndices,
+      W_frac: copMatrix.W_frac,
+      t_frac: copMatrix.t_frac,
+      animate_id: Date.now(),
+    },
+    playing: true,
+  });
 }
 
 async function sendCopCheck() {
@@ -1016,6 +1061,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_gif_request_id: int | None = None
         self.last_custom_op_check_id: object = None
         self.custom_check_actors: list = []
+        self.last_custom_op_animate_id: object = None
+        self.using_custom_paths: bool = False
 
     def add_controls(self) -> None:
         self.plotter.add_key_event("space", self.toggle_play_from_keyboard)
@@ -1044,11 +1091,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if operation_index != self.last_operation_index:
             self.set_operation_index(operation_index)
             self.last_operation_index = operation_index
+            self.using_custom_paths = False
             reset = True
             should_render = True
             should_update_status = True
 
         if scope != self.last_scope or selected_atoms != self.last_selected_atoms:
+            self.using_custom_paths = False
             self.scope = scope
             self.selected_atoms = selected_atoms
             self.build_paths()
@@ -1092,15 +1141,32 @@ class BrowserControlledViewer(NativePyVistaViewer):
         custom_op_check_id = self.shared_state.get("custom_op_check_id")
         clear_custom_check = bool(self.shared_state.pop("clear_custom_check", False))
         custom_op_result = self.shared_state.get("custom_op_result")
+        custom_op_animate = self.shared_state.get("custom_op_animate")
         if clear_custom_check:
             self.clear_custom_check_actors()
+            self.using_custom_paths = False
+            self.build_paths()
             with self.state_lock:
                 self.shared_state["custom_op_result"] = None
+                self.shared_state["custom_op_animate"] = None
+            reset = True
             should_render = True
         elif custom_op_check_id is not None and custom_op_check_id != self.last_custom_op_check_id:
             self.apply_custom_check(custom_op_result)
             self.last_custom_op_check_id = custom_op_check_id
             should_render = True
+
+        if custom_op_animate is not None:
+            animate_id = custom_op_animate.get("animate_id")
+            if animate_id != self.last_custom_op_animate_id:
+                atom_indices = custom_op_animate.get("atom_indices", [])
+                W_frac = np.asarray(custom_op_animate.get("W_frac"), dtype=float)
+                t_frac = np.asarray(custom_op_animate.get("t_frac"), dtype=float)
+                self.paths = self.build_custom_animation_paths(atom_indices, W_frac, t_frac)
+                self.using_custom_paths = True
+                self.last_custom_op_animate_id = animate_id
+                reset = True
+                should_render = True
 
         if requested_playing != self.playing:
             should_update_status = True
@@ -1274,6 +1340,31 @@ class BrowserControlledViewer(NativePyVistaViewer):
         with self.state_lock:
             self.shared_state["gif_status"] = status
 
+    def build_custom_animation_paths(
+        self,
+        atom_indices: list[int],
+        W_frac: np.ndarray,
+        t_frac: np.ndarray,
+    ) -> dict[int, dict]:
+        """Build linear animation paths for a user-supplied (W|t) operation."""
+        unit_cell = self.render_data.get("unit_cell")
+        if unit_cell is None:
+            return {}
+        lattice = np.asarray(unit_cell["lattice"], dtype=float)
+        # W_cart = L.T @ W_frac @ inv(L.T),  t_cart = t_frac @ L
+        W_cart = lattice.T @ W_frac @ np.linalg.inv(lattice.T)
+        t_cart = t_frac @ lattice
+        idx_set = set(int(i) for i in atom_indices)
+        paths = {}
+        for item in self.animated_atoms:
+            atom = item["atom"]
+            if atom["index"] not in idx_set:
+                continue
+            start = np.asarray(atom["cart"], dtype=float)
+            target = W_cart @ start + t_cart
+            paths[atom["index"]] = {"type": "linear", "start": start, "target": target}
+        return paths
+
     def apply_custom_check(self, result: dict | None) -> None:
         self.clear_custom_check_actors()
         if not result or result.get("error") or not result.get("unmapped"):
@@ -1361,6 +1452,9 @@ def make_handler(
                     return
                 W_frac, t_frac = result
                 check_result = check_custom_operation(render_data, W_frac, t_frac, tolerance)
+                # include the operation matrix so the browser can request animation
+                check_result["W_frac"] = W_frac.tolist()
+                check_result["t_frac"] = t_frac.tolist()
                 # store result for PyVista highlight
                 with state_lock:
                     shared_state["custom_op_result"] = check_result
@@ -1386,6 +1480,7 @@ def make_handler(
                 "gif_request_id",
                 "custom_op_check_id",
                 "clear_custom_check",
+                "custom_op_animate",
             }
             with state_lock:
                 for key, value in payload.items():
