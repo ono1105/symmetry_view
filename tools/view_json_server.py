@@ -1082,11 +1082,15 @@ document.getElementById("btn-clear-check").addEventListener("click", async () =>
 });
 
 async function boot() {
+  const st = document.getElementById("status");
+  st.textContent = "Connecting…";
   const info = await api("/api/operations");
   operations = info.operations;
   summariesReady = Boolean(info.summaries_ready);
+  st.textContent = `Loaded ${operations.length} operations`;
   const atomInfo = await api("/api/atoms");
   atoms = atomInfo.atoms;
+  st.textContent = `Loaded ${operations.length} operations, ${atoms.length} atoms`;
   state = await api("/api/state");
   renderDirectionFilter();
   renderAtomElementFilter();
@@ -1099,7 +1103,7 @@ async function boot() {
   setInterval(refreshState, 500);
 }
 boot().catch(error => {
-  document.getElementById("status").textContent = `Error: ${error}`;
+  document.getElementById("status").textContent = `Boot error: ${error}`;
 });
 </script>
 </body>
