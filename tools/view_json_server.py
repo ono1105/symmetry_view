@@ -12,11 +12,21 @@ from urllib.parse import urlparse
 
 import _bootstrap  # noqa: F401
 
+import logging
 import numpy as np
 import imageio.v2 as imageio
 
 from tools import view_json_pyvista as viewer
 from tools.view_json_gui import NativePyVistaViewer
+
+# Suppress VTK C++ warnings that cause recursive logging floods in PyVista.
+try:
+    import vtkmodules.vtkCommonCore as _vtk_core
+    _vtk_core.vtkObject.GlobalWarningDisplayOff()
+except Exception:
+    pass
+logging.getLogger("pyvista").setLevel(logging.ERROR)
+logging.getLogger("vtkmodules").setLevel(logging.ERROR)
 
 
 HTML = """<!doctype html>
@@ -1532,7 +1542,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 continue
             center = np.asarray(atom["cart"], dtype=float) + item["display_shift_cart"]
             sphere = pv.Sphere(radius=radius, center=center, theta_resolution=16, phi_resolution=10)
-            actor = self.plotter.add_mesh(sphere, color="#ff3333", opacity=0.75, smooth_shading=True)
+            actor = self.plotter.add_mesh(sphere, color="#ff3333", opacity=1.0, smooth_shading=True)
             self.custom_check_actors.append(actor)
 
     def clear_custom_check_actors(self) -> None:
