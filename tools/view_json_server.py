@@ -20,11 +20,19 @@ from tools import view_json_pyvista as viewer
 from tools.view_json_gui import NativePyVistaViewer
 
 # Suppress VTK C++ warnings that cause recursive logging floods in PyVista.
+# Redirect VTK's output window to /dev/null so warnings never reach PyVista's
+# Python observer (which would log them, triggering another VTK event, etc.).
 try:
-    import vtkmodules.vtkCommonCore as _vtk_core
-    _vtk_core.vtkObject.GlobalWarningDisplayOff()
+    from vtkmodules.vtkCommonCore import vtkFileOutputWindow, vtkOutputWindow
+    _vtk_null = vtkFileOutputWindow()
+    _vtk_null.SetFileName("/dev/null")
+    vtkOutputWindow.SetInstance(_vtk_null)
 except Exception:
-    pass
+    try:
+        import vtk as _vtk
+        _vtk.vtkObject.GlobalWarningDisplayOff()
+    except Exception:
+        pass
 logging.getLogger("pyvista").setLevel(logging.ERROR)
 logging.getLogger("vtkmodules").setLevel(logging.ERROR)
 
