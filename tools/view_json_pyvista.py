@@ -68,6 +68,18 @@ def main() -> int:
         help="Source atom index used to choose the shared animation target image.",
     )
     parser.add_argument(
+        "--selected-atom",
+        type=int,
+        default=None,
+        help="Animate only this source atom index. Static atoms remain visible.",
+    )
+    parser.add_argument(
+        "--selected-atoms",
+        nargs="+",
+        default=None,
+        help="Animate only these source atom indices. Accepts spaces or commas, e.g. 0 3 8 or 0,3,8.",
+    )
+    parser.add_argument(
         "--element-index",
         type=int,
         default=None,
@@ -97,6 +109,14 @@ def main() -> int:
 
     if args.animate and args.operation is None:
         parser.error("--animate requires --operation")
+    animation_scope = args.animation_scope
+    representative_atom = args.representative_atom
+    selected_atoms = parse_selected_atoms(args.selected_atoms)
+    if args.selected_atom is not None:
+        selected_atoms = tuple((*selected_atoms, args.selected_atom))
+    if selected_atoms:
+        animation_scope = "selected"
+        representative_atom = representative_atom if representative_atom is not None else selected_atoms[0]
     if args.element_index is not None:
         if args.operation is None:
             parser.error("--element-index requires --operation")
@@ -144,8 +164,9 @@ def main() -> int:
             speed=args.animation_speed,
             output_path=args.animation_output,
             element_index=args.element_index,
-            animation_scope=args.animation_scope,
-            representative_atom=args.representative_atom,
+            animation_scope=animation_scope,
+            representative_atom=representative_atom,
+            selected_atoms=selected_atoms,
         )
     elif args.screenshot is not None:
         args.screenshot.parent.mkdir(parents=True, exist_ok=True)
@@ -385,6 +406,7 @@ def run_animation(
     element_index: int | None,
     animation_scope: str,
     representative_atom: int | None,
+    selected_atoms: tuple[int, ...],
 ) -> None:
     if animated_atoms is None:
         print("Animation skipped because atoms are hidden.")
@@ -394,10 +416,13 @@ def run_animation(
     if operation is None or mapping is None:
         print("Animation requires a valid --operation with atom mapping.")
         return
-    if representative_atom is not None and not any(
-        entry["source_atom"] == representative_atom for entry in mapping["entries"]
-    ):
+    available_atoms = {entry["source_atom"] for entry in mapping["entries"]}
+    if representative_atom is not None and representative_atom not in available_atoms:
         print(f"Animation skipped because --representative-atom {representative_atom} is not in this mapping.")
+        return
+    missing_atoms = sorted(set(selected_atoms) - available_atoms)
+    if missing_atoms:
+        print(f"Animation skipped because selected atoms are not in this mapping: {missing_atoms}")
         return
 
     frames = max(frame_count, 2)
@@ -409,6 +434,7 @@ def run_animation(
         element_index=element_index,
         animation_scope=animation_scope,
         representative_atom=representative_atom,
+        selected_atoms=selected_atoms,
     )
     if not paths:
         print("Animation skipped because no atom path could be built. Check --representative-atom.")
@@ -438,6 +464,18 @@ def effective_animation_fps(fps: float, speed: float) -> float:
     return max(float(fps), 1.0) * max(float(speed), 0.05)
 
 
+def parse_selected_atoms(values: list[str] | None) -> tuple[int, ...]:
+    if not values:
+        return ()
+    selected = []
+    for value in values:
+        for item in str(value).split(","):
+            item = item.strip()
+            if item:
+                selected.append(int(item))
+    return tuple(dict.fromkeys(selected))
+
+
 def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s: float) -> None:
     for item in animated_atoms:
         atom = item["atom"]
@@ -457,6 +495,7 @@ def animation_paths(
     element_index: int | None = None,
     animation_scope: str = "all",
     representative_atom: int | None = None,
+    selected_atoms: tuple[int, ...] = (),
 ) -> dict[int, dict]:
     atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
     axis, plane, center, reference_entry, shared_shift, shared_angle = select_animation_context(
@@ -486,6 +525,9 @@ def animation_paths(
     entries = mapping["entries"]
     if animation_scope == "representative":
         entries = [reference_entry]
+    elif animation_scope == "selected":
+        selected_set = set(selected_atoms)
+        entries = [entry for entry in entries if entry["source_atom"] in selected_set]
 
     for entry in entries:
         atom = atoms_by_index.get(entry["source_atom"])

@@ -57,6 +57,13 @@ Use `--animation-speed` to change playback speed without changing the path:
 .venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 31 --animate --animation-speed 0.5 --animation-output exports/checks/jacobsite_op31_slow.gif
 ```
 
+Use `--selected-atom` or `--selected-atoms` to animate only chosen source atoms while the rest of the structure remains visible:
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 25 --animate --selected-atom 0 --animation-output exports/checks/jacobsite_op25_atom0.gif
+.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 25 --animate --selected-atoms 0 3 8 --animation-output exports/checks/jacobsite_op25_atoms.gif
+```
+
 Render a screenshot and exit:
 
 ```bash

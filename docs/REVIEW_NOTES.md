@@ -309,7 +309,7 @@ For molecule mappings, `transformed_cart` is the raw transformed Cartesian coord
 
 ## アニメーション設計レビュー（`CLAUDE_HANDOFF.md` 質問8への回答）
 
-仕様書 `docs/specs/codex_final_spec_crystal_symmetry_viewer.md` Section 16 を参照しながら確認しました。
+仕様書 `docs/archive/specs/codex_final_spec_crystal_symmetry_viewer.md` Section 16 を参照しながら確認しました。
 
 ### Q. この順番（線形補間 → 円弧補間）で進めるのが妥当か
 
@@ -859,7 +859,7 @@ O from O1: 32
 
 ### commit `2cf035b` — Add Claude review request
 
-ドキュメントのみ（`docs/CLAUDE_REVIEW_REQUEST_JACOBSITE_ANIMATION.md` 新規作成）。コードなし。問題なし。
+ドキュメントのみ（現在は `docs/archive/reviews/CLAUDE_REVIEW_REQUEST_JACOBSITE_ANIMATION.md` に移動）。コードなし。問題なし。
 
 ### commit `0138694` — Review Jacobsite animation center handling
 

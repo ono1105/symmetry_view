@@ -36,8 +36,10 @@ exports/
   mg2v2o7.json
   water.json
 
-docs/specs/
-  仕様書・設計メモ
+docs/
+  PROJECT_SPEC.md        現在の目的・スコープ・設計方針
+  README.md              ドキュメント入口
+  archive/               古い仕様書・相談メモ
 
 archive/old_gui_attempt/
   以前のGUI/VTK実験コード。現行実装では使わない。
@@ -112,7 +114,7 @@ JSON export:
 - `AtomMapping` で、各対称操作による原子対応を保持する。
 - `RenderData` と `AtomMapping` はJSON出力できる。
 - JSONを入力にした最小PyVista表示を追加済み。操作一覧、操作ごとの要素絞り込み、原子対応表示、変位線表示に対応。
-- 仕様書との現在の整合性は `docs/SPEC_ALIGNMENT.md` に記録。
+- 現在の目的・スコープ・仕様は `docs/PROJECT_SPEC.md` に集約。
 - JSONビューア上の対称操作アニメーションを追加済み。設計は `docs/ANIMATION_DESIGN.md` に記録。
 - 結晶アニメーションでは、代表原子で決めた周期像シフトを全原子に共有して、1つの対称操作として見える動きを優先する。
 - GUI/Qt埋め込みはまだ再実装しない。

@@ -55,6 +55,8 @@ Add these options to `tools/view_json_pyvista.py`:
 --animation-output PATH
 --animation-scope all|representative
 --representative-atom INDEX
+--selected-atom INDEX
+--selected-atoms INDEX [INDEX ...]
 --list-elements
 --element-index N
 ```
@@ -72,6 +74,8 @@ Required usage:
 `--element-index` selects one matching axis/plane/center for the operation. During animation, only that selected element is displayed and used for the motion path. This matters when one operation has multiple equivalent screw axes.
 `--animation-speed` multiplies playback speed without changing the generated path. Use `0.5` for half speed or `2.0` for double speed.
 `--animation-scope representative` animates only the representative source atom. `--animation-scope all` animates all atoms, using the representative atom to choose one periodic image shift for the whole operation.
+`--selected-atom INDEX` is a user-facing shortcut for animating only one source atom while leaving the rest of the structure visible.
+`--selected-atoms` animates multiple source atoms while leaving the rest of the structure visible. It accepts either space-separated or comma-separated indices.
 
 ## Interpolation Policy
 
