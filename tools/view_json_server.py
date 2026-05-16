@@ -2380,14 +2380,14 @@ def main() -> int:
         "custom_op_check_id": None,
         "custom_op_result": None,
     }
-    atom_mappings = payload.get("atom_mappings")
-
-    # Fast path: summaries without atom_mappings (~30 ms) so the server and
-    # browser start immediately.  Background thread fills the accurate labels.
+    # Fast path: compute summaries without atom_mappings (~30-70 ms).
+    # The element_context_cache is left empty here; show_element_actors fills
+    # it per-operation on first selection (~4 ms each).  This avoids spawning a
+    # CPU-intensive background thread that would block the HTTP server via
+    # Python GIL contention and make the browser appear unresponsive.
     fast_items, _ = operation_summaries(render_data, None)
     summaries_ref = [fast_items]
-    needs_slow = atom_mappings is not None
-    shared_state["summaries_ready"] = not needs_slow
+    shared_state["summaries_ready"] = True
 
     handler = make_handler(
         summaries_ref,
@@ -2402,7 +2402,6 @@ def main() -> int:
     if not args.no_browser:
         open_url(url)
 
-    # Create viewer with empty element_context_cache; background fills it.
     app = BrowserControlledViewer(
         args.json_path,
         display_mode=display_mode,
@@ -2412,18 +2411,6 @@ def main() -> int:
         state_lock=state_lock,
         element_context_cache={},
     )
-
-    if needs_slow:
-        def _background_summaries() -> None:
-            slow_items, slow_cache = operation_summaries(render_data, atom_mappings)
-            summaries_ref[0] = slow_items
-            app.element_context_cache.update(slow_cache)
-            with state_lock:
-                shared_state["summaries_ready"] = True
-            print("Operation labels ready.")
-
-        threading.Thread(target=_background_summaries, daemon=True).start()
-
     app.show()
     server.shutdown()
     server.server_close()
