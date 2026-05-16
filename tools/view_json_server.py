@@ -723,7 +723,7 @@ function renderOperationDetails() {
     for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
     lines.push(`t (cart): ${tc.map(v => v.toFixed(4)).join(",  ")} Å`);
   }
-  div.textContent = lines.join("\n");
+  div.textContent = lines.join("\\n");
 }
 
 function renderAtomElementFilter() {
