@@ -1622,6 +1622,9 @@ def make_handler(
                 "clear_custom_check",
                 "custom_op_animate",
             }
+            if "custom_op_animate" in payload:
+                anim = payload["custom_op_animate"]
+                print(f"[debug] /api/state POST received custom_op_animate: animate_id={anim.get('animate_id')}, atom_indices={anim.get('atom_indices')}", flush=True)
             with state_lock:
                 for key, value in payload.items():
                     if key in allowed:
