@@ -1032,7 +1032,11 @@ function displayCopResult(result, opType, opParams) {
 }
 
 function sendCopAnimate(atomIndices) {
-  if (!copMatrix || atomIndices.length === 0) return;
+  console.log("[debug] sendCopAnimate called, copMatrix=", copMatrix, "atomIndices=", atomIndices);
+  if (!copMatrix || atomIndices.length === 0) {
+    console.log("[debug] sendCopAnimate early return: copMatrix=" + !!copMatrix + " len=" + atomIndices.length);
+    return;
+  }
   postState({
     custom_op_animate: {
       atom_indices: atomIndices,
@@ -1241,9 +1245,15 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 t_frac = np.asarray(custom_op_animate.get("t_frac"), dtype=float)
                 op_type = str(custom_op_animate.get("op_type", "matrix"))
                 op_params = custom_op_animate.get("op_params") or {}
-                self.paths = self.build_custom_animation_paths(
-                    atom_indices, W_frac, t_frac, op_type=op_type, op_params=op_params
-                )
+                try:
+                    self.paths = self.build_custom_animation_paths(
+                        atom_indices, W_frac, t_frac, op_type=op_type, op_params=op_params
+                    )
+                    print(f"[debug] custom animate: op_type={op_type!r}, atom_indices={atom_indices}, paths built={len(self.paths)}", flush=True)
+                except Exception as exc:
+                    print(f"[error] build_custom_animation_paths failed: {exc}", flush=True)
+                    import traceback; traceback.print_exc()
+                    self.paths = {}
                 self.using_custom_paths = True
                 self.last_custom_op_animate_id = animate_id
                 reset = True
