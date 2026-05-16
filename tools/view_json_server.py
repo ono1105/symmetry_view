@@ -543,6 +543,7 @@ let atoms = [];
 let state = {};
 let directionFilterValue = "";
 let atomElementFilterValue = "";
+let summariesReady = false;
 
 async function api(path, options) {
   const response = await fetch(path, options);
@@ -840,6 +841,14 @@ async function refreshState() {
   syncDisplayButtons();
   renderStatus();
   renderOperationDetails();
+  if (!summariesReady && state.summaries_ready) {
+    summariesReady = true;
+    const info = await api("/api/operations");
+    operations = info.operations;
+    renderDirectionFilter();
+    renderOperations();
+    renderOperationDetails();
+  }
 }
 
 document.getElementById("operation-sort").addEventListener("change", renderOperations);
@@ -1075,6 +1084,7 @@ document.getElementById("btn-clear-check").addEventListener("click", async () =>
 async function boot() {
   const info = await api("/api/operations");
   operations = info.operations;
+  summariesReady = Boolean(info.summaries_ready);
   const atomInfo = await api("/api/atoms");
   atoms = atomInfo.atoms;
   state = await api("/api/state");
@@ -1504,7 +1514,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
 
 
 def make_handler(
-    operation_summaries: list[dict],
+    summaries_ref: list,
     atoms: list[dict],
     render_data: dict,
     shared_state: dict,
@@ -1517,8 +1527,11 @@ def make_handler(
                 self.send_bytes(HTML.encode("utf-8"), content_type="text/html; charset=utf-8")
                 return
             if path == "/api/operations":
+                with state_lock:
+                    ready = shared_state.get("summaries_ready", True)
                 body = {
-                    "operations": operation_summaries
+                    "operations": summaries_ref[0],
+                    "summaries_ready": ready,
                 }
                 self.send_json(body)
                 return
@@ -1619,6 +1632,24 @@ def make_handler(
             return
 
     return Handler
+
+
+def open_url(url: str) -> None:
+    """Open URL in the default browser.  On WSL, webbrowser.open() often fails
+    because there is no Linux browser; use cmd.exe instead to open Windows Edge."""
+    import platform
+    import subprocess
+    if "microsoft" in platform.uname().release.lower():
+        try:
+            subprocess.run(
+                ["cmd.exe", "/c", "start", "", url],
+                check=False,
+                capture_output=True,
+            )
+            return
+        except FileNotFoundError:
+            pass
+    webbrowser.open(url)
 
 
 def start_server(host: str, port: int, handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
@@ -2349,12 +2380,17 @@ def main() -> int:
         "custom_op_check_id": None,
         "custom_op_result": None,
     }
-    operation_summary_items, element_context_cache = operation_summaries(
-        render_data,
-        payload.get("atom_mappings"),
-    )
+    atom_mappings = payload.get("atom_mappings")
+
+    # Fast path: summaries without atom_mappings (~30 ms) so the server and
+    # browser start immediately.  Background thread fills the accurate labels.
+    fast_items, _ = operation_summaries(render_data, None)
+    summaries_ref = [fast_items]
+    needs_slow = atom_mappings is not None
+    shared_state["summaries_ready"] = not needs_slow
+
     handler = make_handler(
-        operation_summary_items,
+        summaries_ref,
         render_data["atoms"],
         render_data,
         shared_state,
@@ -2364,8 +2400,9 @@ def main() -> int:
     url = f"http://{args.host}:{server.server_port}/"
     print(f"Control panel: {url}")
     if not args.no_browser:
-        webbrowser.open(url)
+        open_url(url)
 
+    # Create viewer with empty element_context_cache; background fills it.
     app = BrowserControlledViewer(
         args.json_path,
         display_mode=display_mode,
@@ -2373,8 +2410,20 @@ def main() -> int:
         scope=shared_state["scope"],
         shared_state=shared_state,
         state_lock=state_lock,
-        element_context_cache=element_context_cache,
+        element_context_cache={},
     )
+
+    if needs_slow:
+        def _background_summaries() -> None:
+            slow_items, slow_cache = operation_summaries(render_data, atom_mappings)
+            summaries_ref[0] = slow_items
+            app.element_context_cache.update(slow_cache)
+            with state_lock:
+                shared_state["summaries_ready"] = True
+            print("Operation labels ready.")
+
+        threading.Thread(target=_background_summaries, daemon=True).start()
+
     app.show()
     server.shutdown()
     server.server_close()
