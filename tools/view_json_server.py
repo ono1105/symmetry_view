@@ -324,6 +324,7 @@ HTML = """<!doctype html>
       <label for="operations">Operation list</label>
       <div class="operation-list" id="operations" role="listbox"></div>
       <p class="hint">The selected operation controls the axis/plane/center shown in PyVista.</p>
+      <div id="op-details" style="font-family:monospace;font-size:12px;color:#94a3b8;white-space:pre;margin-top:10px;line-height:1.6;min-height:0"></div>
     </section>
     <div class="side-stack">
       <section class="panel">
@@ -681,6 +682,49 @@ function syncOperationSelection() {
   }
 }
 
+function fmtMatVal(v) {
+  if (v === null || v === undefined) return "  ?";
+  const r = Math.round(v * 1e9) / 1e9;
+  if (Number.isInteger(r) && Math.abs(r) < 10) return String(r).padStart(3);
+  return r.toFixed(4).padStart(8);
+}
+
+function fmtFrac(v) {
+  if (v === null || v === undefined) return "?";
+  const r = Math.round(v * 1e9) / 1e9;
+  if (Math.abs(r) < 1e-8) return "0";
+  // try to express as a simple fraction with denominator ≤ 24
+  for (const d of [2, 3, 4, 6, 8, 12, 24]) {
+    const n = Math.round(r * d);
+    if (Math.abs(n / d - r) < 1e-8) return n === 0 ? "0" : `${n}/${d}`;
+  }
+  return r.toFixed(4);
+}
+
+function renderOperationDetails() {
+  const div = document.getElementById("op-details");
+  const op = operations.find(o => o.index === state.operation_index);
+  if (!op) { div.textContent = ""; return; }
+  const W = op.matrix_frac;
+  const t = op.translation_frac;
+  if (!W || !t) { div.textContent = ""; return; }
+
+  let lines = [];
+  lines.push(`${stripHtml(optionText(op))}`);
+  lines.push("W (frac):");
+  for (const row of W) lines.push(`  [${row.map(fmtMatVal).join("  ")}]`);
+  lines.push(`t (frac): ${t.map(fmtFrac).join(",  ")}`);
+
+  const Wc = op.matrix_cart;
+  const tc = op.translation_cart;
+  if (Wc && tc) {
+    lines.push("W (cart):  (Å scale)");
+    for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
+    lines.push(`t (cart): ${tc.map(v => v.toFixed(4)).join(",  ")} Å`);
+  }
+  div.textContent = lines.join("\n");
+}
+
 function renderAtomElementFilter() {
   const root = document.getElementById("atom-element-filter");
   const elements = [...new Set(atoms.map(atom => atom.element))].sort(compareText);
@@ -786,6 +830,7 @@ async function postState(update) {
   renderOperations();
   renderAtoms();
   renderStatus();
+  renderOperationDetails();
 }
 
 async function refreshState() {
@@ -794,6 +839,7 @@ async function refreshState() {
   syncSpeedButtons();
   syncDisplayButtons();
   renderStatus();
+  renderOperationDetails();
 }
 
 document.getElementById("operation-sort").addEventListener("change", renderOperations);
@@ -1039,6 +1085,7 @@ async function boot() {
   renderOperations();
   renderAtoms();
   renderStatus();
+  renderOperationDetails();
   setInterval(refreshState, 500);
 }
 boot().catch(error => {
@@ -1164,6 +1211,11 @@ class BrowserControlledViewer(NativePyVistaViewer):
             should_render = True
         elif custom_op_check_id is not None and custom_op_check_id != self.last_custom_op_check_id:
             self.apply_custom_check(custom_op_result)
+            # New check discards any previous custom animation paths
+            if self.using_custom_paths:
+                self.using_custom_paths = False
+                self.build_paths()
+                reset = True
             self.last_custom_op_check_id = custom_op_check_id
             should_render = True
 
@@ -1807,6 +1859,10 @@ def operation_summaries(
                 "direction_sort_key": operation_direction_sort_key(render_data, summary_operation, axes, planes, centers),
                 "direction_label": operation_direction_label(render_data, summary_operation, axes, planes, centers),
                 "direction_filter_label": operation_direction_filter_label(render_data, summary_operation, axes, planes, centers),
+                "matrix_frac": operation.get("matrix_frac"),
+                "translation_frac": operation.get("translation_frac"),
+                "matrix_cart": operation.get("matrix_cart"),
+                "translation_cart": operation.get("translation_cart"),
             }
         )
     return summaries, element_context_cache
