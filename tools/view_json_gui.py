@@ -180,9 +180,8 @@ class NativePyVistaViewer:
             actor = self.plotter.add_mesh(
                 marker,
                 color="#f7dc6f",
-                opacity=1.0,
-                style="wireframe",
-                line_width=2,
+                opacity=0.28,
+                smooth_shading=True,
             )
             actor.SetVisibility(False)
             self.start_marker_actors.append(actor)

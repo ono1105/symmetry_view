@@ -1153,6 +1153,14 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.shared_state = shared_state
         self.state_lock = state_lock
         self.element_context_cache = element_context_cache or {}
+        # Disable VTK depth peeling to prevent transparency-related warning loops
+        # on WSL/Mesa drivers. Translucent objects render without correct sorting
+        # but without recursive PyVista→logging→VTK→PyVista error floods.
+        try:
+            for renderer in self.plotter.renderers:
+                renderer.UseDepthPeelingOff()
+        except Exception:
+            pass
         self.last_operation_index: int | None = None
         self.last_scope: str | None = None
         self.last_selected_atoms: tuple[int, ...] | None = None
