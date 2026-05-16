@@ -1803,3 +1803,68 @@ element_context_cache 実装後:
 現在の 1.2 秒起動の根本原因は `animation_context_score` が全 ops × 全候補 × 全原子で `build_operation_path` を呼んでいること（前回 REVIEW_NOTES の最適化案 A,B が未対応のままの部分）。追加機能の実装でこのボトルネックは変わっていない。
 
 今後 CIF 直接読み込みを実装する際には、この起動コストが analysis 時間に加算される。現段階では許容範囲（1 秒強）だが、その時点で lazy 化を検討するタイミングになる。
+
+---
+
+## Claude 実装: カスタム操作チェック機能 (2026-05-16)
+
+### 概要
+
+`tools/view_json_server.py` のみを変更。既存コードには触れていない。
+
+### 追加内容
+
+**ブラウザ UI (HTML/JS):**
+- 「Custom Operation Check」セクションをページ下部に追加
+- 操作タイプ選択: 回転 / 鏡映 / 反転 / らせん軸 / 映進反射 / 回反 / 並進 / 恒等 / 行列直接入力
+- タイプ別の入力フォーム（全て分率座標）
+- 許容距離 (Å) 入力
+- Check ボタン → 即時結果表示（ブラウザ）
+- Clear ボタン → PyVista のハイライト消去
+
+**新 API エンドポイント `/api/check_operation` (POST):**
+- リクエスト: `{type, params, tolerance, request_id}`
+- レスポンス: `{is_symmetry, total, mapped_count, unmapped_count, unmapped: [...]}`
+- 計算は HTTP ハンドラーで同期的に実行（純粋な数学計算のため）
+- 結果を `shared_state["custom_op_result"]` に保存 → PyVista が次の timer tick でハイライト
+
+**`/api/state` POST に追加したキー:**
+- `custom_op_check_id` — ブラウザから PyVista にハイライト要求を伝えるトリガー
+- `clear_custom_check` — ハイライト消去
+
+**Python 新関数:**
+- `rotation_matrix_from_axis_angle(axis, angle)` — Rodrigues 回転公式
+- `build_custom_operation_frac(op_type, params, lattice)` → `(W_frac, t_frac)` または エラー文字列
+  - 入力: ユーザーフレンドリーなパラメータ（軸方向、角度、通過点、法線など）
+  - 出力: spglib 規約の分率座標行列 `x'_frac = W_frac @ x_frac + t_frac`
+  - 座標変換: `W_frac = inv(L.T) @ W_cart @ L.T`、法線変換: `n_cart = inv(L) @ hkl`
+- `check_custom_operation(render_data, W_frac, t_frac, tolerance_cart)` → 結果 dict
+  - 全原子に操作を適用し、同元素の原子に重なるか判定
+  - 周期境界条件を考慮（`delta -= round(delta)` で最短像を使用）
+
+**BrowserControlledViewer に追加:**
+- `custom_check_actors: list` — 赤いハイライト球のアクターリスト
+- `last_custom_op_check_id` — 重複実行防止
+- `apply_custom_check(result)` — 未対応原子に赤い半透明球を追加
+- `clear_custom_check_actors()` — ハイライト消去
+- `on_timer` でハイライト更新処理を追加
+- `make_handler` に `render_data` を追加渡し（チェック計算のため）
+
+**動作検証（自動テスト）:**
+```text
+NaCl (Fm-3m) inversion through (1/2,1/2,1/2): is_symmetry=True ✓
+NaCl inversion through (0,0,0):                is_symmetry=True ✓
+NaCl face-centering translation (1/2,1/2,0):   is_symmetry=True ✓
+NaCl random translation (0.3,0,0):             is_symmetry=False unmapped=8/8 ✓
+Jacobsite known screw_4 matrix:                is_symmetry=True ✓
+Jacobsite rotation_2 built from axis data:     is_symmetry=True ✓
+Jacobsite pure 90° rotation (no pure 4-fold in Fd-3m): is_symmetry=False ✓
+Jacobsite mirror (110) through origin:         is_symmetry=True ✓
+```
+
+### 設計判断
+
+- チェックは HTTP ハンドラー内で同期実行（数学計算のみ、~数ms）→ ブラウザに即時応答
+- PyVista ハイライトは shared_state 経由で非同期（次の timer tick = ~33ms 後）
+- 分子モード (unit_cell なし) はエラーメッセージを返す
+- Codex が変更した既存関数は一切変更していない
