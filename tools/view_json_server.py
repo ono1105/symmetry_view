@@ -1152,6 +1152,14 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.add_key_event("r", self.reset_from_keyboard)
 
     def on_timer(self, step: int) -> None:
+        try:
+            self._on_timer_inner(step)
+        except Exception as exc:
+            import traceback, sys
+            print(f"[DEBUG-TIMER] EXCEPTION in on_timer: {exc}", file=sys.stderr, flush=True)
+            traceback.print_exc(file=sys.stderr)
+
+    def _on_timer_inner(self, step: int) -> None:
         del step
         should_render = False
         should_update_status = False
@@ -1256,10 +1264,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
                     self.paths = self.build_custom_animation_paths(
                         atom_indices, W_frac, t_frac, op_type=op_type, op_params=op_params
                     )
-                    print(f"[debug] custom animate: op_type={op_type!r}, atom_indices={atom_indices}, paths built={len(self.paths)}", flush=True)
+                    import sys as _sys
+                    print(f"[DEBUG-TIMER] custom_op_animate processed: op_type={op_type!r} atom_indices={atom_indices} paths={len(self.paths)}", file=_sys.stderr, flush=True)
                 except Exception as exc:
-                    print(f"[error] build_custom_animation_paths failed: {exc}", flush=True)
-                    import traceback; traceback.print_exc()
+                    import traceback, sys as _sys
+                    print(f"[DEBUG-TIMER] build_custom_animation_paths FAILED: {exc}", file=_sys.stderr, flush=True)
+                    traceback.print_exc(file=_sys.stderr)
                     self.paths = {}
                 self.using_custom_paths = True
                 self.last_custom_op_animate_id = animate_id
@@ -1629,10 +1639,11 @@ def make_handler(
                 "clear_custom_check",
                 "custom_op_animate",
             }
-            print(f"[debug] /api/state POST keys={list(payload.keys())}", flush=True)
+            import sys as _sys
+            print(f"[DEBUG-SERVER] POST /api/state keys={list(payload.keys())}", file=_sys.stderr, flush=True)
             if "custom_op_animate" in payload:
                 anim = payload["custom_op_animate"]
-                print(f"[debug]   custom_op_animate: animate_id={anim.get('animate_id')}, atom_indices={anim.get('atom_indices')}", flush=True)
+                print(f"[DEBUG-SERVER]   animate_id={anim.get('animate_id')} atom_indices={anim.get('atom_indices')}", file=_sys.stderr, flush=True)
             with state_lock:
                 for key, value in payload.items():
                     if key in allowed:
