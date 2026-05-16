@@ -6,8 +6,14 @@ from pathlib import Path
 
 import _bootstrap  # noqa: F401
 
+import logging
 import numpy as np
 import pyvista as pv
+
+# PyVista/VTK can emit repetitive warnings through the Python logger.
+# Suppress them here so the console stays readable.
+logging.getLogger("pyvista").setLevel(logging.ERROR)
+logging.getLogger("vtkmodules").setLevel(logging.ERROR)
 
 from tools import view_json_pyvista as viewer
 

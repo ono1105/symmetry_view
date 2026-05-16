@@ -908,13 +908,15 @@ function buildCopPayload() {
   return {type, params, tolerance, request_id: Date.now()};
 }
 
-let copMatrix = null;        // {W_frac, t_frac} from last check result
-let copSelectedAtoms = new Set(); // atom indices ticked for animation
+let copMatrix = null;        // {W_frac, t_frac, op_type, op_params}
+let copSelectedAtoms = new Set();
+let copAllUnmapped = [];
 
-function displayCopResult(result) {
+function displayCopResult(result, opType, opParams) {
   const div = document.getElementById("cop-result");
   copMatrix = null;
   copSelectedAtoms = new Set();
+  copAllUnmapped = [];
   if (!result) { div.hidden = true; return; }
   if (result.error) {
     div.className = "cop-result fail";
@@ -929,8 +931,9 @@ function displayCopResult(result) {
     : `<strong>✗ ${result.unmapped_count} / ${result.total} atoms do not map — NOT a symmetry operation</strong>`;
 
   if (!ok && result.unmapped && result.unmapped.length > 0) {
-    copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac};
-    html += `<div style="margin:8px 0 4px;font-size:12px;color:#94a3b8">Check atoms to animate them with this operation (Play button plays the animation):</div>`;
+    copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac, op_type: opType || "matrix", op_params: opParams || {}};
+    copAllUnmapped = result.unmapped.map(u => u.source);
+    html += `<div style="margin:8px 0 4px;font-size:12px;color:#94a3b8">Check atoms to animate with this operation — or click "Animate all":</div>`;
     html += `<div class="unmapped-list" id="cop-unmapped-list">`;
     for (const u of result.unmapped) {
       const frac = u.frac ? u.frac.map(v => v.toFixed(3)).join(", ") : "—";
@@ -944,6 +947,7 @@ function displayCopResult(result) {
     html += `<button class="secondary" style="font-size:12px;padding:6px 10px" id="cop-anim-sel">Animate selected</button>`;
     html += `<button class="secondary" style="font-size:12px;padding:6px 10px" id="cop-anim-all">Animate all unmapped</button>`;
     html += `</div>`;
+    html += `<p id="cop-anim-msg" class="hint" style="margin-top:6px"></p>`;
   }
   div.innerHTML = html;
   div.hidden = false;
@@ -951,11 +955,16 @@ function displayCopResult(result) {
   if (!ok && result.unmapped && result.unmapped.length > 0) {
     document.getElementById("cop-anim-sel").addEventListener("click", () => {
       const indices = [...copSelectedAtoms];
-      if (indices.length === 0) return;
+      if (indices.length === 0) {
+        document.getElementById("cop-anim-msg").textContent = "No atoms checked — select at least one atom above.";
+        return;
+      }
+      document.getElementById("cop-anim-msg").textContent = "";
       sendCopAnimate(indices);
     });
     document.getElementById("cop-anim-all").addEventListener("click", () => {
-      sendCopAnimate(result.unmapped.map(u => u.source));
+      document.getElementById("cop-anim-msg").textContent = "";
+      sendCopAnimate(copAllUnmapped);
     });
     for (const cb of document.querySelectorAll(".cop-atom-cb")) {
       cb.addEventListener("change", () => {
@@ -968,12 +977,14 @@ function displayCopResult(result) {
 }
 
 function sendCopAnimate(atomIndices) {
-  if (!copMatrix) return;
+  if (!copMatrix || atomIndices.length === 0) return;
   postState({
     custom_op_animate: {
       atom_indices: atomIndices,
       W_frac: copMatrix.W_frac,
       t_frac: copMatrix.t_frac,
+      op_type: copMatrix.op_type,
+      op_params: copMatrix.op_params,
       animate_id: Date.now(),
     },
     playing: true,
@@ -992,7 +1003,7 @@ async function sendCopCheck() {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload),
     });
-    displayCopResult(result);
+    displayCopResult(result, payload.type, payload.params);
     // notify PyVista to highlight unmapped atoms
     state = await api("/api/state", {
       method: "POST",
@@ -1162,7 +1173,11 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 atom_indices = custom_op_animate.get("atom_indices", [])
                 W_frac = np.asarray(custom_op_animate.get("W_frac"), dtype=float)
                 t_frac = np.asarray(custom_op_animate.get("t_frac"), dtype=float)
-                self.paths = self.build_custom_animation_paths(atom_indices, W_frac, t_frac)
+                op_type = str(custom_op_animate.get("op_type", "matrix"))
+                op_params = custom_op_animate.get("op_params") or {}
+                self.paths = self.build_custom_animation_paths(
+                    atom_indices, W_frac, t_frac, op_type=op_type, op_params=op_params
+                )
                 self.using_custom_paths = True
                 self.last_custom_op_animate_id = animate_id
                 reset = True
@@ -1345,15 +1360,57 @@ class BrowserControlledViewer(NativePyVistaViewer):
         atom_indices: list[int],
         W_frac: np.ndarray,
         t_frac: np.ndarray,
+        *,
+        op_type: str = "matrix",
+        op_params: dict | None = None,
     ) -> dict[int, dict]:
-        """Build linear animation paths for a user-supplied (W|t) operation."""
+        """Build operation-aware animation paths for a user-supplied (W|t) operation."""
         unit_cell = self.render_data.get("unit_cell")
         if unit_cell is None:
             return {}
         lattice = np.asarray(unit_cell["lattice"], dtype=float)
-        # W_cart = L.T @ W_frac @ inv(L.T),  t_cart = t_frac @ L
         W_cart = lattice.T @ W_frac @ np.linalg.inv(lattice.T)
         t_cart = t_frac @ lattice
+        op_params = op_params or {}
+
+        # Build symmetry element dicts so build_operation_path can use arcs/reflections
+        axis_dict: dict | None = None
+        plane_dict: dict | None = None
+        center_dict: dict | None = None
+
+        if op_type in ("rotation", "screw"):
+            uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
+            d_cart = viewer.normalize(uvw @ lattice)
+            p_cart = np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice
+            axis_dict = {"point_cart": p_cart.tolist(), "direction_cart": d_cart.tolist()}
+        elif op_type in ("mirror", "glide"):
+            hkl = np.asarray(op_params.get("normal", [0, 0, 1]), dtype=float)
+            n_cart = viewer.normalize(np.linalg.inv(lattice) @ hkl)
+            p_cart = np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice
+            plane_dict = {"point_cart": p_cart.tolist(), "normal_cart": n_cart.tolist()}
+        elif op_type == "inversion":
+            c_cart = np.asarray(op_params.get("center", [0, 0, 0]), dtype=float) @ lattice
+            center_dict = {"point_cart": c_cart.tolist()}
+        elif op_type == "rotoinversion":
+            uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
+            d_cart = viewer.normalize(uvw @ lattice)
+            c_cart = np.asarray(op_params.get("center", [0, 0, 0]), dtype=float) @ lattice
+            axis_dict = {"point_cart": c_cart.tolist(), "direction_cart": d_cart.tolist()}
+            center_dict = {"point_cart": c_cart.tolist()}
+
+        # Map to kind strings expected by build_operation_path
+        _kind_map = {
+            "rotation": "rotation_n",
+            "screw": "screw_n",
+            "mirror": "mirror",
+            "glide": "glide",
+            "inversion": "inversion",
+            "rotoinversion": "rotoinversion_or_improper_n",
+        }
+        kind = _kind_map.get(op_type, "identity")
+        angle_deg = float(op_params.get("angle", 90)) if op_params else 90.0
+        fake_op = {"kind": kind, "angle_deg": angle_deg, "order": None, "matrix_cart": None}
+
         idx_set = set(int(i) for i in atom_indices)
         paths = {}
         for item in self.animated_atoms:
@@ -1362,7 +1419,11 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 continue
             start = np.asarray(atom["cart"], dtype=float)
             target = W_cart @ start + t_cart
-            paths[atom["index"]] = {"type": "linear", "start": start, "target": target}
+            path = viewer.build_operation_path(
+                start, target, fake_op,
+                axis=axis_dict, plane=plane_dict, center=center_dict,
+            )
+            paths[atom["index"]] = path
         return paths
 
     def apply_custom_check(self, result: dict | None) -> None:
