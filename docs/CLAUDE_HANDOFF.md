@@ -15,7 +15,7 @@
 
 結晶・分子の対称性を解析し、将来の3D表示・対称操作アニメーション・パズル化に使える共通データとビューアー基盤を作る。
 
-現在は GUI を作り直す前段階として、次の範囲に集中しています。
+現在は JSON を開く最小 GUI まで作り始めています。
 
 ```text
 結晶解析
@@ -25,12 +25,16 @@ AtomMapping
 JSON export
 最小JSON表示
 対称操作アニメーション
+最小JSON GUI（Qtなし、PyVista native widgets）
+ブラウザ操作パネル + PyVista表示（localhost API）
 ```
 
 まだ主対象にしないもの:
 
 ```text
-PyVistaQt GUI
+PyVistaQt埋め込みGUI
+CIF/XYZをGUIから直接解析する機能
+マウスによる原子選択
 パズルUI
 ```
 
@@ -51,6 +55,7 @@ tools/
 .venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
 .venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --list-operations
 .venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 25 --animate --animation-fps 6 --animation-speed 0.5
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json
 ```
 
 ## 既知の注意点

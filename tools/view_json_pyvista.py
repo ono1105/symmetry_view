@@ -178,9 +178,9 @@ def main() -> int:
     return 0
 
 
-def add_atoms(plotter: pv.Plotter, render_data: dict) -> None:
+def add_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "expanded") -> None:
     bounds_span = scene_span(render_data)
-    for item in display_atom_instances(render_data):
+    for item in display_atom_instances(render_data, display_mode=display_mode):
         atom = item["atom"]
         center = item["cart"]
         radius = atom_radius(atom["atomic_number"], bounds_span)
@@ -194,10 +194,18 @@ def add_atoms(plotter: pv.Plotter, render_data: dict) -> None:
         plotter.add_mesh(sphere, color=color, smooth_shading=True)
 
 
-def add_animated_atoms(plotter: pv.Plotter, render_data: dict) -> list[dict]:
+def add_animated_atoms(
+    plotter: pv.Plotter,
+    render_data: dict,
+    *,
+    display_mode: str = "expanded",
+    theta_resolution: int = 16,
+    phi_resolution: int = 10,
+    smooth_shading: bool = True,
+) -> list[dict]:
     animated = []
     bounds_span = scene_span(render_data)
-    for item in display_atom_instances(render_data):
+    for item in display_atom_instances(render_data, display_mode=display_mode):
         atom = item["atom"]
         center = item["cart"]
         radius = atom_radius(atom["atomic_number"], bounds_span)
@@ -205,26 +213,27 @@ def add_animated_atoms(plotter: pv.Plotter, render_data: dict) -> list[dict]:
         base = pv.Sphere(
             radius=radius,
             center=(0.0, 0.0, 0.0),
-            theta_resolution=16,
-            phi_resolution=10,
+            theta_resolution=theta_resolution,
+            phi_resolution=phi_resolution,
         )
         mesh = base.copy()
-        mesh.points = base.points + center
-        plotter.add_mesh(mesh, color=color, smooth_shading=True)
+        actor = plotter.add_mesh(mesh, color=color, smooth_shading=smooth_shading)
+        actor.SetPosition(*center)
         animated.append(
             {
                 "atom": atom,
                 "display_shift_cart": item["display_shift_cart"],
                 "base_points": base.points.copy(),
                 "mesh": mesh,
+                "actor": actor,
             }
         )
     return animated
 
 
-def display_atom_instances(render_data: dict) -> list[dict]:
+def display_atom_instances(render_data: dict, *, display_mode: str = "expanded") -> list[dict]:
     unit_cell = render_data.get("unit_cell")
-    if unit_cell is None:
+    if unit_cell is None or display_mode == "source":
         return [
             {
                 "atom": atom,
@@ -249,7 +258,7 @@ def display_atom_instances(render_data: dict) -> list[dict]:
             continue
 
         frac = np.asarray(frac, dtype=float)
-        for shift in display_fractional_shifts(frac):
+        for shift in display_fractional_shifts(frac, display_mode=display_mode):
             shift_cart = shift @ lattice
             instances.append(
                 {
@@ -261,13 +270,24 @@ def display_atom_instances(render_data: dict) -> list[dict]:
     return instances
 
 
-def display_fractional_shifts(frac: np.ndarray) -> list[np.ndarray]:
+def display_fractional_shifts(frac: np.ndarray, *, display_mode: str = "expanded") -> list[np.ndarray]:
+    if display_mode == "source":
+        return [np.zeros(3)]
+    margin = display_mode_margin(display_mode)
     shifts = []
     for shift in _PERIODIC_SHIFTS:
         image_frac = frac + shift
-        if np.all(image_frac >= -0.5 - 1e-9) and np.all(image_frac <= 1.5 + 1e-9):
+        if np.all(image_frac >= -margin - 1e-9) and np.all(image_frac <= 1.0 + margin + 1e-9):
             shifts.append(shift)
     return shifts
+
+
+def display_mode_margin(display_mode: str) -> float:
+    if display_mode in ("expanded", "expanded_quarter"):
+        return 0.25
+    if display_mode == "expanded_half":
+        return 0.5
+    return 0.25
 
 
 def add_unit_cell(plotter: pv.Plotter, unit_cell: dict) -> None:
@@ -286,18 +306,28 @@ def add_symmetry_elements(
     *,
     operation_index: int | None,
     element_index: int | None = None,
-) -> None:
+) -> list:
+    axes, planes, centers = display_symmetry_elements(render_data, atom_mappings, operation_index, element_index)
+    return add_symmetry_element_actors(plotter, render_data, axes, planes, centers)
+
+
+def add_symmetry_element_actors(
+    plotter: pv.Plotter,
+    render_data: dict,
+    axes: list[dict],
+    planes: list[dict],
+    centers: list[dict],
+) -> list:
+    actors = []
     span = scene_span(render_data)
     axis_length = max(span * 0.75, 1.0)
     plane_scale = max(span * 0.45, 0.8)
-
-    axes, planes, centers = display_symmetry_elements(render_data, atom_mappings, operation_index, element_index)
 
     for axis in axes:
         point = np.asarray(axis["point_cart"], dtype=float)
         direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
         line = pv.Line(point - axis_length * direction, point + axis_length * direction)
-        plotter.add_mesh(line, color="#58d68d", line_width=6)
+        actors.append(plotter.add_mesh(line, color="#58d68d", line_width=6))
 
     for plane in planes:
         point = np.asarray(plane["point_cart"], dtype=float)
@@ -313,18 +343,27 @@ def add_symmetry_elements(
         )
         faces = np.array([4, 0, 1, 2, 3])
         mesh = pv.PolyData(points, faces)
-        plotter.add_mesh(
-            mesh,
-            color="#5dade2",
-            opacity=0.35,
-            show_edges=True,
-            edge_color="#aed6f1",
+        actors.append(
+            plotter.add_mesh(
+                mesh,
+                color="#5dade2",
+                opacity=0.35,
+                show_edges=True,
+                edge_color="#aed6f1",
+            )
         )
 
     for center in centers:
         point = np.asarray(center["point_cart"], dtype=float)
-        sphere = pv.Sphere(radius=max(span * 0.035, 0.08), center=point)
-        plotter.add_mesh(sphere, color="#ff5f57", smooth_shading=True)
+        cube = pv.Cube(
+            center=point,
+            x_length=max(span * 0.055, 0.12),
+            y_length=max(span * 0.055, 0.12),
+            z_length=max(span * 0.055, 0.12),
+        )
+        actors.append(plotter.add_mesh(cube, color="#ff5f57", opacity=0.8, show_edges=True))
+
+    return actors
 
 
 def display_symmetry_elements(
@@ -484,7 +523,11 @@ def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s:
         center = np.asarray(atom["cart"], dtype=float) + display_shift
         if path is not None:
             center = evaluate_path(path, s, start_override=np.asarray(atom["cart"], dtype=float) + display_shift)
-        item["mesh"].points = item["base_points"] + center
+        actor = item.get("actor")
+        if actor is not None:
+            actor.SetPosition(*center)
+        else:
+            item["mesh"].points = item["base_points"] + center
 
 
 def animation_paths(

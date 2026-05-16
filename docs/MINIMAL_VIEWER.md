@@ -1,8 +1,9 @@
 # Minimal JSON PyVista Viewer
 
-`tools/view_json_pyvista.py` is a small display prototype.
+`tools/view_json_pyvista.py` is a small command-line display prototype.
+`tools/view_json_gui.py` is the first minimal native PyVista GUI around the same JSON data and animation functions.
 
-It reads exported JSON only. It does not run crystal or molecule analysis.
+Both read exported JSON only. They do not run crystal or molecule analysis.
 
 ## Commands
 
@@ -71,6 +72,65 @@ Render a screenshot and exit:
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --screenshot exports/checks/f2_pd_op1_view.png
 ```
 
+Open the minimal GUI:
+
+```bash
+.venv/bin/python tools/view_json_gui.py exports/f2_pd.json
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json
+```
+
+Open the browser-controlled viewer:
+
+```bash
+.venv/bin/python tools/view_json_server.py exports/jacobsite.json
+```
+
+This starts a local control panel at `http://127.0.0.1:5173/` and keeps PyVista responsible for the 3D view. The browser UI includes an operation list, operation filter, atom checkbox list, atom filter, Play, Stop, and Reset. Operation rows show the operation symbol plus the selected representative axis `[uvw]`, plane normal `(hkl)`, or center/point fractional coordinate.
+The operation list can be sorted by operation number, operation symbol, full axis/plane/center entry, or direction only. It can also be filtered to one selected operation or one selected axis/plane direction.
+
+For smoother interactive playback, the GUI defaults to source atoms only. Use `--expanded` when you need the half-cell periodic display clones:
+
+```bash
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --expanded
+```
+
+`--expanded` uses a smaller quarter-cell margin `[-0.25, 1.25]` to keep the GUI responsive.
+
+List operations or atoms before opening the GUI:
+
+```bash
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --list-operations
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --list-atoms
+```
+
+Open at a specific operation or with selected atoms:
+
+```bash
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --operation 25
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --scope selected --selected-atoms 0 1 2
+```
+
+The first GUI intentionally avoids Qt/PyVistaQt. It uses PyVista's native slider and keyboard widgets because WSL/X11 can fail with `BadWindow` when VTK is embedded in Qt.
+
+The browser-controlled viewer also avoids Qt. It communicates with Python through a local stdlib HTTP server, so it is the preferred path for list-based controls and future puzzle UI.
+
+Controls:
+
+```text
+operation slider: choose operation
+speed slider: playback speed
+space: play / stop
+n / p: next / previous operation
+r: reset animation
+1 / 2 / 3: all / representative / selected scope
+```
+
+If the current directory is `tools/`, use:
+
+```bash
+../.venv/bin/python view_json_gui.py ../exports/jacobsite.json
+```
+
 `exports/` 直下は共有用のJSON本体、`exports/checks/` はローカル確認用のGIF/PNG置き場です。
 
 `--animation-scope representative` animates one representative atom only. `--animation-scope all` animates every atom, but the crystal periodic image is chosen once from the representative atom and then applied to all atoms as the same integer lattice shift. Use `--representative-atom N` when a specific atom should define that shared movement.
@@ -95,7 +155,7 @@ representative operations checked:
   op 31 mirror
 ```
 
-For `op 25`, current RenderData exposes centers but no rotation axis, so the viewer falls back to an inversion-style phase instead of a full rotation-plus-inversion animation. Full rotoinversion animation will need axis extraction from the operation matrix or richer element export.
+For `op 25`, the viewer derives the effective rotoinversion axis from the operation matrix and animates it as rotation followed by inversion.
 
 ## Scope
 
@@ -113,15 +173,17 @@ operation element list
 atom mapping printout
 source-to-target displacement lines
 operation animation
+minimal JSON GUI
 screenshots
 ```
 
 Not implemented yet:
 
 ```text
-GUI controls
-atom selection
 puzzle interactions
+CIF/XYZ open and analysis from the GUI
+CIF/XYZ open and analysis from the GUI
+mouse-based atom picking
 ```
 
 This viewer is intentionally separate from analysis code. It should consume only exported JSON.

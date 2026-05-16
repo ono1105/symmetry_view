@@ -1297,3 +1297,509 @@ Codex の GIF 確認と私の数値確認は矛盾なし。Codex は目視のみ
 ### 次の対応提案
 
 6 つの未収録点群（`2`, `3`, `-6`, `422`, `432`, `6mm`）は今すぐ追加が必須ではないが、点群コレクションとして完全にしたい場合は CIF を追加するだけで対応できる。残差チェックが通れば自動でカバー扱いにできる。
+
+---
+
+## GUI 化前の設計確認 (2026-05-16)
+
+`PROJECT_SPEC.md`・アーカイブ仕様書・現行コードを照合して、簡単な GUI に移行する前に Codex が決める必要のある点をまとめる。
+
+### データ層・アニメーションに残存バグなし
+
+全 32 CIF・全操作で residual 機械精度であることを確認済み。GUI 移行を妨げる技術的バグはない。
+
+### 必須対応 1: `run_animation()` のブロッキングループ
+
+`tools/view_json_pyvista.py` の `run_animation()`（line ~454）が `time.sleep()` でフレームを刻んでいる:
+
+```python
+for frame in range(frames):
+    update_animated_atoms(animated_atoms, paths, frame / (frames - 1))
+    plotter.update()
+    time.sleep(delay)   # Qt イベントループをブロックする
+```
+
+Qt GUI に埋め込むと `time.sleep()` がイベントループを止めてウィンドウがフリーズする。
+
+**修正方針**: `BackgroundPlotter.add_callback(func, interval_ms, count)` に置き換える。`pyvistaqt 0.11.4` でこの API は利用可能であることを確認済み。`update_animated_atoms()` 自体は変更不要。
+
+```python
+# GUI 用のループドライバー例
+frame_state = {"index": 0}
+def advance():
+    s = frame_state["index"] / (frames - 1)
+    update_animated_atoms(animated_atoms, paths, s)
+    frame_state["index"] += 1
+bp.add_callback(advance, interval=int(1000 / playback_fps), count=frames)
+```
+
+### 必須対応 2: 対称要素アクターの追跡
+
+`add_symmetry_elements()` は `plotter.add_mesh()` するがアクターの参照を返さない。操作リストで別の操作に切り替えたとき「前の対称要素だけ消す」ができない。
+
+**修正方針**: `add_symmetry_elements()` が追加したアクターのリストを返すよう変更し、呼び出し側が保持して `plotter.remove_actor()` で差し替える。原子・単位胞は起動時の1回だけで操作切り替えの影響を受けない。
+
+```python
+# 変更例
+def add_symmetry_elements(plotter, render_data, ...) -> list:
+    actors = []
+    mesh = plotter.add_mesh(...)
+    actors.append(mesh)
+    return actors
+
+# 操作切り替え時
+for actor in current_element_actors:
+    plotter.remove_actor(actor)
+current_element_actors = add_symmetry_elements(plotter, render_data, new_op_index)
+```
+
+### 設計決定: 解析のトリガー（案 A / B / C）
+
+旧 GUI は CIF 読み込み・解析・描画を一体化して失敗した。現行の JSON 境界設計を GUI でどう扱うかを決める必要がある。
+
+| 案 | GUI の動き | 推奨度 |
+|---|---|---|
+| A. JSON 先読み | ユーザーが事前 export、GUI は JSON を開くだけ | 最シンプル。初期 GUI に最適 |
+| B. auto-export | CIF 開くと裏で `export_analysis_json()` を呼び temp JSON 生成 | UX 自然。既存コード再利用可能 |
+| C. インメモリ | `analyze_cif()` → dict → JSON ファイル不要 | 将来的に理想。今はオーバーエンジニアリング |
+
+**初期 GUI には案 A か B を推奨**。案 B は `tools/export_analysis_json.py` の内部関数を直接呼ぶだけで実現できる。
+
+### 流用可能な関数（変更不要）
+
+以下はそのまま GUI から呼べる。PyVistaQt の `BackgroundPlotter` は `pv.Plotter` のサブクラスなので API 互換。
+
+```text
+add_atoms(plotter, render_data)          ← 起動時 1 回
+add_unit_cell(plotter, render_data)      ← 起動時 1 回
+add_symmetry_elements(...)               ← 操作切り替えで差し替え（要 actor 返却追加）
+add_animated_atoms(plotter, render_data) ← アニメーション用 atom list 生成
+animation_paths(...)                     ← 純粋計算、変更不要
+update_animated_atoms(...)               ← 純粋更新、変更不要
+```
+
+### 推奨する簡単 GUI の構成
+
+```text
+左パネル (QWidget):
+  [Open CIF / XYZ]
+  ---
+  操作リスト (QListWidget)
+    → 選択で右の対称要素を差し替え
+  ---
+  [Play / Stop]
+  速度スライダー
+  scope: All / Representative ラジオボタン
+
+右パネル:
+  BackgroundPlotter (PyVistaQt)
+```
+
+### 今は不要（パズル段階に回してよい）
+
+```text
+原子クリック選択 (enable_element_picking / enable_point_picking)
+パズル正誤判定 (AtomMapping.atom_to_atom との照合)
+操作結果を単位胞内に wrap して表示
+分子モードの GUI サポート
+```
+
+原子クリックは PyVista の `enable_point_picking(callback)` で実装できる準備はあるが、`AtomMapping.atom_to_atom` との連携設計が必要なため GUI 基盤が安定してから追加する。
+
+---
+
+## PyVista 単体 GUI への切り替え評価 (2026-05-16)
+
+### 経緯
+
+`tools/view_json_gui.py` を PyQt6 + pyvistaqt.QtInteractor で実装したところ、WSL/X11 環境で即座にクラッシュした。
+
+```text
+X Error of failed request:  BadWindow (invalid Window parameter)
+  Major opcode of failed request:  12 (X_ConfigureWindow)
+  Serial number of failed request:  7
+```
+
+JSON 読み込みの遅延・`BackgroundPlotter` への切り替えを試みたが同様のエラーが継続した。
+
+### 根本原因
+
+Qt ウィンドウ管理と VTK レンダーウィンドウの連携が WSL/X11 上で不安定。アニメーション計算・AtomMapping・JSON スキーマとは無関係の表示バックエンド問題。
+
+### Codex の対策
+
+Qt / PyVistaQt 依存を完全に除去し、`pv.Plotter` 単体の最小 GUI に置き換えた。
+
+```text
+操作選択:  add_slider_widget（0 〜 N-1 のスライダー）
+速度変更:  add_slider_widget（0.1 〜 4.0）
+アニメーション駆動:  add_timer_event(max_steps, duration, callback)
+キー操作:  add_key_event（space / n / p / r / 1 / 2 / 3）
+ステータス表示:  add_text（操作名・種別・scope をオーバーレイ）
+```
+
+### 技術的正当性の確認
+
+| 項目 | 確認結果 |
+|---|---|
+| `animation_paths()` が `selected_atoms` 引数を受け付けるか | ✓ 実装済み（line 503、scope="selected" で entries をフィルタ） |
+| `add_symmetry_elements()` がアクターリストを返すか | ✓ 実装済み（GUI からの remove_actor に対応済み） |
+| `pv.Plotter.add_timer_event(max_steps, duration, callback)` の API | ✓ 存在確認済み |
+| 構文エラー | なし（`py_compile` 通過） |
+| `--help` / `--selected-atoms` の動作 | ✓ 正常 |
+
+### 軽微な問題
+
+`on_timer` のフレーム進行が整数丸めで粗い:
+
+```python
+self.frame = (self.frame + max(int(round(self.speed)), 1)) % self.frame_count
+```
+
+speed=0.1〜1.4 がすべて「1 フレーム/tick」と同一になり、スライダー下端付近が効かない。現状の「1倍未満は無効」制限として許容できるが、将来的には timer の `duration` 引数で速度を制御する方が正確。ただし `add_timer_event` は実行後に `duration` を変更できないため、改善は別設計が必要。
+
+### 対策の評価
+
+**妥当。** WSL 環境での Qt + VTK 不安定性を避けるために PyVista 単体に戻す判断は合理的。`viewer.animation_paths` / `viewer.add_symmetry_elements` / `viewer.update_animated_atoms` 等の描画・アニメーション関数はすべて正しく流用できている。
+
+### 今後の方針
+
+- `pv.Plotter` 単体で「JSON を開く・操作を選ぶ・アニメーションする」が動く状態を維持する
+- Qt GUI への再移行は WSL の OpenGL サポート状況が改善されてから検討する（`LIBGL_ALWAYS_SOFTWARE=1` + PyVistaQt の組み合わせで安定するか要確認）
+- CIF から直接読み込む案 B は GUI 基盤が安定してから追加する
+
+---
+
+## Browser Control UI チェックポイント (2026-05-16)
+
+Claude に確認してほしい現状共有。
+
+### 現在の構成
+
+- `tools/view_json_server.py`
+  - stdlib `ThreadingHTTPServer` でブラウザ操作パネルを配信
+  - PyVista はメインスレッドで `pv.Plotter` を実行
+  - ブラウザと PyVista は `shared_state` + `threading.Lock` で同期
+  - UI は操作リスト、方向フィルタ、原子チェックリスト、Play/Stop/Reset、View along direction
+- `tools/view_json_gui.py`
+  - Qt を使わない PyVista native widget 版
+  - ブラウザUIが主経路になったため、現在はバックアップ/簡易確認用
+- `tools/view_json_pyvista.py`
+  - 描画・アニメーション本体
+  - GUI/ブラウザはこの関数群を呼ぶだけにしている
+
+### Codex が今回確認したこと
+
+```bash
+.venv/bin/python -m py_compile tools/view_json_server.py tools/view_json_gui.py tools/view_json_pyvista.py crystal_viewer/*.py
+```
+
+構文エラーなし。
+
+`exports/*.json` に対して `operation_summaries()` を実行し、例外なし。
+
+```text
+f2_pd.json      12 ops   36.7 ms
+jacobsite.json 192 ops 1014.4 ms
+mg2v2o7.json     2 ops    1.9 ms
+water.json       4 ops    0.6 ms
+```
+
+### 見つけて修正したバグ
+
+操作リストの軸/面/通過座標が、実際に PyVista で表示・アニメーションに使う軸/面とずれるケースがあった。
+
+原因:
+
+- `operation_summaries()` が高速化のため `display_symmetry_elements(render_data, None, ...)` を使っていた
+- そのため複数の等価な軸/面がある操作では「先頭候補」の表示になり、`atom_mappings` を使って選ばれる実際の要素と一致しなかった
+- Jacobsite では 42 操作で通過座標がずれていた
+
+修正:
+
+- `operation_summaries()` でも `atom_mappings` を渡し、実際のアニメーション文脈で選ばれる軸/面/中心を表示するよう変更
+- pure translation だけは、周期境界で実際にアニメーションする代表原子の `start -> target` 方向を表示するため、表示上の translation 方向を上書きしている
+
+修正後:
+
+- 回転/鏡映/回反などのリスト表記は PyVista 表示要素と一致
+- translation は JSON 生データの `+1/2` 方向ではなく、実際に見える最短像方向を表示
+
+### 現在の既知トレードオフ
+
+- Jacobsite の起動時 summary 生成は約 1 秒かかる
+  - 以前の fast path は約 0.09 秒だったが、リスト表示と実際の表示要素の一致を優先した
+  - 体感上まだ許容範囲
+  - 将来操作数がさらに増える場合は、初期表示を fast path にして、選択時だけ詳細ラベルを更新する lazy 方式を検討
+- `tools/view_json_server.py` と `tools/view_json_gui.py` はまだ未追跡ファイル
+  - push 前に `git add` が必要
+- docs の一部に古い UI 説明が残っている
+  - 例: operation filter / atom filter と書いているが、現在のUIでは検索入力欄を削除済み
+
+### Claude に特に確認してほしい点
+
+1. `operation_summaries()` が `atom_mappings` を使うようになった判断は妥当か
+2. translation の表記を「JSON 生データ」ではなく「実際に見える最短像方向」に合わせる方針でよいか
+3. summary 生成 1 秒程度を今の段階で許容してよいか、lazy 化すべきか
+4. ブラウザUIの `shared_state` 同期に競合・上書きバグが残っていないか
+5. 次の段階で、CIF直接読み込みより先に行うべき設計整理があるか
+
+---
+
+## Browser UI コードレビュー (2026-05-16)
+
+Codex の 5 問への回答と、実際にコードを読んで見つけたバグ・最適化案。
+
+### Q1 ～ Q5 への回答
+
+**Q1: `operation_summaries` が `atom_mappings` を使うようになった判断は妥当か**
+
+妥当。Jacobsite で 42 操作のラベルが 3D 表示と食い違っていたのは実際の問題。ブラウザのリスト表記と PyVista 表示が一致していないと、「どの操作を選んでいるか」がユーザーに伝わらない。現行の slow path（atom_mappings あり）を維持する判断は正しい。
+
+**Q2: translation の表記を「実際に見える最短像方向」に合わせる方針でよいか**
+
+よい。`translation_cart` の生の値（例: `[4.26, 4.26, 0]` Å）より、代表原子の `animation_paths` から導いた実際の表示方向の方が直感的で、3D での動きと一致する。`_display_translation_cart` を `summary_operation` に持たせて `translation_direction_cart` で参照する設計も正しい。
+
+**Q3: summary 生成 700ms を今の段階で許容してよいか**
+
+許容できるが、**無料で 23× 高速化できる方法がある**（後述）。
+
+**Q4: `shared_state` の競合・上書きバグは残っているか**
+
+前回指摘した 2 件は修正済み:
+- write-back を `playing` のみに限定 ✓
+- `scope=shared_state["scope"]` をコンストラクタに明示渡し ✓
+
+現在のコードに競合バグはない。`view_request_id` のトランジェント処理も `last_view_request_id` で正しく重複実行を防いでいる。
+
+**Q5: CIF 直接読み込みより先に行うべき設計整理はあるか**
+
+今の段階で行うべき整理が 1 点ある（後述の最適化と同時に）。
+
+---
+
+### 現行コードの確認: バグなし
+
+前回レビューのバグは全件修正済みを確認:
+
+| 項目 | 前回 | 今回 |
+|---|---|---|
+| write-back 競合 | ❌ `operation_index/scope/selected_atoms` も書き戻し | ✓ `playing` のみ |
+| 初期 scope 不整合 | ❌ `scope="all"` vs `shared_state="representative"` | ✓ 明示渡しで一致 |
+
+`element_actor_cache` + `SetVisibility` による操作切り替えは良い設計。`remove_actor/add_mesh` より大幅に速い。
+
+`camera_up_vector` の実装も正しい（方向が [1,1,1] 等の場合でも垂直な up ベクトルが得られる）。
+
+---
+
+### 最適化: `display_symmetry_elements` の重複呼び出し
+
+#### 現状（コスト内訳）
+
+```text
+operation_summaries() 起動時:
+  display_symmetry_elements × 192 (slow path) = 658 ms  ← ボトルネック
+  visual_translation_direction × 192           =   3 ms
+  ラベル計算                                   =  40 ms
+  合計                                         = 700 ms
+
+ユーザーが操作を初めて選ぶとき:
+  show_element_actors() で display_symmetry_elements を再度呼ぶ = 3.7 ms/click
+
+view_along_current_operation():
+  display_symmetry_elements を再度呼ぶ = 3.7 ms/click
+```
+
+`display_symmetry_elements(rd, atom_mappings, ...)` は、起動時（summaries 生成）と操作初回選択（`show_element_actors`）の 2 回呼ばれている。axes/planes/centers の dict を起動時に返して `BrowserControlledViewer` に渡せば、2 回目は不要になる。
+
+#### 最適化案（コスト: 起動は変わらず、操作切り替えと view_along は 0ms に）
+
+`operation_summaries` が `axes/planes/centers` のキャッシュも一緒に返すよう変更:
+
+```python
+def operation_summaries(
+    render_data: dict, atom_mappings: dict | None
+) -> tuple[list[dict], dict[int, tuple]]:
+    summaries = []
+    element_cache: dict[int, tuple[list, list, list]] = {}
+    for operation in render_data["operations"]:
+        ...
+        axes, planes, centers = viewer.display_symmetry_elements(
+            render_data, atom_mappings, operation["index"], None
+        )
+        element_cache[operation["index"]] = (axes, planes, centers)
+        summaries.append({...})
+    return summaries, element_cache
+```
+
+`BrowserControlledViewer` にこのキャッシュを渡し、`show_element_actors` で使う:
+
+```python
+class BrowserControlledViewer(NativePyVistaViewer):
+    def __init__(self, *args, element_context_cache: dict | None = None, **kwargs):
+        super().__init__(...)
+        self.element_context_cache = element_context_cache or {}
+
+    def show_element_actors(self, operation_index: int) -> None:
+        if operation_index not in self.element_actor_cache:
+            precomputed = self.element_context_cache.get(operation_index)
+            if precomputed:
+                axes, planes, centers = precomputed
+                actors = _add_elements_from(self.plotter, axes, planes, centers, span)
+            else:
+                actors = viewer.add_symmetry_elements(...)
+            self.element_actor_cache[operation_index] = actors
+        ...
+```
+
+`view_along_current_operation` も `element_context_cache` から取得すれば再計算不要。
+
+#### 別案: 起動 700ms を 30ms にする fast-path 方式
+
+REVIEW_NOTES 前回記載の `None` 渡し案（fast path, 3ms）と slow path の組み合わせ:
+
+```python
+# 起動: fast path でラベル生成（30ms）
+summaries, _ = operation_summaries(render_data, None)
+
+# 操作初回選択時: show_element_actors が slow path を呼ぶ (3.7ms/click)
+```
+
+**トレードオフ**: ブラウザのリスト表記が PyVista 表示と一致しない ops が最大 42 件残る（Codex が解決済みの問題が再発）。起動速度を優先するなら採用してよいが、教育ツールとして「リスト→3D 一致」の方が重要なら今のままでよい。
+
+---
+
+### 推奨: 最適化案 A（element_context_cache 共有）
+
+- 起動時間: 現状と同じ（700ms）
+- 操作切り替え初回: 3.7ms → 0ms
+- `view_along` click: 3.7ms → 0ms
+- ラベルと 3D の一致: 維持
+- 変更量: `operation_summaries` の戻り値変更 + `BrowserControlledViewer` への cache 渡し + `show_element_actors` での参照追加
+
+ただし `viewer.add_symmetry_elements` の中で `display_symmetry_elements` を再度呼ぶ問題も残るため、`add_symmetry_elements` に `axes/planes/centers` を直接受け取るオーバーロードを追加すると完結する。
+
+**今すぐ直すかどうか**: 700ms は体感で許容範囲なら後回しでよい。CIF 直接読み込み実装前（analysis 呼び出しが追加されるとさらに遅くなる可能性）に対処しておくことを推奨。
+
+### Codex 対応 (2026-05-16)
+
+Claude 推奨の最適化案 A を実装。
+
+- `tools/view_json_pyvista.py`
+  - `add_symmetry_element_actors(plotter, render_data, axes, planes, centers)` を追加
+  - 既存の `add_symmetry_elements()` は `display_symmetry_elements()` 後にこの関数へ委譲
+- `tools/view_json_server.py`
+  - `operation_summaries()` が `(summaries, element_context_cache)` を返すよう変更
+  - `BrowserControlledViewer` が `element_context_cache` を受け取り、操作初回選択時の対称要素描画に再利用
+  - `view_along_current_operation()` も同じ cache を参照
+
+確認:
+
+```bash
+.venv/bin/python -m py_compile tools/view_json_server.py tools/view_json_gui.py tools/view_json_pyvista.py crystal_viewer/*.py
+.venv/bin/python tools/view_json_server.py --help
+```
+
+`exports/*.json` の summary/cache 生成も例外なし。
+
+```text
+f2_pd.json      ops= 12  cache= 12
+jacobsite.json  ops=192  cache=192
+mg2v2o7.json    ops=  2  cache=  2
+water.json      ops=  4  cache=  4
+```
+
+---
+
+## Camera Rotation UI 追加 (2026-05-16)
+
+ブラウザ操作パネルに、現在の視点を任意角度で上下左右に回転する機能を追加。
+
+目的:
+
+- `View along direction` で (001) 面などを正面から見た後、90° 右回転して「その面を右側から見る」ような確認をしたい
+- VESTA 的に、現在の視点を基準に少しずつ回して構造を確認できるようにする
+
+実装:
+
+- `tools/view_json_server.py`
+  - UI に `Camera` セクションを追加
+  - `camera-angle` 入力欄と `Up / Left / Right / Down` ボタンを追加
+  - ブラウザから `camera_request_id`, `camera_direction`, `camera_angle` を POST
+  - PyVista 側で現在の camera position / focal point / view up を取得し、focal point を中心に回転
+  - 左右: 現在の view-up 軸まわり
+  - 上下: 現在の screen-right 軸まわり
+  - カメラ位置だけでなく view-up も同時に回して、画面の上下が不自然にねじれないようにした
+
+確認:
+
+```bash
+.venv/bin/python -m py_compile tools/view_json_server.py tools/view_json_gui.py tools/view_json_pyvista.py
+.venv/bin/python tools/view_json_server.py --help
+```
+
+数値確認:
+
+```text
+view radius [0,0,1], up [0,1,0]
+right 90 -> [1,0,0]
+left  90 -> [-1,0,0]
+```
+
+---
+
+## Browser UI 機能追加コードレビュー (2026-05-16)
+
+前回レビューからの追加機能（カメラ回転、GIF保存、速度ボタン、表示範囲切り替え、元素フィルター、element_context_cache）を確認した。
+
+### バグなし — 全件確認
+
+| 確認項目 | 結果 |
+|---|---|
+| 構文エラー | なし（py_compile 通過） |
+| `element_context_cache` が 192 op 全件をカバー | ✓ |
+| `rotate_vector` の数値正確性（right 90° → [1,0,0]、left 90° → [-1,0,0]）| ✓ |
+| `imageio.v2.mimsave(..., fps=fps)` GIF 書き出し | ✓ API 正常 |
+| `scope="selected"` 全原子 vs `scope="all"` の同一性 | ✓ 残差一致・角度一致 |
+
+### 新機能の設計確認
+
+**カメラ回転 (`rotate_current_camera`):**
+Rodrigues 回転公式を正しく使用。Left/Right は `up` 軸周り、Up/Down は `screen_right` 軸周り。camera_request_id による重複実行防止も正しく機能。
+
+**GIF 保存 (`save_current_gif`):**
+`on_timer` からブロッキング呼び出しだが、VTK はスレッドセーフでないため正当な設計。s=0→1 の全サイクルを 48 フレームに等間隔サンプリング。`imageio.mimsave` の `fps` 引数は正常動作確認済み。`finally` で `frame_position` を元に戻す処理も正しい。
+
+**速度ボタン (`operation_speed_multiplier`):**
+mirror/inversion/glide/translation を 2×、rotation/screw を 1× にするのは妥当な設計。`rotoinversion` は 1× のまま（回転+反転の複合操作なので速くしない）。
+
+**`scope="selected"` 全原子デフォルト:**
+`animation_paths(scope="selected", representative_atom=0, selected_atoms=all)` は `scope="all"` と同じ残差・角度になることを数値確認済み（Jacobsite rotation_2 で一致）。唯一の差異は代表原子が auto-select か atom[0] かという点のみで、全操作 residual < 1e-6 を維持している。
+
+**表示範囲切り替え (`rebuild_display_atoms`):**
+元の atom actor（`item["actor"]`）を正しく除去してから再構築する設計。element_actor_cache は影響を受けない（表示範囲は atom 球の数と位置のみを変える）。
+
+### 起動時間の詳細プロファイル
+
+```text
+operation_summaries (192 ops, Jacobsite): 1214 ms
+
+ボトルネック: display_symmetry_elements × 192 = ~660 ms
+  ├ select_animation_context (avg 2.9 候補 × 56 atoms × build_operation_path):
+  │   effective_rotation_axis 呼び出し合計: 17,725 回
+  │   このうちラベル関数からの冗長呼び出し: 最小限
+  │   （axes が既に populated なら label 関数は effective_axis_from_operation を呼ばない）
+  └ 大半は animation_context_score → build_operation_path 内の呼び出し
+```
+
+element_context_cache 実装後:
+- 初回操作選択: display_symmetry_elements を再呼び出ししない → 0ms
+- 2 回目以降: element_actor_cache から visibility toggle → 0ms
+- view_along_current_operation: element_context_cache からの fallback なし（全 op がキャッシュ済み）
+
+### 残存する最適化余地
+
+現在の 1.2 秒起動の根本原因は `animation_context_score` が全 ops × 全候補 × 全原子で `build_operation_path` を呼んでいること（前回 REVIEW_NOTES の最適化案 A,B が未対応のままの部分）。追加機能の実装でこのボトルネックは変わっていない。
+
+今後 CIF 直接読み込みを実装する際には、この起動コストが analysis 時間に加算される。現段階では許容範囲（1 秒強）だが、その時点で lazy 化を検討するタイミングになる。

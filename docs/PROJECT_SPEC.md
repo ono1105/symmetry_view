@@ -98,18 +98,32 @@ Animation details are documented in `docs/ANIMATION_DESIGN.md`.
 - animate selected operations,
 - write GIFs and screenshots.
 
+`tools/view_json_gui.py` is the first minimal native PyVista GUI. It also reads exported JSON only and can:
+
+- open one exported JSON file from the command line,
+- switch displayed symmetry elements by operation,
+- play non-blocking operation animations,
+- change playback speed,
+- animate all atoms, one representative atom, or typed selected atom indices.
+
+The first GUI intentionally avoids Qt/PyVistaQt. WSL/X11 showed `BadWindow` failures when VTK was embedded in Qt, so the stable prototype uses PyVista's native slider and keyboard widgets.
+For responsiveness, it defaults to source atoms only and offers `--expanded` for the half-cell periodic clone display used in visual checks.
+The expanded GUI display uses a quarter-cell margin rather than the wider half-cell margin used by earlier checks.
+
+`tools/view_json_server.py` is the preferred prototype for list-based controls. It starts a local stdlib HTTP server for browser operation/atom lists and uses the main Python thread for PyVista rendering. The browser UI supports operation filtering/selection, operation sorting, direction filtering, atom checkbox selection, Play, Stop, and Reset. Operation rows stay compact: operation symbol plus representative axis `[uvw]`, plane normal `(hkl)`, and center/point fractional coordinates.
+
 Viewer usage is documented in `docs/MINIMAL_VIEWER.md`.
 
 ## Intentional Differences From The Original Final Spec
 
-The archived final spec expected a PyVistaQt GUI. The current implementation intentionally keeps GUI work deferred because the first GUI attempt was unstable.
+The archived final spec expected a PyVistaQt GUI. The current implementation restarted GUI work from a small JSON-only viewer because the first GUI attempt was unstable.
 
 Known intentional differences:
 
 ```text
-PyVistaQt GUI is not active yet.
+The first GUI is native PyVista and JSON-only for now.
 Open CIF / Analyze Symmetry buttons are not implemented yet.
-Selected atom interaction is not implemented yet.
+Mouse-based selected atom interaction is not implemented yet.
 Puzzle UI is not implemented yet.
 Molecular analysis is already implemented, although early crystal-only specs deferred it.
 ```

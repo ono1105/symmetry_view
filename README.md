@@ -104,6 +104,25 @@ JSON export:
 .venv/bin/python tools/view_json_pyvista.py exports/water.json
 ```
 
+簡単なGUI:
+
+```bash
+.venv/bin/python tools/view_json_gui.py exports/f2_pd.json
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --list-operations
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --list-atoms
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --operation 25
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --scope selected --selected-atoms 0 1 2
+.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --expanded
+.venv/bin/python tools/view_json_server.py exports/jacobsite.json
+```
+
+`tools/` ディレクトリに移動している場合:
+
+```bash
+../.venv/bin/python view_json_gui.py ../exports/jacobsite.json
+```
+
 `exports/` 直下は共有用のJSON本体だけを置き、確認用のGIF/PNGは `exports/checks/` に置く方針です。
 
 ## 現在の設計方針
@@ -117,4 +136,4 @@ JSON export:
 - 現在の目的・スコープ・仕様は `docs/PROJECT_SPEC.md` に集約。
 - JSONビューア上の対称操作アニメーションを追加済み。設計は `docs/ANIMATION_DESIGN.md` に記録。
 - 結晶アニメーションでは、代表原子で決めた周期像シフトを全原子に共有して、1つの対称操作として見える動きを優先する。
-- GUI/Qt埋め込みはまだ再実装しない。
+- GUIはQtなしのPyVista単体版から再開。CIFをGUIから直接解析する案Bは次段階で追加する。
