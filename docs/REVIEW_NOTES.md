@@ -1864,7 +1864,94 @@ Jacobsite mirror (110) through origin:         is_symmetry=True ✓
 
 ### 設計判断
 
-- チェックは HTTP ハンドラー内で同期実行（数学計算のみ、~数ms）→ ブラウザに即時応答
+- チェックは HTTP ハンドラー内で同期実行（数学計算のみ、~数ms）→ ブラウザに即心応答
 - PyVista ハイライトは shared_state 経由で非同期（次の timer tick = ~33ms 後）
 - 分子モード (unit_cell なし) はエラーメッセージを返す
 - Codex が変更した既存関数は一切変更していない
+
+---
+
+## Claude 実装 (2026-05-17): デバッグセッションで発見した問題と修正
+
+### 修正済みバグ
+
+#### 1. JS構文エラー (`lines.join("\n")`)
+**場所:** `view_json_server.py` の `renderOperationDetails` 関数内（HTML テンプレート）
+
+**原因:** Python の `"""..."""` 文字列内で `"\n"` を書くと Python が改行文字に変換し、ブラウザに届く JS に改行を含むダブルクォート文字列リテラルが生成される（JS では構文エラー）。
+
+**修正:** `"\n"` → `"\\n"` でバックスラッシュ+n として渡す。
+
+---
+
+#### 2. `NameError: name 'pv' is not defined` の無限ループ
+**場所:** `view_json_server.py` の `apply_custom_check()` / `_on_timer_inner()`
+
+**原因:** `apply_custom_check` が `pv.Sphere()` を呼ぶが `view_json_server.py` に `import pyvista as pv` がなかった。NameError が発生すると `last_custom_op_check_id` が更新されず、次の timer tick でも同じ例外を繰り返す（33ms 毎）→ CPU スパイク。
+
+**修正:**
+- `import pyvista as pv` を追加
+- `last_custom_op_check_id = custom_op_check_id` を `apply_custom_check()` 呼び出しの**前**に移動（例外が起きても ID が更新され、ループしない）
+
+---
+
+#### 3. VTK warning 再帰ループ
+**場所:** `view_json_server.py` 起動時 / PyVista レンダリング
+
+**原因:** `opacity < 1` のアクターが VTK の depth peeling (透明順ソート) 警告を発生させる→ PyVista がそれを Python logging 経由でログ→ そのログ出力が何らかの VTK イベントを再トリガー→ 指数的に増殖するメッセージが端末を占拠し、他の出力が一切見えなくなる。WSL/Mesa 環境で顕著。
+
+**修正:** `BrowserControlledViewer.__init__` で全レンダラーの depth peeling を無効化：
+```python
+for renderer in self.plotter.renderers:
+    renderer.UseDepthPeelingOff()
+```
+
+---
+
+### 現在残っている問題（Codex に引き渡す）
+
+#### Bug (中): カスタムアニメ後に同じ操作でPlayしても通常アニメが動かない
+
+**場所:** `view_json_gui.py:114` の `set_operation_position` 早期リターン / `view_json_server.py` `_on_timer_inner`
+
+**再現手順:**
+1. Custom Operation Check でアンマップ原子を確認 → Animate all unmapped で再生
+2. ブラウザの operation list で**同じ操作**を選択
+3. Play → **カスタムアニメが再生され、通常操作アニメが動かない**
+
+**根本原因:** `_on_timer_inner` は `operation_index` の変化で `using_custom_paths = False` を設定するが、同じ操作を再クリックしても `operation_index != self.last_operation_index` が偽になるためこのブロックに入らない。`using_custom_paths` は True のまま残り、`self.paths` はカスタムパスを保持し続ける。`set_operation_position` の早期リターン条件 `self.paths` (非空) も Build paths を呼ばない。
+
+**回避策:** "Clear highlight" ボタンを押すと `build_paths()` が強制呼び出され解消。
+
+**提案修正:** 以下のいずれか：
+- `_on_timer_inner` の `active_mode` が "standard" に変わったときに `using_custom_paths = False` + `build_paths()` を呼ぶ
+- `set_operation_position` の早期リターン条件に `not self.using_custom_paths` を加える（base クラスは `using_custom_paths` を持たないので server.py でオーバーライドするのが安全）
+
+---
+
+#### Bug (低): `apply_custom_check` 失敗時にハイライトが無音で消える
+
+**場所:** `view_json_server.py:1424`
+
+**状況:** `last_custom_op_check_id` を呼び出し前に更新する修正で例外ループは防げたが、`apply_custom_check` 内で例外が発生した場合、赤ハイライトが表示されない上にユーザーへのフィードバックもない。
+
+**提案修正:** `apply_custom_check` を `try/except` で囲み、失敗時はブラウザのステータスに "check highlight failed" を出す（`shared_state["status_message"]` 等）。
+
+---
+
+#### Latent (低): `sphere_mesh_cache` で同じ PolyData を共有
+
+**場所:** `view_json_gui.py:261` `sphere_mesh()` / `ensure_display_atom()`
+
+**状況:** 同じ原子番号・半径のアクター全員が同一 `pv.PolyData` オブジェクトを `item["mesh"]` として参照する。現在は `actor.SetPosition()` のみ使用するため問題ない。しかし `update_animated_atoms` の `else` ブランチ (`item["mesh"].points = item["base_points"] + center`) はまだコード上に残っており、将来的に actor が None になる経路ができると全同元素アクターの形状が破壊される。
+
+**提案:** `else` ブランチを削除するか、コメントで「このブランチは actor がある限り到達しない」と明記。
+
+---
+
+### コードの良い点（変更不要）
+
+- `atom_actor_cache` + `sphere_mesh_cache` の設計：表示モード切替時にアクターを再生成せず hide/show するため、高頻度な display_mode 変更でも VTK オブジェクトを使い回せる。
+- `custom_op_check_id` / `custom_op_animate` / `reset` 等の shared_state 読み取りがすべてロック内に統一された（race condition なし）。
+- `active_mode` フィールドで standard/custom の状態管理が明確化された。
+- `custom_speed_multiplier` で操作種別ごとの速度調整ができるようになった。
