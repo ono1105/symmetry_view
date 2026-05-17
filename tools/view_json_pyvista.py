@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -31,12 +32,6 @@ ELEMENT_COLORS = {
     "As": "#bd80e3",
     "Pd": "#8aa6c1",
 }
-
-_PERIODIC_SHIFTS = np.array(
-    [(i, j, k) for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)],
-    dtype=float,
-)
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Minimal PyVista viewer for exported symmetry JSON.")
@@ -222,7 +217,9 @@ def add_animated_atoms(
         animated.append(
             {
                 "atom": atom,
+                "display_shift_frac": item["display_shift_frac"],
                 "display_shift_cart": item["display_shift_cart"],
+                "is_primary_image": item.get("is_primary_image", True),
                 "base_points": base.points.copy(),
                 "mesh": mesh,
                 "actor": actor,
@@ -238,7 +235,9 @@ def display_atom_instances(render_data: dict, *, display_mode: str = "expanded")
             {
                 "atom": atom,
                 "cart": np.asarray(atom["cart"], dtype=float),
+                "display_shift_frac": np.zeros(3),
                 "display_shift_cart": np.zeros(3),
+                "is_primary_image": True,
             }
             for atom in render_data["atoms"]
         ]
@@ -252,7 +251,9 @@ def display_atom_instances(render_data: dict, *, display_mode: str = "expanded")
                 {
                     "atom": atom,
                     "cart": np.asarray(atom["cart"], dtype=float),
+                    "display_shift_frac": np.zeros(3),
                     "display_shift_cart": np.zeros(3),
+                    "is_primary_image": True,
                 }
             )
             continue
@@ -264,7 +265,9 @@ def display_atom_instances(render_data: dict, *, display_mode: str = "expanded")
                 {
                     "atom": atom,
                     "cart": np.asarray(atom["cart"], dtype=float) + shift_cart,
+                    "display_shift_frac": shift.copy(),
                     "display_shift_cart": shift_cart,
+                    "is_primary_image": is_primary_centered_image(frac, shift),
                 }
             )
     return instances
@@ -275,18 +278,41 @@ def display_fractional_shifts(frac: np.ndarray, *, display_mode: str = "expanded
         return [np.zeros(3)]
     margin = display_mode_margin(display_mode)
     shifts = []
-    for shift in _PERIODIC_SHIFTS:
+    lower = -0.5 - margin
+    upper = 0.5 + margin
+    for shift in periodic_shifts(max(int(np.ceil(margin + 1.0)), 1)):
         image_frac = frac + shift
-        if np.all(image_frac >= -margin - 1e-9) and np.all(image_frac <= 1.0 + margin + 1e-9):
+        if np.all(image_frac >= lower - 1e-9) and np.all(image_frac <= upper + 1e-9):
             shifts.append(shift)
     return shifts
 
 
+def is_primary_centered_image(frac: np.ndarray, shift: np.ndarray) -> bool:
+    image_frac = np.asarray(frac, dtype=float) + np.asarray(shift, dtype=float)
+    return bool(np.all(image_frac >= -0.5 - 1e-9) and np.all(image_frac < 0.5 - 1e-9))
+
+
+def periodic_shifts(limit: int = 1) -> np.ndarray:
+    limit = max(int(limit), 0)
+    return np.asarray(
+        list(product(range(-limit, limit + 1), repeat=3)),
+        dtype=float,
+    )
+
+
 def display_mode_margin(display_mode: str) -> float:
+    if display_mode == "source":
+        return 0.0
     if display_mode in ("expanded", "expanded_quarter"):
         return 0.25
     if display_mode == "expanded_half":
         return 0.5
+    if display_mode.startswith("expanded_"):
+        value = display_mode.removeprefix("expanded_").replace("_", ".")
+        try:
+            return max(float(value), 0.0)
+        except ValueError:
+            return 0.25
     return 0.25
 
 
@@ -306,9 +332,10 @@ def add_symmetry_elements(
     *,
     operation_index: int | None,
     element_index: int | None = None,
+    display_mode: str = "source",
 ) -> list:
     axes, planes, centers = display_symmetry_elements(render_data, atom_mappings, operation_index, element_index)
-    return add_symmetry_element_actors(plotter, render_data, axes, planes, centers)
+    return add_symmetry_element_actors(plotter, render_data, axes, planes, centers, display_mode=display_mode)
 
 
 def add_symmetry_element_actors(
@@ -317,9 +344,11 @@ def add_symmetry_element_actors(
     axes: list[dict],
     planes: list[dict],
     centers: list[dict],
+    *,
+    display_mode: str = "source",
 ) -> list:
     actors = []
-    span = scene_span(render_data)
+    span = display_scene_span(render_data, display_mode)
     axis_length = max(span * 0.75, 1.0)
     plane_scale = max(span * 0.45, 0.8)
 
@@ -521,13 +550,19 @@ def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s:
         path = paths.get(atom["index"])
         display_shift = item["display_shift_cart"]
         center = np.asarray(atom["cart"], dtype=float) + display_shift
-        if path is not None:
+        if path is not None and path_applies_to_display_item(path, item):
             center = evaluate_path(path, s, start_override=np.asarray(atom["cart"], dtype=float) + display_shift)
         actor = item.get("actor")
         if actor is not None:
             actor.SetPosition(*center)
         else:
             item["mesh"].points = item["base_points"] + center
+
+
+def path_applies_to_display_item(path: dict, item: dict) -> bool:
+    if not path.get("unit_cell_only"):
+        return True
+    return bool(item.get("is_primary_image", False))
 
 
 def animation_paths(
@@ -1047,7 +1082,7 @@ def periodic_target_candidates(render_data: dict, entry: dict) -> np.ndarray:
         return np.asarray([entry["transformed_cart"]], dtype=float)
     lattice = np.asarray(unit_cell["lattice"], dtype=float)
     frac = np.asarray(frac, dtype=float)
-    return (frac + _PERIODIC_SHIFTS) @ lattice
+    return (frac + periodic_shifts(1)) @ lattice
 
 
 def best_axis_consistent_target(candidates: np.ndarray, rotated: np.ndarray, axis_direction: np.ndarray) -> np.ndarray:
@@ -1630,6 +1665,34 @@ def scene_span(render_data: dict) -> float:
     bounds_max = np.asarray(render_data["bounds_max"], dtype=float)
     span = np.linalg.norm(bounds_max - bounds_min)
     return float(span if span > 1e-9 else 1.0)
+
+
+def display_scene_span(render_data: dict, display_mode: str = "source") -> float:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None or display_mode == "source":
+        return scene_span(render_data)
+    margin = display_mode_margin(display_mode)
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    lower = -0.5 - margin
+    upper = 0.5 + margin
+    corners_frac = np.asarray(list(product((lower, upper), repeat=3)), dtype=float)
+    corners_cart = corners_frac @ lattice
+    span = np.linalg.norm(corners_cart.max(axis=0) - corners_cart.min(axis=0))
+    return float(span if span > 1e-9 else scene_span(render_data))
+
+
+def display_scene_center(render_data: dict, display_mode: str = "source") -> np.ndarray:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        atoms = render_data.get("atoms", [])
+        if atoms:
+            points = np.asarray([atom["cart"] for atom in atoms], dtype=float)
+            return np.mean(points, axis=0)
+        return np.zeros(3)
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    if display_mode == "source":
+        return np.asarray([0.5, 0.5, 0.5], dtype=float) @ lattice
+    return np.zeros(3)
 
 
 def atom_radius(atomic_number: int, scene_span_value: float) -> float:

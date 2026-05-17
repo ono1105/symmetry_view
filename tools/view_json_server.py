@@ -105,6 +105,14 @@ HTML = """<!doctype html>
       background: #7dd3fc;
       color: #081017;
     }
+    .mode-button.selected {
+      background: #7dd3fc;
+      color: #081017;
+    }
+    .atom-mode-button.selected {
+      background: #7dd3fc;
+      color: #081017;
+    }
     .operation-list {
       width: 100%;
       min-height: 280px;
@@ -169,10 +177,20 @@ HTML = """<!doctype html>
       gap: 16px;
       align-content: start;
     }
+    .left-stack {
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
     .section-title {
       margin: 0 0 12px;
       font-size: 15px;
       color: #f8fafc;
+    }
+    .subsection-title {
+      margin: 14px 0 8px;
+      font-size: 13px;
+      color: #d7dee9;
     }
     .control-stack {
       display: grid;
@@ -232,6 +250,16 @@ HTML = """<!doctype html>
     .atom-row span {
       color: #cbd5e1;
     }
+    .atom-row.unmapped {
+      background: rgba(248, 113, 113, 0.14);
+      border-radius: 5px;
+      padding-left: 6px;
+    }
+    .atom-badge {
+      color: #fecaca;
+      font-size: 11px;
+      margin-left: 6px;
+    }
     .hint {
       color: #91a0b3;
       font-size: 12px;
@@ -250,6 +278,16 @@ HTML = """<!doctype html>
       color: #cbd5e1;
       font-size: 13px;
       white-space: pre-wrap;
+    }
+    .operation-details {
+      max-height: 260px;
+      overflow: auto;
+      font-family: monospace;
+      font-size: 12px;
+      color: #94a3b8;
+      white-space: pre;
+      line-height: 1.6;
+      min-height: 0;
     }
     .vec3-row {
       display: grid;
@@ -307,9 +345,14 @@ HTML = """<!doctype html>
 <main>
   <div class="topbar">
     <h1>Symmetry Controls</h1>
+    <div class="button-row flush" id="mode-controls">
+      <button class="secondary mode-button selected" data-mode="standard">Symmetry operation</button>
+      <button class="secondary mode-button" data-mode="custom">Custom operation</button>
+    </div>
   </div>
   <div class="grid">
-    <section class="panel">
+    <div class="left-stack">
+    <section class="panel" id="standard-panel">
       <h2 class="section-title">Operations</h2>
       <div class="control-stack">
         <div>
@@ -329,8 +372,168 @@ HTML = """<!doctype html>
       <label for="operations">Operation list</label>
       <div class="operation-list" id="operations" role="listbox"></div>
       <p class="hint">The selected operation controls the axis/plane/center shown in PyVista.</p>
-      <div id="op-details" style="font-family:monospace;font-size:12px;color:#94a3b8;white-space:pre;margin-top:10px;line-height:1.6;min-height:0"></div>
     </section>
+    <section class="panel" id="custom-panel" hidden>
+      <h2 class="section-title">Custom Operation</h2>
+      <p class="hint">Enter any (W|t) operation and check it against the unit-cell atoms. After checking, the shared animation and atom controls apply to this operation.</p>
+      <div class="control-stack">
+        <div>
+          <label for="cop-type">Operation type</label>
+          <select id="cop-type">
+            <option value="rotation">Rotation</option>
+            <option value="mirror">Mirror</option>
+            <option value="inversion">Inversion</option>
+            <option value="screw">Screw axis</option>
+            <option value="glide">Glide reflection</option>
+            <option value="rotoinversion">Rotoinversion (Sₙ)</option>
+            <option value="translation">Translation</option>
+            <option value="identity">Identity</option>
+            <option value="matrix">Matrix (W|t) direct input</option>
+          </select>
+        </div>
+        <div id="cop-rotation" class="cop-fields">
+          <label>Axis [u v w] — fractional lattice direction</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-rot-u" value="0" step="any" placeholder="u">
+            <input type="number" id="cop-rot-v" value="0" step="any" placeholder="v">
+            <input type="number" id="cop-rot-w" value="1" step="any" placeholder="w">
+          </div>
+          <label>Angle (degrees)</label>
+          <input type="number" id="cop-rot-angle" value="90" step="any" class="narrow-input">
+          <label>Point on axis [x y z] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-rot-px" value="0" step="any" placeholder="x">
+            <input type="number" id="cop-rot-py" value="0" step="any" placeholder="y">
+            <input type="number" id="cop-rot-pz" value="0" step="any" placeholder="z">
+          </div>
+        </div>
+        <div id="cop-mirror" class="cop-fields" hidden>
+          <label>Plane normal (h k l) — Miller indices</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-mir-h" value="0" step="any" placeholder="h">
+            <input type="number" id="cop-mir-k" value="0" step="any" placeholder="k">
+            <input type="number" id="cop-mir-l" value="1" step="any" placeholder="l">
+          </div>
+          <label>Point on plane [x y z] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-mir-px" value="0" step="any" placeholder="x">
+            <input type="number" id="cop-mir-py" value="0" step="any" placeholder="y">
+            <input type="number" id="cop-mir-pz" value="0" step="any" placeholder="z">
+          </div>
+        </div>
+        <div id="cop-inversion" class="cop-fields" hidden>
+          <label>Inversion center [x y z] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-inv-cx" value="0" step="any" placeholder="x">
+            <input type="number" id="cop-inv-cy" value="0" step="any" placeholder="y">
+            <input type="number" id="cop-inv-cz" value="0" step="any" placeholder="z">
+          </div>
+        </div>
+        <div id="cop-screw" class="cop-fields" hidden>
+          <label>Axis [u v w] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-scr-u" value="0" step="any" placeholder="u">
+            <input type="number" id="cop-scr-v" value="0" step="any" placeholder="v">
+            <input type="number" id="cop-scr-w" value="1" step="any" placeholder="w">
+          </div>
+          <label>Rotation angle (degrees)</label>
+          <input type="number" id="cop-scr-angle" value="180" step="any" class="narrow-input">
+          <label>Screw translation [tx ty tz] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-scr-tx" value="0" step="any" placeholder="tx">
+            <input type="number" id="cop-scr-ty" value="0" step="any" placeholder="ty">
+            <input type="number" id="cop-scr-tz" value="0.5" step="any" placeholder="tz">
+          </div>
+          <label>Point on axis [x y z] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-scr-px" value="0" step="any" placeholder="x">
+            <input type="number" id="cop-scr-py" value="0" step="any" placeholder="y">
+            <input type="number" id="cop-scr-pz" value="0" step="any" placeholder="z">
+          </div>
+        </div>
+        <div id="cop-glide" class="cop-fields" hidden>
+          <label>Plane normal (h k l) — Miller indices</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-gli-h" value="0" step="any" placeholder="h">
+            <input type="number" id="cop-gli-k" value="0" step="any" placeholder="k">
+            <input type="number" id="cop-gli-l" value="1" step="any" placeholder="l">
+          </div>
+          <label>Point on plane [x y z] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-gli-px" value="0" step="any" placeholder="x">
+            <input type="number" id="cop-gli-py" value="0" step="any" placeholder="y">
+            <input type="number" id="cop-gli-pz" value="0" step="any" placeholder="z">
+          </div>
+          <label>Glide translation [tx ty tz] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-gli-tx" value="0.5" step="any" placeholder="tx">
+            <input type="number" id="cop-gli-ty" value="0" step="any" placeholder="ty">
+            <input type="number" id="cop-gli-tz" value="0" step="any" placeholder="tz">
+          </div>
+        </div>
+        <div id="cop-rotoinversion" class="cop-fields" hidden>
+          <label>Axis [u v w] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-riv-u" value="0" step="any" placeholder="u">
+            <input type="number" id="cop-riv-v" value="0" step="any" placeholder="v">
+            <input type="number" id="cop-riv-w" value="1" step="any" placeholder="w">
+          </div>
+          <label>Rotation angle before inversion (degrees)</label>
+          <input type="number" id="cop-riv-angle" value="90" step="any" class="narrow-input">
+          <label>Inversion center [x y z] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-riv-cx" value="0" step="any" placeholder="x">
+            <input type="number" id="cop-riv-cy" value="0" step="any" placeholder="y">
+            <input type="number" id="cop-riv-cz" value="0" step="any" placeholder="z">
+          </div>
+        </div>
+        <div id="cop-translation" class="cop-fields" hidden>
+          <label>Translation [tx ty tz] — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-tra-x" value="0.5" step="any" placeholder="tx">
+            <input type="number" id="cop-tra-y" value="0.5" step="any" placeholder="ty">
+            <input type="number" id="cop-tra-z" value="0" step="any" placeholder="tz">
+          </div>
+        </div>
+        <div id="cop-identity" class="cop-fields" hidden>
+          <p class="hint">Identity: W = I, t = 0. All atoms map to themselves.</p>
+        </div>
+        <div id="cop-matrix" class="cop-fields" hidden>
+          <label>Rotation matrix W — 3×3 row-major, fractional basis</label>
+          <div class="mat3-grid">
+            <input type="number" id="cop-mat-w00" value="1" step="any">
+            <input type="number" id="cop-mat-w01" value="0" step="any">
+            <input type="number" id="cop-mat-w02" value="0" step="any">
+            <input type="number" id="cop-mat-w10" value="0" step="any">
+            <input type="number" id="cop-mat-w11" value="1" step="any">
+            <input type="number" id="cop-mat-w12" value="0" step="any">
+            <input type="number" id="cop-mat-w20" value="0" step="any">
+            <input type="number" id="cop-mat-w21" value="0" step="any">
+            <input type="number" id="cop-mat-w22" value="1" step="any">
+          </div>
+          <label>Translation t — fractional</label>
+          <div class="vec3-row">
+            <input type="number" id="cop-mat-tx" value="0" step="any" placeholder="tx">
+            <input type="number" id="cop-mat-ty" value="0" step="any" placeholder="ty">
+            <input type="number" id="cop-mat-tz" value="0" step="any" placeholder="tz">
+          </div>
+        </div>
+        <div>
+          <label for="cop-tol">Tolerance (Å)</label>
+          <input type="number" id="cop-tol" value="0.1" min="0.001" max="2.0" step="0.01" class="narrow-input">
+        </div>
+      </div>
+      <div class="button-row flush">
+        <button id="btn-check-op">Check symmetry</button>
+        <button id="btn-clear-check" class="secondary">Clear custom</button>
+      </div>
+      <div id="cop-result" class="cop-result" hidden></div>
+    </section>
+    <section class="panel">
+      <h2 class="section-title">Selected Operation</h2>
+      <div id="op-details" class="operation-details"></div>
+    </section>
+    </div>
     <div class="side-stack">
       <section class="panel">
         <h2 class="section-title">Animation</h2>
@@ -339,9 +542,10 @@ HTML = """<!doctype html>
           <button id="stop" class="secondary">Stop</button>
           <button id="reset" class="secondary">Reset</button>
           <button id="view-direction" class="secondary">View along direction</button>
+          <button id="reset-view" class="secondary">Reset view center</button>
           <button id="save-gif" class="secondary">Save GIF</button>
         </div>
-        <label>Speed</label>
+        <h3 class="subsection-title">Speed</h3>
         <div class="button-row flush" id="speed-controls">
           <button class="secondary speed-button" data-speed="0.5">Slow</button>
           <button class="secondary speed-button selected" data-speed="1.0">Normal</button>
@@ -354,6 +558,8 @@ HTML = """<!doctype html>
           <button class="secondary display-button selected" data-display-mode="source">Unit cell</button>
           <button class="secondary display-button" data-display-mode="expanded_quarter">±1/4</button>
           <button class="secondary display-button" data-display-mode="expanded_half">±1/2</button>
+          <button class="secondary display-button" data-display-mode="expanded_0_75">±3/4</button>
+          <button class="secondary display-button" data-display-mode="expanded_1_0">±1</button>
         </div>
         <h2 class="section-title">Camera</h2>
         <label for="camera-angle">Rotate current view</label>
@@ -377,170 +583,15 @@ HTML = """<!doctype html>
         <label>Animated atoms</label>
         <div class="atom-list" id="atoms"></div>
         <div class="button-row">
-          <button id="all-atoms" class="secondary">All atoms</button>
-          <button id="clear-atoms" class="secondary">Representative</button>
+          <button id="displayed-atoms" class="secondary atom-mode-button" data-scope="displayed">Displayed all</button>
+          <button id="unit-cell-atoms" class="secondary atom-mode-button" data-scope="unit_cell">Unit cell only</button>
+          <button id="clear-atoms" class="secondary atom-mode-button" data-scope="representative">Clear</button>
         </div>
-        <p class="hint">Check atoms to animate only those atoms. Clear selection to return to representative mode.</p>
+        <p class="hint">Check atoms to animate selected atom types. Unit cell only leaves periodic display copies fixed.</p>
       </section>
     </div>
   </div>
   <div class="status" id="status">Loading...</div>
-  <section class="panel" style="margin-top:16px">
-    <h2 class="section-title">Custom Operation Check</h2>
-    <p class="hint">Enter any (W|t) operation and check whether every atom maps to an atom of the same element. Unhighlighted atoms map correctly; red atoms do not.</p>
-    <div class="control-stack">
-      <div>
-        <label for="cop-type">Operation type</label>
-        <select id="cop-type">
-          <option value="rotation">Rotation</option>
-          <option value="mirror">Mirror</option>
-          <option value="inversion">Inversion</option>
-          <option value="screw">Screw axis</option>
-          <option value="glide">Glide reflection</option>
-          <option value="rotoinversion">Rotoinversion (Sₙ)</option>
-          <option value="translation">Translation</option>
-          <option value="identity">Identity</option>
-          <option value="matrix">Matrix (W|t) direct input</option>
-        </select>
-      </div>
-      <div id="cop-rotation" class="cop-fields">
-        <label>Axis [u v w] — fractional lattice direction</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-rot-u" value="0" step="any" placeholder="u">
-          <input type="number" id="cop-rot-v" value="0" step="any" placeholder="v">
-          <input type="number" id="cop-rot-w" value="1" step="any" placeholder="w">
-        </div>
-        <label>Angle (degrees)</label>
-        <input type="number" id="cop-rot-angle" value="90" step="any" class="narrow-input">
-        <label>Point on axis [x y z] — fractional (default 0 0 0)</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-rot-px" value="0" step="any" placeholder="x">
-          <input type="number" id="cop-rot-py" value="0" step="any" placeholder="y">
-          <input type="number" id="cop-rot-pz" value="0" step="any" placeholder="z">
-        </div>
-      </div>
-      <div id="cop-mirror" class="cop-fields" hidden>
-        <label>Plane normal (h k l) — Miller indices</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-mir-h" value="0" step="any" placeholder="h">
-          <input type="number" id="cop-mir-k" value="0" step="any" placeholder="k">
-          <input type="number" id="cop-mir-l" value="1" step="any" placeholder="l">
-        </div>
-        <label>Point on plane [x y z] — fractional (default 0 0 0)</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-mir-px" value="0" step="any" placeholder="x">
-          <input type="number" id="cop-mir-py" value="0" step="any" placeholder="y">
-          <input type="number" id="cop-mir-pz" value="0" step="any" placeholder="z">
-        </div>
-      </div>
-      <div id="cop-inversion" class="cop-fields" hidden>
-        <label>Inversion center [x y z] — fractional</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-inv-cx" value="0" step="any" placeholder="x">
-          <input type="number" id="cop-inv-cy" value="0" step="any" placeholder="y">
-          <input type="number" id="cop-inv-cz" value="0" step="any" placeholder="z">
-        </div>
-      </div>
-      <div id="cop-screw" class="cop-fields" hidden>
-        <label>Axis [u v w] — fractional</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-scr-u" value="0" step="any" placeholder="u">
-          <input type="number" id="cop-scr-v" value="0" step="any" placeholder="v">
-          <input type="number" id="cop-scr-w" value="1" step="any" placeholder="w">
-        </div>
-        <label>Rotation angle (degrees)</label>
-        <input type="number" id="cop-scr-angle" value="180" step="any" class="narrow-input">
-        <label>Screw translation [tx ty tz] — fractional (e.g. 0 0 0.5 for 2₁ along c)</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-scr-tx" value="0" step="any" placeholder="tx">
-          <input type="number" id="cop-scr-ty" value="0" step="any" placeholder="ty">
-          <input type="number" id="cop-scr-tz" value="0.5" step="any" placeholder="tz">
-        </div>
-        <label>Point on axis [x y z] — fractional (default 0 0 0)</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-scr-px" value="0" step="any" placeholder="x">
-          <input type="number" id="cop-scr-py" value="0" step="any" placeholder="y">
-          <input type="number" id="cop-scr-pz" value="0" step="any" placeholder="z">
-        </div>
-      </div>
-      <div id="cop-glide" class="cop-fields" hidden>
-        <label>Plane normal (h k l) — Miller indices</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-gli-h" value="0" step="any" placeholder="h">
-          <input type="number" id="cop-gli-k" value="0" step="any" placeholder="k">
-          <input type="number" id="cop-gli-l" value="1" step="any" placeholder="l">
-        </div>
-        <label>Point on plane [x y z] — fractional</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-gli-px" value="0" step="any" placeholder="x">
-          <input type="number" id="cop-gli-py" value="0" step="any" placeholder="y">
-          <input type="number" id="cop-gli-pz" value="0" step="any" placeholder="z">
-        </div>
-        <label>Glide translation [tx ty tz] — fractional (e.g. 0.5 0 0 for a-glide)</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-gli-tx" value="0.5" step="any" placeholder="tx">
-          <input type="number" id="cop-gli-ty" value="0" step="any" placeholder="ty">
-          <input type="number" id="cop-gli-tz" value="0" step="any" placeholder="tz">
-        </div>
-      </div>
-      <div id="cop-rotoinversion" class="cop-fields" hidden>
-        <label>Axis [u v w] — fractional</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-riv-u" value="0" step="any" placeholder="u">
-          <input type="number" id="cop-riv-v" value="0" step="any" placeholder="v">
-          <input type="number" id="cop-riv-w" value="1" step="any" placeholder="w">
-        </div>
-        <label>Rotation angle before inversion (degrees, e.g. 90 for S₄)</label>
-        <input type="number" id="cop-riv-angle" value="90" step="any" class="narrow-input">
-        <label>Inversion center [x y z] — fractional (on the axis)</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-riv-cx" value="0" step="any" placeholder="x">
-          <input type="number" id="cop-riv-cy" value="0" step="any" placeholder="y">
-          <input type="number" id="cop-riv-cz" value="0" step="any" placeholder="z">
-        </div>
-      </div>
-      <div id="cop-translation" class="cop-fields" hidden>
-        <label>Translation [tx ty tz] — fractional (e.g. 0.5 0.5 0 for A-centering)</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-tra-x" value="0.5" step="any" placeholder="tx">
-          <input type="number" id="cop-tra-y" value="0.5" step="any" placeholder="ty">
-          <input type="number" id="cop-tra-z" value="0" step="any" placeholder="tz">
-        </div>
-      </div>
-      <div id="cop-identity" class="cop-fields" hidden>
-        <p class="hint">Identity: W = I, t = 0. All atoms map to themselves.</p>
-      </div>
-      <div id="cop-matrix" class="cop-fields" hidden>
-        <label>Rotation matrix W — 3×3 row-major, fractional basis (spglib convention)</label>
-        <div class="mat3-grid">
-          <input type="number" id="cop-mat-w00" value="1" step="any">
-          <input type="number" id="cop-mat-w01" value="0" step="any">
-          <input type="number" id="cop-mat-w02" value="0" step="any">
-          <input type="number" id="cop-mat-w10" value="0" step="any">
-          <input type="number" id="cop-mat-w11" value="1" step="any">
-          <input type="number" id="cop-mat-w12" value="0" step="any">
-          <input type="number" id="cop-mat-w20" value="0" step="any">
-          <input type="number" id="cop-mat-w21" value="0" step="any">
-          <input type="number" id="cop-mat-w22" value="1" step="any">
-        </div>
-        <label>Translation t — fractional</label>
-        <div class="vec3-row">
-          <input type="number" id="cop-mat-tx" value="0" step="any" placeholder="tx">
-          <input type="number" id="cop-mat-ty" value="0" step="any" placeholder="ty">
-          <input type="number" id="cop-mat-tz" value="0" step="any" placeholder="tz">
-        </div>
-      </div>
-      <div>
-        <label for="cop-tol">Tolerance (Å) — atoms within this distance count as overlapping</label>
-        <input type="number" id="cop-tol" value="0.1" min="0.001" max="2.0" step="0.01" class="narrow-input">
-      </div>
-    </div>
-    <div class="button-row flush">
-      <button id="btn-check-op">Check symmetry</button>
-      <button id="btn-clear-check" class="secondary">Clear highlight</button>
-    </div>
-    <div id="cop-result" class="cop-result" hidden></div>
-  </section>
 </main>
 <script>
 let operations = [];
@@ -549,6 +600,8 @@ let state = {};
 let directionFilterValue = "";
 let atomElementFilterValue = "";
 let summariesReady = false;
+let activeMode = "standard";
+let customUnmappedAtoms = new Set();
 
 async function api(path, options) {
   const response = await fetch(path, options);
@@ -709,6 +762,10 @@ function fmtFrac(v) {
 
 function renderOperationDetails() {
   const div = document.getElementById("op-details");
+  if (activeMode === "custom") {
+    renderCustomOperationDetails();
+    return;
+  }
   const op = operations.find(o => o.index === state.operation_index);
   if (!op) { div.textContent = ""; return; }
   const W = op.matrix_frac;
@@ -728,6 +785,25 @@ function renderOperationDetails() {
     for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
     lines.push(`t (cart): ${tc.map(v => v.toFixed(4)).join(",  ")} Å`);
   }
+  div.textContent = lines.join("\\n");
+}
+
+function renderCustomOperationDetails() {
+  const div = document.getElementById("op-details");
+  if (!copMatrix) {
+    div.textContent = "Custom operation is not checked yet. Enter parameters and click Check symmetry.";
+    return;
+  }
+  const result = copMatrix.result || {};
+  let lines = [];
+  lines.push(`custom ${copMatrix.op_type}`);
+  lines.push(result.is_symmetry ? "status: symmetry operation" : "status: not a symmetry operation");
+  if (result.total !== undefined) {
+    lines.push(`mapped: ${result.mapped_count}/${result.total}  unmapped: ${result.unmapped_count}`);
+  }
+  lines.push("W (frac):");
+  for (const row of copMatrix.W_frac) lines.push(`  [${row.map(fmtMatVal).join("  ")}]`);
+  lines.push(`t (frac): ${copMatrix.t_frac.map(fmtFrac).join(",  ")}`);
   div.textContent = lines.join("\\n");
 }
 
@@ -768,6 +844,7 @@ function renderAtoms() {
     const text = atomText(atom);
     const label = document.createElement("label");
     label.className = "atom-row";
+    if (customUnmappedAtoms.has(atom.index)) label.classList.add("unmapped");
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.value = atom.index;
@@ -775,6 +852,12 @@ function renderAtoms() {
     checkbox.addEventListener("change", onAtomSelectionChange);
     const span = document.createElement("span");
     span.appendChild(renderHtml(text));
+    if (customUnmappedAtoms.has(atom.index)) {
+      const badge = document.createElement("span");
+      badge.className = "atom-badge";
+      badge.textContent = "do not map";
+      span.appendChild(badge);
+    }
     label.appendChild(checkbox);
     label.appendChild(span);
     root.appendChild(label);
@@ -792,6 +875,13 @@ function syncDisplayButtons() {
   const displayMode = state.display_mode || "source";
   for (const button of document.querySelectorAll(".display-button")) {
     button.classList.toggle("selected", button.dataset.displayMode === displayMode);
+  }
+}
+
+function syncAtomModeButtons() {
+  const scope = state.scope || "representative";
+  for (const button of document.querySelectorAll(".atom-mode-button")) {
+    button.classList.toggle("selected", button.dataset.scope === scope);
   }
 }
 
@@ -815,12 +905,16 @@ function renderStatus() {
   const selected = state.selected_atoms && state.selected_atoms.length
     ? state.selected_atoms.join(", ")
     : "-";
+  const scopeLabel = (state.scope || "representative") === "representative"
+    ? "clear"
+    : (state.scope || "representative");
   document.getElementById("status").textContent =
     `state: ${state.playing ? "playing" : "stopped"}\\n` +
-    `operation: ${operation ? stripHtml(optionText(operation)) : state.operation_index}\\n` +
+    `mode: ${activeMode}\\n` +
+    `operation: ${activeMode === "custom" ? (copMatrix ? "custom " + copMatrix.op_type : "custom unchecked") : (operation ? stripHtml(optionText(operation)) : state.operation_index)}\\n` +
     `speed: ${state.speed || 1.0}x\\n` +
     `display: ${state.display_mode || "source"}\\n` +
-    `scope: ${state.scope || "representative"}\\n` +
+    `scope: ${scopeLabel}\\n` +
     `selected atoms: ${selected}\\n` +
     `gif: ${state.gif_status || "-"}`;
 }
@@ -833,8 +927,28 @@ async function postState(update) {
   });
   syncSpeedButtons();
   syncDisplayButtons();
+  syncAtomModeButtons();
   renderOperations();
   renderAtoms();
+  renderStatus();
+  renderOperationDetails();
+}
+
+function setActiveMode(mode) {
+  activeMode = mode === "custom" ? "custom" : "standard";
+  document.getElementById("standard-panel").hidden = activeMode !== "standard";
+  document.getElementById("custom-panel").hidden = activeMode !== "custom";
+  for (const button of document.querySelectorAll(".mode-button")) {
+    button.classList.toggle("selected", button.dataset.mode === activeMode);
+  }
+  if (activeMode === "standard") {
+    customUnmappedAtoms = new Set();
+    copMatrix = null;
+    renderAtoms();
+    postState({active_mode: "standard", playing: false, reset: true, clear_custom_check: true});
+  } else {
+    postState({active_mode: "custom", playing: false});
+  }
   renderStatus();
   renderOperationDetails();
 }
@@ -844,6 +958,7 @@ async function refreshState() {
   syncOperationSelection();
   syncSpeedButtons();
   syncDisplayButtons();
+  syncAtomModeButtons();
   renderStatus();
   renderOperationDetails();
   if (!summariesReady && state.summaries_ready) {
@@ -857,7 +972,16 @@ async function refreshState() {
 }
 
 document.getElementById("operation-sort").addEventListener("change", renderOperations);
-document.getElementById("play").addEventListener("click", () => postState({playing: true}));
+for (const button of document.querySelectorAll(".mode-button")) {
+  button.addEventListener("click", () => setActiveMode(button.dataset.mode));
+}
+document.getElementById("play").addEventListener("click", () => {
+  if (activeMode === "custom") {
+    sendCurrentCustomAnimation(true);
+    return;
+  }
+  postState({playing: true});
+});
 document.getElementById("stop").addEventListener("click", () => postState({playing: false}));
 document.getElementById("reset").addEventListener("click", () => postState({playing: false, reset: true}));
 for (const button of document.querySelectorAll(".speed-button")) {
@@ -873,7 +997,15 @@ for (const button of document.querySelectorAll(".display-button")) {
 document.getElementById("view-direction").addEventListener("click", () => {
   postState({view_request_id: Date.now()});
 });
+document.getElementById("reset-view").addEventListener("click", () => {
+  postState({reset_view_request_id: Date.now()});
+});
 document.getElementById("save-gif").addEventListener("click", () => {
+  if (activeMode === "custom") {
+    sendCurrentCustomAnimation(false);
+    window.setTimeout(() => postState({gif_request_id: Date.now(), playing: false}), 120);
+    return;
+  }
   postState({gif_request_id: Date.now(), playing: false});
 });
 function cameraAngle() {
@@ -892,8 +1024,11 @@ document.getElementById("camera-left").addEventListener("click", () => rotateCam
 document.getElementById("camera-right").addEventListener("click", () => rotateCamera("right"));
 document.getElementById("camera-up").addEventListener("click", () => rotateCamera("up"));
 document.getElementById("camera-down").addEventListener("click", () => rotateCamera("down"));
-document.getElementById("all-atoms").addEventListener("click", () => {
-  postState({selected_atoms: atoms.map(atom => atom.index), scope: "selected", playing: false, reset: true});
+document.getElementById("displayed-atoms").addEventListener("click", () => {
+  postState({selected_atoms: atoms.map(atom => atom.index), scope: "displayed", playing: false, reset: true});
+});
+document.getElementById("unit-cell-atoms").addEventListener("click", () => {
+  postState({selected_atoms: atoms.map(atom => atom.index), scope: "unit_cell", playing: false, reset: true});
 });
 document.getElementById("clear-atoms").addEventListener("click", () => {
   postState({selected_atoms: [], scope: "representative", playing: false, reset: true});
@@ -977,6 +1112,7 @@ function displayCopResult(result, opType, opParams) {
   copMatrix = null;
   copSelectedAtoms = new Set();
   copAllUnmapped = [];
+  customUnmappedAtoms = new Set();
   if (!result) { div.hidden = true; return; }
   if (result.error) {
     div.className = "cop-result fail";
@@ -991,52 +1127,56 @@ function displayCopResult(result, opType, opParams) {
     : `<strong>✗ ${result.unmapped_count} / ${result.total} atoms do not map — NOT a symmetry operation</strong>`;
 
   if (!ok && result.unmapped && result.unmapped.length > 0) {
-    copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac, op_type: opType || "matrix", op_params: opParams || {}};
     copAllUnmapped = result.unmapped.map(u => u.source);
-    html += `<div style="margin:8px 0 4px;font-size:12px;color:#94a3b8">Check atoms to animate with this operation — or click "Animate all":</div>`;
+    customUnmappedAtoms = new Set(copAllUnmapped);
+    html += `<div style="margin:8px 0 4px;font-size:12px;color:#94a3b8">Unmapped atoms are highlighted in PyVista. Use the shared Atoms and Animation panels to animate this custom operation.</div>`;
     html += `<div class="unmapped-list" id="cop-unmapped-list">`;
     for (const u of result.unmapped) {
       const frac = u.frac ? u.frac.map(v => v.toFixed(3)).join(", ") : "—";
-      html += `<label style="display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer">`;
-      html += `<input type="checkbox" class="cop-atom-cb" value="${u.source}">`;
-      html += `<span>atom ${u.source}: <b>${u.element}</b>  →  (${frac})  nearest: ${u.distance.toFixed(3)} Å</span>`;
-      html += `</label>`;
+      html += `<div>atom ${u.source}: <b>${u.element}</b>  →  (${frac})  nearest: ${u.distance.toFixed(3)} Å</div>`;
     }
     html += `</div>`;
-    html += `<div class="button-row flush" style="margin-top:8px">`;
-    html += `<button class="secondary" style="font-size:12px;padding:6px 10px" id="cop-anim-sel">Animate selected</button>`;
-    html += `<button class="secondary" style="font-size:12px;padding:6px 10px" id="cop-anim-all">Animate all unmapped</button>`;
-    html += `</div>`;
-    html += `<p id="cop-anim-msg" class="hint" style="margin-top:6px"></p>`;
+  }
+  if (result.W_frac && result.t_frac) {
+    copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac, op_type: opType || "matrix", op_params: opParams || {}, result};
+    html += `<p id="cop-anim-msg" class="hint">Use Play with the current Atoms mode: Clear, selected atoms, Unit cell only, or Displayed all.</p>`;
   }
   div.innerHTML = html;
   div.hidden = false;
-
-  if (!ok && result.unmapped && result.unmapped.length > 0) {
-    document.getElementById("cop-anim-sel").addEventListener("click", () => {
-      const indices = [...copSelectedAtoms];
-      if (indices.length === 0) {
-        document.getElementById("cop-anim-msg").textContent = "No atoms checked — select at least one atom above.";
-        return;
-      }
-      document.getElementById("cop-anim-msg").textContent = "";
-      sendCopAnimate(indices);
-    });
-    document.getElementById("cop-anim-all").addEventListener("click", () => {
-      document.getElementById("cop-anim-msg").textContent = "";
-      sendCopAnimate(copAllUnmapped);
-    });
-    for (const cb of document.querySelectorAll(".cop-atom-cb")) {
-      cb.addEventListener("change", () => {
-        const idx = Number(cb.value);
-        if (cb.checked) copSelectedAtoms.add(idx);
-        else copSelectedAtoms.delete(idx);
-      });
-    }
-  }
+  renderAtoms();
+  renderOperationDetails();
 }
 
-async function sendCopAnimate(atomIndices) {
+function currentAnimationAtoms() {
+  const all = atoms.map(atom => atom.index);
+  if (state.scope === "representative") return all.slice(0, 1);
+  if (state.scope === "unit_cell") return all;
+  if (state.scope === "displayed") return all;
+  if (state.scope === "selected") return state.selected_atoms && state.selected_atoms.length ? state.selected_atoms : selectedAtomIndices();
+  return all;
+}
+
+function currentAnimationUnitCellOnly() {
+  return state.scope === "unit_cell" || state.scope === "representative" || state.scope === "selected";
+}
+
+function sendCurrentCustomAnimation(startPlaying = true) {
+  const msg = document.getElementById("cop-anim-msg");
+  if (!copMatrix) {
+    if (msg) msg.textContent = "Check the custom operation first.";
+    else document.getElementById("status").textContent = "Check the custom operation first.";
+    return;
+  }
+  const indices = currentAnimationAtoms();
+  if (!indices.length) {
+    if (msg) msg.textContent = "No atoms selected.";
+    return;
+  }
+  if (msg) msg.textContent = "";
+  sendCopAnimate(indices, currentAnimationUnitCellOnly(), startPlaying);
+}
+
+async function sendCopAnimate(atomIndices, unitCellOnly = false, startPlaying = true) {
   if (!copMatrix || atomIndices.length === 0) {
     return;
   }
@@ -1047,9 +1187,10 @@ async function sendCopAnimate(atomIndices) {
       t_frac: copMatrix.t_frac,
       op_type: copMatrix.op_type,
       op_params: copMatrix.op_params,
+      unit_cell_only: Boolean(unitCellOnly),
       animate_id: Date.now(),
     },
-    playing: true,
+    playing: Boolean(startPlaying),
   };
   await postState(body);
 }
@@ -1082,11 +1223,17 @@ async function sendCopCheck() {
 document.getElementById("btn-check-op").addEventListener("click", sendCopCheck);
 document.getElementById("btn-clear-check").addEventListener("click", async () => {
   document.getElementById("cop-result").hidden = true;
+  copMatrix = null;
+  copSelectedAtoms = new Set();
+  copAllUnmapped = [];
+  customUnmappedAtoms = new Set();
   state = await api("/api/state", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({clear_custom_check: true}),
   });
+  renderAtoms();
+  renderOperationDetails();
 });
 
 async function boot() {
@@ -1104,6 +1251,7 @@ async function boot() {
   renderAtomElementFilter();
   syncSpeedButtons();
   syncDisplayButtons();
+  syncAtomModeButtons();
   renderOperations();
   renderAtoms();
   renderStatus();
@@ -1144,11 +1292,15 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_scope: str | None = None
         self.last_selected_atoms: tuple[int, ...] | None = None
         self.last_display_mode: str | None = self.display_mode
+        self.last_active_mode: str | None = None
         self.last_view_request_id: int | None = None
+        self.last_reset_view_request_id: int | None = None
         self.last_camera_request_id: int | None = None
         self.last_gif_request_id: int | None = None
         self.last_custom_op_check_id: object = None
         self.custom_check_actors: list = []
+        self.custom_view_direction_cart: np.ndarray | None = None
+        self.custom_focus_cart: np.ndarray | None = None
         self.last_custom_op_animate_id: object = None
         self.using_custom_paths: bool = False
 
@@ -1170,7 +1322,9 @@ class BrowserControlledViewer(NativePyVistaViewer):
             selected_atoms = tuple(int(index) for index in self.shared_state.get("selected_atoms", []))
             speed = float(self.shared_state.get("speed", 1.0))
             display_mode = str(self.shared_state.get("display_mode", self.display_mode))
+            active_mode = str(self.shared_state.get("active_mode", "standard"))
             view_request_id = self.shared_state.get("view_request_id")
+            reset_view_request_id = self.shared_state.get("reset_view_request_id")
             camera_request_id = self.shared_state.get("camera_request_id")
             camera_direction = str(self.shared_state.get("camera_direction", ""))
             camera_angle = float(self.shared_state.get("camera_angle", 90.0))
@@ -1183,10 +1337,23 @@ class BrowserControlledViewer(NativePyVistaViewer):
 
         self.speed = max(speed, 0.1)
 
+        if active_mode != self.last_active_mode:
+            if active_mode == "custom":
+                self.hide_element_actors()
+                self.hide_start_markers()
+            else:
+                self.clear_custom_check_actors()
+                self.show_element_actors(self.current_operation()["index"])
+                self.update_start_markers()
+            self.last_active_mode = active_mode
+            should_render = True
+
         if operation_index != self.last_operation_index:
             self.set_operation_index(operation_index)
             self.last_operation_index = operation_index
             self.using_custom_paths = False
+            if active_mode == "custom":
+                self.hide_element_actors()
             reset = True
             should_render = True
             should_update_status = True
@@ -1205,8 +1372,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
 
         if display_mode != self.last_display_mode:
             self.playing = False
+            self.hide_element_actors()
+            old_display_mode = self.display_mode
             self.rebuild_display_atoms(display_mode)
             self.last_display_mode = display_mode
+            self.recenter_camera_for_display_mode(old_display_mode, display_mode)
+            if active_mode == "standard":
+                self.show_element_actors(self.current_operation()["index"])
             reset = True
             should_render = True
             should_update_status = True
@@ -1219,6 +1391,11 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if view_request_id is not None and view_request_id != self.last_view_request_id:
             self.view_along_current_operation()
             self.last_view_request_id = view_request_id
+            should_render = True
+
+        if reset_view_request_id is not None and reset_view_request_id != self.last_reset_view_request_id:
+            self.reset_view_center()
+            self.last_reset_view_request_id = reset_view_request_id
             should_render = True
 
         if camera_request_id is not None and camera_request_id != self.last_camera_request_id:
@@ -1260,11 +1437,18 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 t_frac = np.asarray(custom_op_animate.get("t_frac"), dtype=float)
                 op_type = str(custom_op_animate.get("op_type", "matrix"))
                 op_params = custom_op_animate.get("op_params") or {}
+                unit_cell_only = bool(custom_op_animate.get("unit_cell_only", False))
                 self.paths = self.build_custom_animation_paths(
-                    atom_indices, W_frac, t_frac, op_type=op_type, op_params=op_params
+                    atom_indices,
+                    W_frac,
+                    t_frac,
+                    op_type=op_type,
+                    op_params=op_params,
+                    unit_cell_only=unit_cell_only,
                 )
                 self.using_custom_paths = True
                 self.last_custom_op_animate_id = animate_id
+                self.update_start_markers()
                 reset = True
                 should_render = True
 
@@ -1298,7 +1482,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 return
 
     def show_element_actors(self, operation_index: int) -> None:
-        if operation_index not in self.element_actor_cache:
+        cache_key = (operation_index, self.display_mode)
+        if cache_key not in self.element_actor_cache:
             cached = self.element_context_cache.get(operation_index)
             if cached is not None:
                 axes, planes, centers = cached
@@ -1308,6 +1493,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                     axes,
                     planes,
                     centers,
+                    display_mode=self.display_mode,
                 )
             else:
                 actors = viewer.add_symmetry_elements(
@@ -1316,9 +1502,10 @@ class BrowserControlledViewer(NativePyVistaViewer):
                     self.atom_mappings,
                     operation_index=operation_index,
                     element_index=None,
+                    display_mode=self.display_mode,
                 )
-            self.element_actor_cache[operation_index] = actors
-        self.element_actors = self.element_actor_cache[operation_index]
+            self.element_actor_cache[cache_key] = actors
+        self.element_actors = self.element_actor_cache[cache_key]
         for actor in self.element_actors:
             try:
                 actor.SetVisibility(True)
@@ -1335,6 +1522,22 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.shared_state["reset"] = True
 
     def view_along_current_operation(self) -> None:
+        if self.custom_view_direction_cart is not None:
+            direction = self.custom_view_direction_cart
+            if np.linalg.norm(direction) < 1e-10:
+                return
+            direction = viewer.normalize(direction)
+            center = self.custom_focus_cart if self.custom_focus_cart is not None else self.display_center()
+            distance = max(viewer.display_scene_span(self.render_data, self.display_mode) * 1.8, 1.0)
+            up = camera_up_vector(direction)
+            self.plotter.camera_position = [
+                tuple(center + direction * distance),
+                tuple(center),
+                tuple(up),
+            ]
+            self.plotter.reset_camera_clipping_range()
+            return
+
         operation = self.current_operation()
         axes, planes, centers = self.element_context_cache.get(operation["index"], (None, None, None))
         if axes is None or planes is None or centers is None:
@@ -1352,8 +1555,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if direction is None:
             return
         direction = viewer.normalize(direction)
-        center = scene_center(self.render_data)
-        distance = max(viewer.scene_span(self.render_data) * 1.8, 1.0)
+        center = operation_focus_point_cart(self.render_data, operation, axes, planes, centers, self.display_mode)
+        distance = max(viewer.display_scene_span(self.render_data, self.display_mode) * 1.8, 1.0)
         up = camera_up_vector(direction)
         self.plotter.camera_position = [
             tuple(center + direction * distance),
@@ -1395,6 +1598,38 @@ class BrowserControlledViewer(NativePyVistaViewer):
             tuple(focal_point + rotated_radius),
             tuple(focal_point),
             tuple(viewer.normalize(rotated_up)),
+        ]
+        self.plotter.reset_camera_clipping_range()
+
+    def display_center(self) -> np.ndarray:
+        return viewer.display_scene_center(self.render_data, self.display_mode)
+
+    def reset_view_center(self) -> None:
+        new_center = self.display_center()
+        position = np.asarray(self.plotter.camera.GetPosition(), dtype=float)
+        focal_point = np.asarray(self.plotter.camera.GetFocalPoint(), dtype=float)
+        up = viewer.normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
+        shift = new_center - focal_point
+        self.plotter.camera_position = [
+            tuple(position + shift),
+            tuple(new_center),
+            tuple(up),
+        ]
+        self.plotter.reset_camera_clipping_range()
+
+    def recenter_camera_for_display_mode(self, old_display_mode: str, new_display_mode: str) -> None:
+        old_center = viewer.display_scene_center(self.render_data, old_display_mode)
+        new_center = viewer.display_scene_center(self.render_data, new_display_mode)
+        shift = new_center - old_center
+        if np.linalg.norm(shift) < 1e-10:
+            return
+        position = np.asarray(self.plotter.camera.GetPosition(), dtype=float)
+        focal_point = np.asarray(self.plotter.camera.GetFocalPoint(), dtype=float)
+        up = viewer.normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
+        self.plotter.camera_position = [
+            tuple(position + shift),
+            tuple(focal_point + shift),
+            tuple(up),
         ]
         self.plotter.reset_camera_clipping_range()
 
@@ -1448,6 +1683,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         *,
         op_type: str = "matrix",
         op_params: dict | None = None,
+        unit_cell_only: bool = False,
     ) -> dict[int, dict]:
         """Build operation-aware animation paths for a user-supplied (W|t) operation."""
         unit_cell = self.render_data.get("unit_cell")
@@ -1508,23 +1744,53 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 start, target, fake_op,
                 axis=axis_dict, plane=plane_dict, center=center_dict,
             )
+            if unit_cell_only:
+                path["unit_cell_only"] = True
             paths[atom["index"]] = path
         return paths
 
     def apply_custom_check(self, result: dict | None) -> None:
         self.clear_custom_check_actors()
-        if not result or result.get("error") or not result.get("unmapped"):
+        if not result or result.get("error"):
+            return
+
+        elements = result.get("elements") or {}
+        axes = elements.get("axes") or []
+        planes = elements.get("planes") or []
+        centers = elements.get("centers") or []
+        if axes or planes or centers:
+            self.custom_check_actors.extend(
+                viewer.add_symmetry_element_actors(
+                    self.plotter,
+                    self.render_data,
+                    axes,
+                    planes,
+                    centers,
+                    display_mode=self.display_mode,
+                )
+            )
+        direction = result.get("view_direction_cart")
+        if direction is not None:
+            self.custom_view_direction_cart = np.asarray(direction, dtype=float)
+        self.custom_focus_cart = custom_focus_point_cart(result, self.render_data, self.display_mode)
+
+        if not result.get("unmapped"):
             return
         unmapped_set = {item["source"] for item in result["unmapped"]}
         span = viewer.scene_span(self.render_data)
-        radius = max(span * 0.048, 0.14)
-        for item in self.animated_atoms:
-            atom = item["atom"]
+        for atom in self.render_data.get("atoms", []):
             if atom["index"] not in unmapped_set:
                 continue
-            center = np.asarray(atom["cart"], dtype=float) + item["display_shift_cart"]
-            sphere = pv.Sphere(radius=radius, center=center, theta_resolution=16, phi_resolution=10)
-            actor = self.plotter.add_mesh(sphere, color="#ff3333", opacity=1.0, smooth_shading=True)
+            center = np.asarray(atom["cart"], dtype=float)
+            radius = viewer.atom_radius(atom["atomic_number"], span) * 1.28
+            sphere = pv.Sphere(radius=radius, center=center, theta_resolution=24, phi_resolution=14)
+            actor = self.plotter.add_mesh(
+                sphere,
+                color="#ff8a80",
+                style="wireframe",
+                line_width=1,
+                opacity=0.55,
+            )
             self.custom_check_actors.append(actor)
 
     def clear_custom_check_actors(self) -> None:
@@ -1534,6 +1800,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
             except Exception:
                 pass
         self.custom_check_actors = []
+        self.custom_view_direction_cart = None
+        self.custom_focus_cart = None
 
 
 def make_handler(
@@ -1601,9 +1869,11 @@ def make_handler(
                     return
                 W_frac, t_frac = result
                 check_result = check_custom_operation(render_data, W_frac, t_frac, tolerance)
+                visuals = custom_operation_visuals(op_type, params, lattice, W_frac, t_frac)
                 # include the operation matrix so the browser can request animation
                 check_result["W_frac"] = W_frac.tolist()
                 check_result["t_frac"] = t_frac.tolist()
+                check_result.update(visuals)
                 # store result for PyVista highlight
                 with state_lock:
                     shared_state["custom_op_result"] = check_result
@@ -1621,8 +1891,10 @@ def make_handler(
                 "selected_atoms",
                 "speed",
                 "display_mode",
+                "active_mode",
                 "scope",
                 "view_request_id",
+                "reset_view_request_id",
                 "camera_request_id",
                 "camera_direction",
                 "camera_angle",
@@ -1808,6 +2080,105 @@ def build_custom_operation_frac(
         return f"Parameter error: {exc}"
 
 
+def custom_operation_visuals(
+    op_type: str,
+    params: dict,
+    lattice: np.ndarray,
+    W_frac: np.ndarray,
+    t_frac: np.ndarray,
+) -> dict:
+    axes: list[dict] = []
+    planes: list[dict] = []
+    centers: list[dict] = []
+    view_direction: np.ndarray | None = None
+
+    try:
+        if op_type in ("rotation", "screw"):
+            uvw = np.asarray(params.get("axis", [0, 0, 1]), dtype=float)
+            direction = uvw @ lattice
+            if np.linalg.norm(direction) >= 1e-10:
+                point = np.asarray(params.get("point", [0, 0, 0]), dtype=float) @ lattice
+                direction = viewer.normalize(direction)
+                axes.append(
+                    {
+                        "label": "custom axis",
+                        "point_cart": point.tolist(),
+                        "direction_cart": direction.tolist(),
+                    }
+                )
+                view_direction = direction
+
+        elif op_type in ("mirror", "glide"):
+            hkl = np.asarray(params.get("normal", [0, 0, 1]), dtype=float)
+            normal = np.linalg.inv(lattice) @ hkl
+            if np.linalg.norm(normal) >= 1e-10:
+                point = np.asarray(params.get("point", [0, 0, 0]), dtype=float) @ lattice
+                normal = viewer.normalize(normal)
+                basis1, basis2 = plane_basis_from_normal(normal)
+                planes.append(
+                    {
+                        "label": "custom plane",
+                        "point_cart": point.tolist(),
+                        "normal_cart": normal.tolist(),
+                        "basis1_cart": basis1.tolist(),
+                        "basis2_cart": basis2.tolist(),
+                    }
+                )
+                view_direction = normal
+
+        elif op_type == "inversion":
+            center = np.asarray(params.get("center", [0, 0, 0]), dtype=float) @ lattice
+            centers.append({"label": "custom center", "point_cart": center.tolist()})
+
+        elif op_type == "rotoinversion":
+            uvw = np.asarray(params.get("axis", [0, 0, 1]), dtype=float)
+            direction = uvw @ lattice
+            center = np.asarray(params.get("center", [0, 0, 0]), dtype=float) @ lattice
+            centers.append({"label": "custom center", "point_cart": center.tolist()})
+            if np.linalg.norm(direction) >= 1e-10:
+                direction = viewer.normalize(direction)
+                axes.append(
+                    {
+                        "label": "custom axis",
+                        "point_cart": center.tolist(),
+                        "direction_cart": direction.tolist(),
+                    }
+                )
+                view_direction = direction
+
+        elif op_type == "translation":
+            direction = np.asarray(t_frac, dtype=float) @ lattice
+            if np.linalg.norm(direction) >= 1e-10:
+                view_direction = direction
+
+        elif op_type == "matrix":
+            direction = np.asarray(t_frac, dtype=float) @ lattice
+            if np.linalg.norm(direction) >= 1e-10:
+                view_direction = direction
+
+    except (KeyError, ValueError, TypeError, np.linalg.LinAlgError):
+        pass
+
+    return {
+        "elements": {
+            "axes": axes,
+            "planes": planes,
+            "centers": centers,
+        },
+        "view_direction_cart": None if view_direction is None else np.asarray(view_direction, dtype=float).tolist(),
+    }
+
+
+def plane_basis_from_normal(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    normal = viewer.normalize(np.asarray(normal, dtype=float))
+    trial = np.array([1.0, 0.0, 0.0])
+    if abs(float(np.dot(trial, normal))) > 0.85:
+        trial = np.array([0.0, 1.0, 0.0])
+    basis1 = viewer.normalize(np.cross(normal, trial))
+    basis2 = viewer.normalize(np.cross(normal, basis1))
+    return basis1, basis2
+
+
 def check_custom_operation(
     render_data: dict,
     W_frac: np.ndarray,
@@ -1815,10 +2186,13 @@ def check_custom_operation(
     tolerance_cart: float = 0.1,
 ) -> dict:
     """
-    Apply (W_frac, t_frac) to every atom.
+    Apply (W_frac, t_frac) to atoms in the exported unit cell only.
     For each transformed position, check if a same-element atom is within tolerance_cart.
     """
-    atoms = render_data.get("atoms", [])
+    atoms = [
+        atom for atom in render_data.get("atoms", [])
+        if atom.get("frac") is not None
+    ]
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         return {"error": "No unit cell — molecule mode not supported for custom operation check"}
@@ -2098,6 +2472,48 @@ def operation_view_direction_cart(
     if planes:
         return np.asarray(planes[0]["normal_cart"], dtype=float)
     return translation_direction_cart(operation)
+
+
+def operation_focus_point_cart(
+    render_data: dict,
+    operation: dict,
+    axes: list[dict],
+    planes: list[dict],
+    centers: list[dict],
+    display_mode: str,
+) -> np.ndarray:
+    effective_axis = axes[0] if axes else effective_axis_from_operation(operation, centers)
+    if effective_axis is not None:
+        return display_point_cart(render_data, effective_axis["point_cart"], display_mode)
+    if planes:
+        return display_point_cart(render_data, planes[0]["point_cart"], display_mode)
+    if centers:
+        return display_point_cart(render_data, centers[0]["point_cart"], display_mode)
+    return viewer.display_scene_center(render_data, display_mode)
+
+
+def custom_focus_point_cart(result: dict, render_data: dict, display_mode: str) -> np.ndarray | None:
+    elements = result.get("elements") or {}
+    for key in ("axes", "planes", "centers"):
+        items = elements.get(key) or []
+        if items:
+            return display_point_cart(render_data, items[0]["point_cart"], display_mode)
+    return None
+
+
+def display_point_cart(render_data: dict, point_cart: list[float] | np.ndarray, display_mode: str) -> np.ndarray:
+    point = np.asarray(point_cart, dtype=float)
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return point
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    frac = point @ np.linalg.inv(lattice)
+    if display_mode == "source":
+        wrapped = frac - np.floor(frac + 1e-9)
+    else:
+        wrapped = frac - np.round(frac)
+        wrapped = np.where(wrapped >= 0.5 - 1e-9, wrapped - 1.0, wrapped)
+    return wrapped @ lattice
 
 
 def visual_translation_direction_cart(
@@ -2399,6 +2815,7 @@ def main() -> int:
         "selected_atoms": initial_selected_atoms,
         "speed": 1.0,
         "display_mode": display_mode,
+        "active_mode": "standard",
         "gif_status": "",
         "custom_op_check_id": None,
         "custom_op_result": None,
