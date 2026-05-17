@@ -15,6 +15,7 @@ import _bootstrap  # noqa: F401
 import logging
 import numpy as np
 import imageio.v2 as imageio
+import pyvista as pv
 
 from tools import view_json_pyvista as viewer
 from tools.view_json_gui import NativePyVistaViewer
@@ -1036,9 +1037,7 @@ function displayCopResult(result, opType, opParams) {
 }
 
 async function sendCopAnimate(atomIndices) {
-  console.log("[debug] sendCopAnimate called, copMatrix=", copMatrix, "atomIndices=", atomIndices);
   if (!copMatrix || atomIndices.length === 0) {
-    console.log("[debug] sendCopAnimate early return: copMatrix=" + !!copMatrix + " len=" + atomIndices.length);
     return;
   }
   const body = {
@@ -1052,13 +1051,7 @@ async function sendCopAnimate(atomIndices) {
     },
     playing: true,
   };
-  console.log("[debug] sending postState, body keys:", Object.keys(body));
-  try {
-    await postState(body);
-    console.log("[debug] postState completed successfully");
-  } catch(err) {
-    console.error("[debug] postState FAILED:", err);
-  }
+  await postState(body);
 }
 
 async function sendCopCheck() {
@@ -1164,12 +1157,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.add_key_event("r", self.reset_from_keyboard)
 
     def on_timer(self, step: int) -> None:
-        try:
-            self._on_timer_inner(step)
-        except Exception as exc:
-            import traceback, sys
-            print(f"[DEBUG-TIMER] EXCEPTION in on_timer: {exc}", file=open("/tmp/symetry_debug.log","a"), flush=True)
-            traceback.print_exc(file=open("/tmp/symetry_debug.log","a"))
+        self._on_timer_inner(step)
 
     def _on_timer_inner(self, step: int) -> None:
         del step
@@ -1187,6 +1175,10 @@ class BrowserControlledViewer(NativePyVistaViewer):
             camera_direction = str(self.shared_state.get("camera_direction", ""))
             camera_angle = float(self.shared_state.get("camera_angle", 90.0))
             gif_request_id = self.shared_state.get("gif_request_id")
+            custom_op_check_id = self.shared_state.get("custom_op_check_id")
+            clear_custom_check = bool(self.shared_state.pop("clear_custom_check", False))
+            custom_op_result = self.shared_state.get("custom_op_result")
+            custom_op_animate = self.shared_state.get("custom_op_animate")
             reset = bool(self.shared_state.pop("reset", False))
 
         self.speed = max(speed, 0.1)
@@ -1241,10 +1233,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
             should_update_status = True
             should_render = True
 
-        custom_op_check_id = self.shared_state.get("custom_op_check_id")
-        clear_custom_check = bool(self.shared_state.pop("clear_custom_check", False))
-        custom_op_result = self.shared_state.get("custom_op_result")
-        custom_op_animate = self.shared_state.get("custom_op_animate")
         if clear_custom_check:
             self.clear_custom_check_actors()
             self.using_custom_paths = False
@@ -1255,13 +1243,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
             reset = True
             should_render = True
         elif custom_op_check_id is not None and custom_op_check_id != self.last_custom_op_check_id:
+            self.last_custom_op_check_id = custom_op_check_id  # update first to prevent exception loops
             self.apply_custom_check(custom_op_result)
             # New check discards any previous custom animation paths
             if self.using_custom_paths:
                 self.using_custom_paths = False
                 self.build_paths()
                 reset = True
-            self.last_custom_op_check_id = custom_op_check_id
             should_render = True
 
         if custom_op_animate is not None:
@@ -1272,17 +1260,9 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 t_frac = np.asarray(custom_op_animate.get("t_frac"), dtype=float)
                 op_type = str(custom_op_animate.get("op_type", "matrix"))
                 op_params = custom_op_animate.get("op_params") or {}
-                try:
-                    self.paths = self.build_custom_animation_paths(
-                        atom_indices, W_frac, t_frac, op_type=op_type, op_params=op_params
-                    )
-                    import sys as _sys
-                    print(f"[DEBUG-TIMER] custom_op_animate processed: op_type={op_type!r} atom_indices={atom_indices} paths={len(self.paths)}", file=open("/tmp/symetry_debug.log","a"), flush=True)
-                except Exception as exc:
-                    import traceback, sys as _sys
-                    print(f"[DEBUG-TIMER] build_custom_animation_paths FAILED: {exc}", file=open("/tmp/symetry_debug.log","a"), flush=True)
-                    traceback.print_exc(file=open("/tmp/symetry_debug.log","a"))
-                    self.paths = {}
+                self.paths = self.build_custom_animation_paths(
+                    atom_indices, W_frac, t_frac, op_type=op_type, op_params=op_params
+                )
                 self.using_custom_paths = True
                 self.last_custom_op_animate_id = animate_id
                 reset = True
@@ -1651,11 +1631,6 @@ def make_handler(
                 "clear_custom_check",
                 "custom_op_animate",
             }
-            import sys as _sys
-            print(f"[DEBUG-SERVER] POST /api/state keys={list(payload.keys())}", file=open("/tmp/symetry_debug.log","a"), flush=True)
-            if "custom_op_animate" in payload:
-                anim = payload["custom_op_animate"]
-                print(f"[DEBUG-SERVER]   animate_id={anim.get('animate_id')} atom_indices={anim.get('atom_indices')}", file=open("/tmp/symetry_debug.log","a"), flush=True)
             with state_lock:
                 for key, value in payload.items():
                     if key in allowed:
@@ -2428,13 +2403,11 @@ def main() -> int:
         "custom_op_check_id": None,
         "custom_op_result": None,
     }
-    # Fast path: compute summaries without atom_mappings (~30-70 ms).
-    # The element_context_cache is left empty here; show_element_actors fills
-    # it per-operation on first selection (~4 ms each).  This avoids spawning a
-    # CPU-intensive background thread that would block the HTTP server via
-    # Python GIL contention and make the browser appear unresponsive.
-    fast_items, _ = operation_summaries(render_data, None)
-    summaries_ref = [fast_items]
+    operation_summary_items, element_context_cache = operation_summaries(
+        render_data,
+        payload.get("atom_mappings"),
+    )
+    summaries_ref = [operation_summary_items]
     shared_state["summaries_ready"] = True
 
     handler = make_handler(
@@ -2457,7 +2430,7 @@ def main() -> int:
         scope=shared_state["scope"],
         shared_state=shared_state,
         state_lock=state_lock,
-        element_context_cache={},
+        element_context_cache=element_context_cache,
     )
     app.show()
     server.shutdown()
