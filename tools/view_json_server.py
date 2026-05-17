@@ -19,20 +19,6 @@ import imageio.v2 as imageio
 from tools import view_json_pyvista as viewer
 from tools.view_json_gui import NativePyVistaViewer
 
-# Suppress VTK C++ warnings that cause recursive logging floods in PyVista.
-# Redirect VTK's output window to /dev/null so warnings never reach PyVista's
-# Python observer (which would log them, triggering another VTK event, etc.).
-try:
-    from vtkmodules.vtkCommonCore import vtkFileOutputWindow, vtkOutputWindow
-    _vtk_null = vtkFileOutputWindow()
-    _vtk_null.SetFileName("/dev/null")
-    vtkOutputWindow.SetInstance(_vtk_null)
-except Exception:
-    try:
-        import vtk as _vtk
-        _vtk.vtkObject.GlobalWarningDisplayOff()
-    except Exception:
-        pass
 logging.getLogger("pyvista").setLevel(logging.ERROR)
 logging.getLogger("vtkmodules").setLevel(logging.ERROR)
 
@@ -1182,8 +1168,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self._on_timer_inner(step)
         except Exception as exc:
             import traceback, sys
-            print(f"[DEBUG-TIMER] EXCEPTION in on_timer: {exc}", file=sys.stderr, flush=True)
-            traceback.print_exc(file=sys.stderr)
+            print(f"[DEBUG-TIMER] EXCEPTION in on_timer: {exc}", file=open("/tmp/symetry_debug.log","a"), flush=True)
+            traceback.print_exc(file=open("/tmp/symetry_debug.log","a"))
 
     def _on_timer_inner(self, step: int) -> None:
         del step
@@ -1291,11 +1277,11 @@ class BrowserControlledViewer(NativePyVistaViewer):
                         atom_indices, W_frac, t_frac, op_type=op_type, op_params=op_params
                     )
                     import sys as _sys
-                    print(f"[DEBUG-TIMER] custom_op_animate processed: op_type={op_type!r} atom_indices={atom_indices} paths={len(self.paths)}", file=_sys.stderr, flush=True)
+                    print(f"[DEBUG-TIMER] custom_op_animate processed: op_type={op_type!r} atom_indices={atom_indices} paths={len(self.paths)}", file=open("/tmp/symetry_debug.log","a"), flush=True)
                 except Exception as exc:
                     import traceback, sys as _sys
-                    print(f"[DEBUG-TIMER] build_custom_animation_paths FAILED: {exc}", file=_sys.stderr, flush=True)
-                    traceback.print_exc(file=_sys.stderr)
+                    print(f"[DEBUG-TIMER] build_custom_animation_paths FAILED: {exc}", file=open("/tmp/symetry_debug.log","a"), flush=True)
+                    traceback.print_exc(file=open("/tmp/symetry_debug.log","a"))
                     self.paths = {}
                 self.using_custom_paths = True
                 self.last_custom_op_animate_id = animate_id
@@ -1666,10 +1652,10 @@ def make_handler(
                 "custom_op_animate",
             }
             import sys as _sys
-            print(f"[DEBUG-SERVER] POST /api/state keys={list(payload.keys())}", file=_sys.stderr, flush=True)
+            print(f"[DEBUG-SERVER] POST /api/state keys={list(payload.keys())}", file=open("/tmp/symetry_debug.log","a"), flush=True)
             if "custom_op_animate" in payload:
                 anim = payload["custom_op_animate"]
-                print(f"[DEBUG-SERVER]   animate_id={anim.get('animate_id')} atom_indices={anim.get('atom_indices')}", file=_sys.stderr, flush=True)
+                print(f"[DEBUG-SERVER]   animate_id={anim.get('animate_id')} atom_indices={anim.get('atom_indices')}", file=open("/tmp/symetry_debug.log","a"), flush=True)
             with state_lock:
                 for key, value in payload.items():
                     if key in allowed:
