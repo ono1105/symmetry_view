@@ -31,10 +31,8 @@ examples/
   methane.xyz
 
 exports/
-  f2_pd.json
-  jacobsite.json
-  mg2v2o7.json
-  water.json
+  json/      共有用JSON
+  gifs/      ローカル確認用GIF出力
 
 docs/
   PROJECT_SPEC.md        現在の目的・スコープ・設計方針
@@ -84,46 +82,47 @@ pip install -r requirements.txt
 JSON export:
 
 ```bash
-.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
-.venv/bin/python tools/export_analysis_json.py examples/structures/jacobsite.cif --mode crystal -o exports/jacobsite.json
-.venv/bin/python tools/export_analysis_json.py examples/structures/mg2v2o7.cif --mode crystal -o exports/mg2v2o7.json
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/json/f2_pd.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/jacobsite.cif --mode crystal -o exports/json/jacobsite.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/mg2v2o7.cif --mode crystal -o exports/json/mg2v2o7.json
+.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/json/water.json
 ```
 
 最小表示:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --show-mapping --show-displacements
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/checks/f2_pd_op1_rep.gif
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/checks/f2_pd_op1_all.gif
-.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op26_glide.gif
-.venv/bin/python tools/view_json_pyvista.py exports/water.json
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --list-operations
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --list-elements
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --show-mapping --show-displacements
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/gifs/f2_pd/f2_pd_op1_rep.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/gifs/f2_pd/f2_pd_op1_all.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/gifs/jacobsite/jacobsite_op26_glide.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/water.json
 ```
 
 簡単なGUI:
 
 ```bash
-.venv/bin/python tools/view_json_gui.py exports/f2_pd.json
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --list-operations
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --list-atoms
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --operation 25
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --scope selected --selected-atoms 0 1 2
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --expanded
-.venv/bin/python tools/view_json_server.py exports/jacobsite.json
+.venv/bin/python tools/view_json_gui.py exports/json/f2_pd.json
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --list-operations
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --list-atoms
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --operation 25
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --scope selected --selected-atoms 0 1 2
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --expanded
+.venv/bin/python tools/view_json_server.py exports/json/jacobsite.json
 ```
 
 `tools/` ディレクトリに移動している場合:
 
 ```bash
-../.venv/bin/python view_json_gui.py ../exports/jacobsite.json
+../.venv/bin/python view_json_gui.py ../exports/json/jacobsite.json
 ```
 
-`exports/` 直下は共有用のJSON本体だけを置き、確認用のGIF/PNGは `exports/checks/` に置く方針です。
+`exports/json/` は共有用のJSON本体、`exports/gifs/<structure>/` はローカル確認用のGIF出力置き場です。
+ブラウザビューアーの `Save GIF` / `Save 3-view GIFs` もこの `exports/gifs/<structure>/` へ保存します。
 
 ## 現在の設計方針
 

@@ -541,9 +541,8 @@ HTML = """<!doctype html>
           <button id="play">Play</button>
           <button id="stop" class="secondary">Stop</button>
           <button id="reset" class="secondary">Reset</button>
-          <button id="view-direction" class="secondary">View along direction</button>
-          <button id="reset-view" class="secondary">Reset view center</button>
           <button id="save-gif" class="secondary">Save GIF</button>
+          <button id="save-gif-3view" class="secondary">Save 3-view GIFs</button>
         </div>
         <h3 class="subsection-title">Speed</h3>
         <div class="button-row flush" id="speed-controls">
@@ -551,17 +550,12 @@ HTML = """<!doctype html>
           <button class="secondary speed-button selected" data-speed="1.0">Normal</button>
           <button class="secondary speed-button" data-speed="2.0">Fast</button>
         </div>
-        <p class="hint">Play the selected symmetry operation or align the camera to its axis, plane normal, or translation direction.</p>
-        <h2 class="section-title">Display</h2>
-        <label>Range</label>
-        <div class="button-row flush" id="display-controls">
-          <button class="secondary display-button selected" data-display-mode="source">Unit cell</button>
-          <button class="secondary display-button" data-display-mode="expanded_quarter">±1/4</button>
-          <button class="secondary display-button" data-display-mode="expanded_half">±1/2</button>
-          <button class="secondary display-button" data-display-mode="expanded_0_75">±3/4</button>
-          <button class="secondary display-button" data-display-mode="expanded_1_0">±1</button>
-        </div>
+        <p class="hint">Play the selected operation and save the current view as a GIF.</p>
         <h2 class="section-title">Camera</h2>
+        <div class="button-row flush">
+          <button id="view-direction" class="secondary">View along direction</button>
+          <button id="reset-view" class="secondary">Reset view center</button>
+        </div>
         <label for="camera-angle">Rotate current view</label>
         <div class="camera-grid">
           <span></span>
@@ -574,7 +568,16 @@ HTML = """<!doctype html>
           <button id="camera-down" class="secondary">Down</button>
           <span></span>
         </div>
-        <p class="hint">Enter an angle in degrees, then rotate the current camera view around the structure.</p>
+        <p class="hint">Align to the selected axis, plane normal, or translation direction, then rotate the current view.</p>
+        <h2 class="section-title">Display</h2>
+        <label>Range</label>
+        <div class="button-row flush" id="display-controls">
+          <button class="secondary display-button selected" data-display-mode="source">Unit cell</button>
+          <button class="secondary display-button" data-display-mode="expanded_quarter">±1/4</button>
+          <button class="secondary display-button" data-display-mode="expanded_half">±1/2</button>
+          <button class="secondary display-button" data-display-mode="expanded_0_75">±3/4</button>
+          <button class="secondary display-button" data-display-mode="expanded_1_0">±1</button>
+        </div>
       </section>
       <section class="panel">
         <h2 class="section-title">Atoms</h2>
@@ -1008,6 +1011,14 @@ document.getElementById("save-gif").addEventListener("click", () => {
   }
   postState({gif_request_id: Date.now(), playing: false});
 });
+document.getElementById("save-gif-3view").addEventListener("click", () => {
+  if (activeMode === "custom") {
+    sendCurrentCustomAnimation(false);
+    window.setTimeout(() => postState({gif_3view_request_id: Date.now(), playing: false}), 120);
+    return;
+  }
+  postState({gif_3view_request_id: Date.now(), playing: false});
+});
 function cameraAngle() {
   const value = Number(document.getElementById("camera-angle").value);
   if (!Number.isFinite(value)) return 90;
@@ -1297,10 +1308,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_reset_view_request_id: int | None = None
         self.last_camera_request_id: int | None = None
         self.last_gif_request_id: int | None = None
+        self.last_gif_3view_request_id: int | None = None
         self.last_custom_op_check_id: object = None
         self.custom_check_actors: list = []
         self.custom_view_direction_cart: np.ndarray | None = None
         self.custom_focus_cart: np.ndarray | None = None
+        self.custom_speed_multiplier: float = 1.0
         self.last_custom_op_animate_id: object = None
         self.using_custom_paths: bool = False
 
@@ -1329,6 +1342,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             camera_direction = str(self.shared_state.get("camera_direction", ""))
             camera_angle = float(self.shared_state.get("camera_angle", 90.0))
             gif_request_id = self.shared_state.get("gif_request_id")
+            gif_3view_request_id = self.shared_state.get("gif_3view_request_id")
             custom_op_check_id = self.shared_state.get("custom_op_check_id")
             clear_custom_check = bool(self.shared_state.pop("clear_custom_check", False))
             custom_op_result = self.shared_state.get("custom_op_result")
@@ -1343,6 +1357,10 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 self.hide_start_markers()
             else:
                 self.clear_custom_check_actors()
+                if self.using_custom_paths:
+                    self.using_custom_paths = False
+                    self.build_paths()
+                    reset = True
                 self.show_element_actors(self.current_operation()["index"])
                 self.update_start_markers()
             self.last_active_mode = active_mode
@@ -1410,6 +1428,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
             should_update_status = True
             should_render = True
 
+        if gif_3view_request_id is not None and gif_3view_request_id != self.last_gif_3view_request_id:
+            self.playing = False
+            self.save_three_view_gifs()
+            self.last_gif_3view_request_id = gif_3view_request_id
+            should_update_status = True
+            should_render = True
+
         if clear_custom_check:
             self.clear_custom_check_actors()
             self.using_custom_paths = False
@@ -1421,7 +1446,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
             should_render = True
         elif custom_op_check_id is not None and custom_op_check_id != self.last_custom_op_check_id:
             self.last_custom_op_check_id = custom_op_check_id  # update first to prevent exception loops
-            self.apply_custom_check(custom_op_result)
+            try:
+                self.apply_custom_check(custom_op_result)
+            except Exception as exc:
+                self.clear_custom_check_actors()
+                self.set_gif_status(f"check highlight failed: {exc}")
+                should_update_status = True
             # New check discards any previous custom animation paths
             if self.using_custom_paths:
                 self.using_custom_paths = False
@@ -1447,6 +1477,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                     unit_cell_only=unit_cell_only,
                 )
                 self.using_custom_paths = True
+                self.custom_speed_multiplier = custom_operation_speed_multiplier(op_type)
                 self.last_custom_op_animate_id = animate_id
                 self.update_start_markers()
                 reset = True
@@ -1458,7 +1489,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if self.playing and self.paths:
             if self.frame_position >= self.frame_count - 1:
                 self.frame_position = 0.0
-            frame_step = self.speed * operation_speed_multiplier(self.current_operation())
+            multiplier = self.custom_speed_multiplier if self.using_custom_paths else operation_speed_multiplier(self.current_operation())
+            frame_step = self.speed * multiplier
             self.frame_position = min(self.frame_position + frame_step, self.frame_count - 1)
             self.update_atoms(self.frame_position / max(self.frame_count - 1, 1))
             should_render = True
@@ -1522,21 +1554,22 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.shared_state["reset"] = True
 
     def view_along_current_operation(self) -> None:
+        basis = self.operation_camera_basis()
+        if basis is None:
+            return
+        center, direction, up, distance = basis
+        self.set_camera_view(center, direction, up, distance)
+
+    def operation_camera_basis(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
         if self.custom_view_direction_cart is not None:
             direction = self.custom_view_direction_cart
             if np.linalg.norm(direction) < 1e-10:
-                return
+                return None
             direction = viewer.normalize(direction)
             center = self.custom_focus_cart if self.custom_focus_cart is not None else self.display_center()
             distance = max(viewer.display_scene_span(self.render_data, self.display_mode) * 1.8, 1.0)
             up = camera_up_vector(direction)
-            self.plotter.camera_position = [
-                tuple(center + direction * distance),
-                tuple(center),
-                tuple(up),
-            ]
-            self.plotter.reset_camera_clipping_range()
-            return
+            return center, direction, up, distance
 
         operation = self.current_operation()
         axes, planes, centers = self.element_context_cache.get(operation["index"], (None, None, None))
@@ -1553,11 +1586,14 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if direction is None:
             direction = operation_view_direction_cart(self.render_data, operation, axes, planes, centers)
         if direction is None:
-            return
+            return None
         direction = viewer.normalize(direction)
         center = operation_focus_point_cart(self.render_data, operation, axes, planes, centers, self.display_mode)
         distance = max(viewer.display_scene_span(self.render_data, self.display_mode) * 1.8, 1.0)
         up = camera_up_vector(direction)
+        return center, direction, up, distance
+
+    def set_camera_view(self, center: np.ndarray, direction: np.ndarray, up: np.ndarray, distance: float) -> None:
         self.plotter.camera_position = [
             tuple(center + direction * distance),
             tuple(center),
@@ -1633,17 +1669,19 @@ class BrowserControlledViewer(NativePyVistaViewer):
         ]
         self.plotter.reset_camera_clipping_range()
 
-    def save_current_gif(self) -> None:
+    def save_current_gif(self, *, suffix: str | None = None, timestamp: str | None = None) -> bool:
         if not self.paths:
             self.set_gif_status("skipped: no animation path")
-            return
+            return False
         operation = self.current_operation()
-        output_path = self.gif_output_path(operation)
+        output_path = self.gif_output_path(operation, custom=self.using_custom_paths, suffix=suffix, timestamp=timestamp)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         original_frame = float(self.frame_position)
         frames = max(self.frame_count // 2, 24)
-        fps = 10.0 * max(self.speed, 0.1) * operation_speed_multiplier(operation)
+        multiplier = self.custom_speed_multiplier if self.using_custom_paths else operation_speed_multiplier(operation)
+        fps = 10.0 * max(self.speed, 0.1) * multiplier
         images = []
+        saved = False
         self.set_gif_status(f"writing {output_path}")
         try:
             for frame in range(frames):
@@ -1656,6 +1694,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             if images:
                 imageio.mimsave(output_path, images, fps=fps)
                 self.set_gif_status(f"saved {output_path}")
+                saved = True
             else:
                 self.set_gif_status("failed: no frames captured")
         except Exception as exc:
@@ -1663,13 +1702,59 @@ class BrowserControlledViewer(NativePyVistaViewer):
         finally:
             self.frame_position = original_frame
             self.update_atoms(original_frame / max(self.frame_count - 1, 1))
+        return saved
 
-    def gif_output_path(self, operation: dict) -> Path:
+    def save_three_view_gifs(self) -> None:
+        if not self.paths:
+            self.set_gif_status("skipped: no animation path")
+            return
+        basis = self.operation_camera_basis()
+        if basis is None:
+            self.set_gif_status("skipped: no view direction")
+            return
+
+        center, front_direction, front_up, distance = basis
+        front_direction = viewer.normalize(front_direction)
+        front_up = viewer.normalize(front_up)
+        right_direction = viewer.normalize(np.cross(front_direction, front_up))
+        top_direction = front_up
+        top_up = viewer.normalize(-front_direction)
+        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        original_camera_position = self.plotter.camera_position
+        views = [
+            ("front", front_direction, front_up),
+            ("right", right_direction, front_up),
+            ("top", top_direction, top_up),
+        ]
+        failed_labels = []
+        try:
+            for label, direction, up in views:
+                self.set_camera_view(center, direction, up, distance)
+                if not self.save_current_gif(suffix=label, timestamp=timestamp):
+                    failed_labels.append(label)
+            if failed_labels:
+                self.set_gif_status(f"3-view GIF incomplete; failed: {', '.join(failed_labels)}")
+            else:
+                self.set_gif_status(f"saved 3-view GIFs ({timestamp})")
+        finally:
+            self.plotter.camera_position = original_camera_position
+            self.plotter.reset_camera_clipping_range()
+
+    def gif_output_path(
+        self,
+        operation: dict,
+        *,
+        custom: bool = False,
+        suffix: str | None = None,
+        timestamp: str | None = None,
+    ) -> Path:
         stem = self.json_path.stem
         scope = self.scope or "representative"
-        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{stem}_op{int(operation['index']):03d}_{scope}_{timestamp}.gif"
-        return self.json_path.parent / "checks" / "current" / filename
+        timestamp = timestamp or dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        op_label = "custom" if custom else f"op{int(operation['index']):03d}"
+        suffix_part = f"_{suffix}" if suffix else ""
+        filename = f"{stem}_{op_label}_{scope}{suffix_part}_{timestamp}.gif"
+        return export_gif_dir(self.json_path) / stem / filename
 
     def set_gif_status(self, status: str) -> None:
         with self.state_lock:
@@ -1802,6 +1887,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.custom_check_actors = []
         self.custom_view_direction_cart = None
         self.custom_focus_cart = None
+        self.custom_speed_multiplier = 1.0
 
 
 def make_handler(
@@ -1899,6 +1985,7 @@ def make_handler(
                 "camera_direction",
                 "camera_angle",
                 "gif_request_id",
+                "gif_3view_request_id",
                 "custom_op_check_id",
                 "clear_custom_check",
                 "custom_op_animate",
@@ -1963,6 +2050,20 @@ def operation_speed_multiplier(operation: dict) -> float:
     if kind == "mirror" or kind == "inversion" or "translation" in kind or "glide" in kind:
         return 2.0
     return 1.0
+
+
+def custom_operation_speed_multiplier(op_type: str) -> float:
+    if op_type in {"mirror", "inversion", "translation", "glide"}:
+        return 2.0
+    return 1.0
+
+
+def export_gif_dir(json_path: Path) -> Path:
+    if json_path.parent.name == "json" and json_path.parent.parent.name == "exports":
+        return json_path.parent.parent / "gifs"
+    if json_path.parent.name == "exports":
+        return json_path.parent / "gifs"
+    return json_path.parent / "gifs"
 
 
 def rotation_matrix_from_axis_angle(axis: np.ndarray, angle: float) -> np.ndarray:
@@ -2198,6 +2299,10 @@ def check_custom_operation(
         return {"error": "No unit cell — molecule mode not supported for custom operation check"}
 
     lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    validity_error = custom_matrix_validity_error(W_frac, lattice)
+    if validity_error is not None:
+        return {"error": validity_error}
+
     fracs = {}
     for atom in atoms:
         frac = atom.get("frac")
@@ -2253,6 +2358,23 @@ def check_custom_operation(
         "unmapped": unmapped,
         "tolerance_cart": tolerance_cart,
     }
+
+
+def custom_matrix_validity_error(W_frac: np.ndarray, lattice: np.ndarray) -> str | None:
+    W_frac = np.asarray(W_frac, dtype=float)
+    if W_frac.shape != (3, 3) or not np.all(np.isfinite(W_frac)):
+        return "Operation matrix W must be a finite 3x3 matrix"
+    try:
+        W_cart = lattice.T @ W_frac @ np.linalg.inv(lattice.T)
+    except np.linalg.LinAlgError:
+        return "Unit-cell lattice is singular"
+    determinant = float(np.linalg.det(W_cart))
+    if abs(abs(determinant) - 1.0) > 1e-5:
+        return "Operation matrix must preserve volume (determinant must be ±1)"
+    metric = W_cart.T @ W_cart
+    if not np.allclose(metric, np.eye(3), atol=1e-5):
+        return "Operation matrix must preserve distances; scaling/shear is not a symmetry operation"
+    return None
 
 
 def operation_summaries(
@@ -2817,6 +2939,8 @@ def main() -> int:
         "display_mode": display_mode,
         "active_mode": "standard",
         "gif_status": "",
+        "gif_request_id": None,
+        "gif_3view_request_id": None,
         "custom_op_check_id": None,
         "custom_op_result": None,
     }

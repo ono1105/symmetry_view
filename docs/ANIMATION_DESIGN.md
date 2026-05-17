@@ -64,10 +64,10 @@ Add these options to `tools/view_json_pyvista.py`:
 Required usage:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/checks/f2_pd_op1_rep.gif
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/checks/f2_pd_op1_all.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/water.json --operation 0 --animate
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --list-elements
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/gifs/f2_pd/f2_pd_op1_rep.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/gifs/f2_pd/f2_pd_op1_all.gif
 ```
 
 `--animate` requires `--operation`, because atom targets are operation-specific.
@@ -221,9 +221,9 @@ Minimum checks:
 
 ```bash
 .venv/bin/python -m py_compile tools/view_json_pyvista.py crystal_viewer/render_data.py
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
-.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
-.venv/bin/python tools/view_json_pyvista.py exports/water.json --list-operations
+.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/json/water.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/json/f2_pd.json
+.venv/bin/python tools/view_json_pyvista.py exports/json/water.json --list-operations
 ```
 
 Visual checks:

@@ -16,13 +16,13 @@ atom_mappings
 Crystal:
 
 ```bash
-.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
+.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/json/f2_pd.json
 ```
 
 Molecule:
 
 ```bash
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
+.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/json/water.json
 ```
 
 Stdout export is also supported:
@@ -119,7 +119,7 @@ For molecule mappings, `transformed_cart` is the raw transformed Cartesian coord
 ## Validation
 
 ```bash
-.venv/bin/python -m json.tool exports/f2_pd.json /tmp/f2_pd_checked.json
-.venv/bin/python -m json.tool exports/water.json /tmp/water_checked.json
-.venv/bin/python -m json.tool exports/jacobsite.json /tmp/jacobsite_checked.json
+.venv/bin/python -m json.tool exports/json/f2_pd.json /tmp/f2_pd_checked.json
+.venv/bin/python -m json.tool exports/json/water.json /tmp/water_checked.json
+.venv/bin/python -m json.tool exports/json/jacobsite.json /tmp/jacobsite_checked.json
 ```

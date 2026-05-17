@@ -555,8 +555,6 @@ def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s:
         actor = item.get("actor")
         if actor is not None:
             actor.SetPosition(*center)
-        else:
-            item["mesh"].points = item["base_points"] + center
 
 
 def path_applies_to_display_item(path: dict, item: dict) -> bool:

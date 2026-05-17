@@ -152,13 +152,13 @@ examples/methane.xyz
 Generated JSON samples:
 
 ```text
-exports/f2_pd.json
-exports/jacobsite.json
-exports/mg2v2o7.json
-exports/water.json
+exports/json/f2_pd.json
+exports/json/jacobsite.json
+exports/json/mg2v2o7.json
+exports/json/water.json
 ```
 
-Local GIF/PNG checks live under `exports/checks/` and are intentionally not tracked.
+Local GIF/PNG checks live under `exports/gifs/<structure>/` and are intentionally not tracked.
 
 ## Archive
 

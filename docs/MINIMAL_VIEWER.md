@@ -10,79 +10,79 @@ Both read exported JSON only. They do not run crystal or molecule analysis.
 Show all render elements:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json
-.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json
-.venv/bin/python tools/view_json_pyvista.py exports/water.json
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json
+.venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json
+.venv/bin/python tools/view_json_pyvista.py exports/json/water.json
 ```
 
 List operations:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations
-.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --list-operations
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --list-operations
+.venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --list-operations
 ```
 
 List symmetry elements for one operation:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --list-elements
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --list-elements
 ```
 
 Show elements related to one operation:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 2
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --element-index 2
 ```
 
 Show atom mapping and source-to-target displacement lines for one operation:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --show-mapping --show-displacements
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --show-mapping --show-displacements
+.venv/bin/python tools/view_json_pyvista.py exports/json/water.json --operation 0 --show-mapping --show-displacements
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --show-mapping --show-displacements
 ```
 
 Animate one operation:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/water.json --operation 0 --animate
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/checks/f2_pd_op1_rep.gif
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/checks/f2_pd_op1_all.gif
-.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op1_screw4.gif
-.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/checks/jacobsite_op26_glide.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/water.json --operation 0 --animate
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/gifs/f2_pd/f2_pd_op1_rep.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/gifs/f2_pd/f2_pd_op1_all.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --operation 1 --element-index 0 --animate --animation-fps 6 --animation-output exports/gifs/jacobsite/jacobsite_op1_screw4.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/gifs/jacobsite/jacobsite_op26_glide.gif
 ```
 
 Use `--animation-speed` to change playback speed without changing the path:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 31 --animate --animation-speed 0.5 --animation-output exports/checks/jacobsite_op31_slow.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --operation 31 --animate --animation-speed 0.5 --animation-output exports/gifs/jacobsite/jacobsite_op31_slow.gif
 ```
 
 Use `--selected-atom` or `--selected-atoms` to animate only chosen source atoms while the rest of the structure remains visible:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 25 --animate --selected-atom 0 --animation-output exports/checks/jacobsite_op25_atom0.gif
-.venv/bin/python tools/view_json_pyvista.py exports/jacobsite.json --operation 25 --animate --selected-atoms 0 3 8 --animation-output exports/checks/jacobsite_op25_atoms.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --operation 25 --animate --selected-atom 0 --animation-output exports/gifs/jacobsite/jacobsite_op25_atom0.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --operation 25 --animate --selected-atoms 0 3 8 --animation-output exports/gifs/jacobsite/jacobsite_op25_atoms.gif
 ```
 
 Render a screenshot and exit:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/water.json --screenshot exports/checks/water_view.png
-.venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --operation 1 --screenshot exports/checks/f2_pd_op1_view.png
+.venv/bin/python tools/view_json_pyvista.py exports/json/water.json --screenshot exports/gifs/water/water_view.png
+.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --screenshot exports/gifs/f2_pd/f2_pd_op1_view.png
 ```
 
 Open the minimal GUI:
 
 ```bash
-.venv/bin/python tools/view_json_gui.py exports/f2_pd.json
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json
+.venv/bin/python tools/view_json_gui.py exports/json/f2_pd.json
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json
 ```
 
 Open the browser-controlled viewer:
 
 ```bash
-.venv/bin/python tools/view_json_server.py exports/jacobsite.json
+.venv/bin/python tools/view_json_server.py exports/json/jacobsite.json
 ```
 
 This starts a local control panel at `http://127.0.0.1:5173/` and keeps PyVista responsible for the 3D view. The browser UI includes an operation list, operation filter, atom checkbox list, atom filter, Play, Stop, and Reset. Operation rows show the operation symbol plus the selected representative axis `[uvw]`, plane normal `(hkl)`, or center/point fractional coordinate.
@@ -91,7 +91,7 @@ The operation list can be sorted by operation number, operation symbol, full axi
 For smoother interactive playback, the GUI defaults to source atoms only. Use `--expanded` when you need the half-cell periodic display clones:
 
 ```bash
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --expanded
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --expanded
 ```
 
 `--expanded` uses a smaller quarter-cell margin `[-0.25, 1.25]` to keep the GUI responsive.
@@ -99,15 +99,15 @@ For smoother interactive playback, the GUI defaults to source atoms only. Use `-
 List operations or atoms before opening the GUI:
 
 ```bash
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --list-operations
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --list-atoms
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --list-operations
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --list-atoms
 ```
 
 Open at a specific operation or with selected atoms:
 
 ```bash
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --operation 25
-.venv/bin/python tools/view_json_gui.py exports/jacobsite.json --scope selected --selected-atoms 0 1 2
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --operation 25
+.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --scope selected --selected-atoms 0 1 2
 ```
 
 The first GUI intentionally avoids Qt/PyVistaQt. It uses PyVista's native slider and keyboard widgets because WSL/X11 can fail with `BadWindow` when VTK is embedded in Qt.
@@ -128,10 +128,10 @@ r: reset animation
 If the current directory is `tools/`, use:
 
 ```bash
-../.venv/bin/python view_json_gui.py ../exports/jacobsite.json
+../.venv/bin/python view_json_gui.py ../exports/json/jacobsite.json
 ```
 
-`exports/` 直下は共有用のJSON本体、`exports/checks/` はローカル確認用のGIF/PNG置き場です。
+`exports/json/` は共有用のJSON本体、`exports/gifs/<structure>/` はローカル確認用のGIF/PNG置き場です。
 
 `--animation-scope representative` animates one representative atom only. `--animation-scope all` animates every atom, but the crystal periodic image is chosen once from the representative atom and then applied to all atoms as the same integer lattice shift. Use `--representative-atom N` when a specific atom should define that shared movement.
 
