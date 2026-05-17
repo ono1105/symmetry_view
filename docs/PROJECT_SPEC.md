@@ -110,7 +110,16 @@ The first GUI intentionally avoids Qt/PyVistaQt. WSL/X11 showed `BadWindow` fail
 For responsiveness, it defaults to source atoms only and offers `--expanded` for the half-cell periodic clone display used in visual checks.
 The expanded GUI display uses a quarter-cell margin rather than the wider half-cell margin used by earlier checks.
 
-`tools/view_json_server.py` is the preferred prototype for list-based controls. It starts a local stdlib HTTP server for browser operation/atom lists and uses the main Python thread for PyVista rendering. The browser UI supports operation filtering/selection, operation sorting, direction filtering, atom checkbox selection, Play, Stop, and Reset. Operation rows stay compact: operation symbol plus representative axis `[uvw]`, plane normal `(hkl)`, and center/point fractional coordinates.
+`tools/view_json_server.py` is the preferred prototype for list-based controls. It is now a thin entry point plus stdlib HTTP API. Shared viewer responsibilities live under `crystal_viewer/viewer/`:
+
+```text
+browser_ui.py          browser control panel HTML/JS
+custom_operation.py    custom operation construction and symmetry checking
+operation_labels.py    symbols, directions, fractional labels, and view targets
+pyvista_controller.py  PyVista state, camera control, animation, and GIF saving
+```
+
+This split is intentionally coarse: it keeps the current JSON viewer stable while making future CIF loading and molecule-specific controls easier to add without turning the server entry point into the single core file. The browser UI supports operation filtering/selection, operation sorting, direction filtering, atom checkbox selection, Play, Stop, and Reset. Operation rows stay compact: operation symbol plus representative axis `[uvw]`, plane normal `(hkl)`, and center/point fractional coordinates.
 
 Viewer usage is documented in `docs/MINIMAL_VIEWER.md`.
 

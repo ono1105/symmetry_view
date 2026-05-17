@@ -1,0 +1,668 @@
+from __future__ import annotations
+
+import datetime as dt
+import threading
+from pathlib import Path
+
+import imageio.v2 as imageio
+import numpy as np
+import pyvista as pv
+
+from tools import view_json_pyvista as viewer
+from tools.view_json_gui import NativePyVistaViewer
+from crystal_viewer.viewer.operation_labels import (
+    camera_up_vector,
+    custom_focus_point_cart,
+    is_pure_translation_operation,
+    operation_focus_point_cart,
+    operation_view_direction_cart,
+    rotate_vector,
+    visual_translation_direction_cart,
+)
+
+
+class BrowserControlledViewer(NativePyVistaViewer):
+    def __init__(
+        self,
+        *args,
+        shared_state: dict,
+        state_lock: threading.Lock,
+        element_context_cache: dict[int, tuple[list[dict], list[dict], list[dict]]] | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.shared_state = shared_state
+        self.state_lock = state_lock
+        self.element_context_cache = element_context_cache or {}
+        # Disable VTK depth peeling to prevent transparency-related warning loops
+        # on WSL/Mesa drivers. Translucent objects render without correct sorting
+        # but without recursive PyVista→logging→VTK→PyVista error floods.
+        try:
+            for renderer in self.plotter.renderers:
+                renderer.UseDepthPeelingOff()
+        except Exception:
+            pass
+        self.last_operation_index: int | None = None
+        self.last_scope: str | None = None
+        self.last_selected_atoms: tuple[int, ...] | None = None
+        self.last_display_mode: str | None = self.display_mode
+        self.last_active_mode: str | None = None
+        self.last_view_request_id: int | None = None
+        self.last_reset_view_request_id: int | None = None
+        self.last_camera_request_id: int | None = None
+        self.last_gif_request_id: int | None = None
+        self.last_gif_3view_request_id: int | None = None
+        self.last_custom_op_check_id: object = None
+        self.custom_check_actors: list = []
+        self.custom_view_direction_cart: np.ndarray | None = None
+        self.custom_focus_cart: np.ndarray | None = None
+        self.custom_speed_multiplier: float = 1.0
+        self.last_custom_op_animate_id: object = None
+        self.using_custom_paths: bool = False
+
+    def add_controls(self) -> None:
+        self.plotter.add_key_event("space", self.toggle_play_from_keyboard)
+        self.plotter.add_key_event("r", self.reset_from_keyboard)
+
+    def on_timer(self, step: int) -> None:
+        self._on_timer_inner(step)
+
+    def _on_timer_inner(self, step: int) -> None:
+        del step
+        should_render = False
+        should_update_status = False
+        with self.state_lock:
+            operation_index = int(self.shared_state["operation_index"])
+            requested_playing = bool(self.shared_state["playing"])
+            scope = str(self.shared_state.get("scope", "representative"))
+            selected_atoms = tuple(int(index) for index in self.shared_state.get("selected_atoms", []))
+            speed = float(self.shared_state.get("speed", 1.0))
+            display_mode = str(self.shared_state.get("display_mode", self.display_mode))
+            active_mode = str(self.shared_state.get("active_mode", "standard"))
+            view_request_id = self.shared_state.get("view_request_id")
+            reset_view_request_id = self.shared_state.get("reset_view_request_id")
+            camera_request_id = self.shared_state.get("camera_request_id")
+            camera_direction = str(self.shared_state.get("camera_direction", ""))
+            camera_angle = float(self.shared_state.get("camera_angle", 90.0))
+            gif_request_id = self.shared_state.get("gif_request_id")
+            gif_3view_request_id = self.shared_state.get("gif_3view_request_id")
+            custom_op_check_id = self.shared_state.get("custom_op_check_id")
+            clear_custom_check = bool(self.shared_state.pop("clear_custom_check", False))
+            custom_op_result = self.shared_state.get("custom_op_result")
+            custom_op_animate = self.shared_state.get("custom_op_animate")
+            reset = bool(self.shared_state.pop("reset", False))
+
+        self.speed = max(speed, 0.1)
+
+        if active_mode != self.last_active_mode:
+            if active_mode == "custom":
+                self.hide_element_actors()
+                self.hide_start_markers()
+            else:
+                self.clear_custom_check_actors()
+                if self.using_custom_paths:
+                    self.using_custom_paths = False
+                    self.build_paths()
+                    reset = True
+                self.show_element_actors(self.current_operation()["index"])
+                self.update_start_markers()
+            self.last_active_mode = active_mode
+            should_render = True
+
+        if operation_index != self.last_operation_index:
+            self.set_operation_index(operation_index)
+            self.last_operation_index = operation_index
+            self.using_custom_paths = False
+            if active_mode == "custom":
+                self.hide_element_actors()
+            reset = True
+            should_render = True
+            should_update_status = True
+
+        if scope != self.last_scope or selected_atoms != self.last_selected_atoms:
+            self.using_custom_paths = False
+            self.scope = scope
+            self.selected_atoms = selected_atoms
+            self.build_paths()
+            self.update_start_markers()
+            self.last_scope = scope
+            self.last_selected_atoms = selected_atoms
+            reset = True
+            should_render = True
+            should_update_status = True
+
+        if display_mode != self.last_display_mode:
+            self.playing = False
+            self.hide_element_actors()
+            self.clear_element_actor_cache()
+            old_display_mode = self.display_mode
+            self.rebuild_display_atoms(display_mode)
+            self.last_display_mode = display_mode
+            self.recenter_camera_for_display_mode(old_display_mode, display_mode)
+            if active_mode == "standard":
+                self.show_element_actors(self.current_operation()["index"])
+            reset = True
+            should_render = True
+            should_update_status = True
+
+        if reset:
+            self.frame_position = 0.0
+            self.update_atoms(0.0)
+            should_render = True
+
+        if view_request_id is not None and view_request_id != self.last_view_request_id:
+            self.view_along_current_operation()
+            self.last_view_request_id = view_request_id
+            should_render = True
+
+        if reset_view_request_id is not None and reset_view_request_id != self.last_reset_view_request_id:
+            self.reset_view_center()
+            self.last_reset_view_request_id = reset_view_request_id
+            should_render = True
+
+        if camera_request_id is not None and camera_request_id != self.last_camera_request_id:
+            self.rotate_current_camera(camera_direction, camera_angle)
+            self.last_camera_request_id = camera_request_id
+            should_render = True
+
+        if gif_request_id is not None and gif_request_id != self.last_gif_request_id:
+            self.playing = False
+            self.save_current_gif()
+            self.last_gif_request_id = gif_request_id
+            should_update_status = True
+            should_render = True
+
+        if gif_3view_request_id is not None and gif_3view_request_id != self.last_gif_3view_request_id:
+            self.playing = False
+            self.save_three_view_gifs()
+            self.last_gif_3view_request_id = gif_3view_request_id
+            should_update_status = True
+            should_render = True
+
+        if clear_custom_check:
+            self.clear_custom_check_actors()
+            self.using_custom_paths = False
+            self.build_paths()
+            with self.state_lock:
+                self.shared_state["custom_op_result"] = None
+                self.shared_state["custom_op_animate"] = None
+            reset = True
+            should_render = True
+        elif custom_op_check_id is not None and custom_op_check_id != self.last_custom_op_check_id:
+            self.last_custom_op_check_id = custom_op_check_id  # update first to prevent exception loops
+            try:
+                self.apply_custom_check(custom_op_result)
+            except Exception as exc:
+                self.clear_custom_check_actors()
+                self.set_gif_status(f"check highlight failed: {exc}")
+                should_update_status = True
+            # New check discards any previous custom animation paths
+            if self.using_custom_paths:
+                self.using_custom_paths = False
+                self.build_paths()
+                reset = True
+            should_render = True
+
+        if custom_op_animate is not None:
+            animate_id = custom_op_animate.get("animate_id")
+            if animate_id != self.last_custom_op_animate_id:
+                atom_indices = custom_op_animate.get("atom_indices", [])
+                W_frac = np.asarray(custom_op_animate.get("W_frac"), dtype=float)
+                t_frac = np.asarray(custom_op_animate.get("t_frac"), dtype=float)
+                op_type = str(custom_op_animate.get("op_type", "matrix"))
+                op_params = custom_op_animate.get("op_params") or {}
+                unit_cell_only = bool(custom_op_animate.get("unit_cell_only", False))
+                self.paths = self.build_custom_animation_paths(
+                    atom_indices,
+                    W_frac,
+                    t_frac,
+                    op_type=op_type,
+                    op_params=op_params,
+                    unit_cell_only=unit_cell_only,
+                )
+                self.using_custom_paths = True
+                self.custom_speed_multiplier = custom_operation_speed_multiplier(op_type)
+                self.last_custom_op_animate_id = animate_id
+                self.update_start_markers()
+                reset = True
+                should_render = True
+
+        if requested_playing != self.playing:
+            should_update_status = True
+        self.playing = requested_playing
+        if self.playing and self.paths:
+            if self.frame_position >= self.frame_count - 1:
+                self.frame_position = 0.0
+            multiplier = self.custom_speed_multiplier if self.using_custom_paths else operation_speed_multiplier(self.current_operation())
+            frame_step = self.speed * multiplier
+            self.frame_position = min(self.frame_position + frame_step, self.frame_count - 1)
+            self.update_atoms(self.frame_position / max(self.frame_count - 1, 1))
+            should_render = True
+            if self.frame_position >= self.frame_count - 1:
+                self.playing = False
+                should_update_status = True
+
+        with self.state_lock:
+            self.shared_state["playing"] = self.playing
+
+        if should_update_status:
+            self.update_status()
+            should_render = True
+        if should_render:
+            self.plotter.render()
+
+    def set_operation_index(self, operation_index: int) -> None:
+        for position, operation in enumerate(self.operations):
+            if operation["index"] == operation_index:
+                self.set_operation_position(position)
+                return
+
+    def show_element_actors(self, operation_index: int) -> None:
+        cache_key = (operation_index, self.display_mode)
+        if cache_key not in self.element_actor_cache:
+            cached = self.element_context_cache.get(operation_index)
+            if cached is not None:
+                axes, planes, centers = cached
+                actors = viewer.add_symmetry_element_actors(
+                    self.plotter,
+                    self.render_data,
+                    axes,
+                    planes,
+                    centers,
+                    display_mode=self.display_mode,
+                )
+            else:
+                actors = viewer.add_symmetry_elements(
+                    self.plotter,
+                    self.render_data,
+                    self.atom_mappings,
+                    operation_index=operation_index,
+                    element_index=None,
+                    display_mode=self.display_mode,
+                )
+            self.element_actor_cache[cache_key] = actors
+        self.element_actors = self.element_actor_cache[cache_key]
+        for actor in self.element_actors:
+            try:
+                actor.SetVisibility(True)
+            except Exception:
+                pass
+
+    def clear_element_actor_cache(self) -> None:
+        for actors in self.element_actor_cache.values():
+            for actor in actors:
+                try:
+                    self.plotter.remove_actor(actor)
+                except Exception:
+                    pass
+        self.element_actor_cache = {}
+        self.element_actors = []
+
+    def toggle_play_from_keyboard(self) -> None:
+        with self.state_lock:
+            self.shared_state["playing"] = not bool(self.shared_state["playing"])
+
+    def reset_from_keyboard(self) -> None:
+        with self.state_lock:
+            self.shared_state["playing"] = False
+            self.shared_state["reset"] = True
+
+    def view_along_current_operation(self) -> None:
+        basis = self.operation_camera_basis()
+        if basis is None:
+            return
+        center, direction, up, distance = basis
+        self.set_camera_view(center, direction, up, distance)
+
+    def operation_camera_basis(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
+        if self.custom_view_direction_cart is not None:
+            direction = self.custom_view_direction_cart
+            if np.linalg.norm(direction) < 1e-10:
+                return None
+            direction = viewer.normalize(direction)
+            center = self.custom_focus_cart if self.custom_focus_cart is not None else self.display_center()
+            distance = max(viewer.display_scene_span(self.render_data, self.display_mode) * 1.8, 1.0)
+            up = camera_up_vector(direction)
+            return center, direction, up, distance
+
+        operation = self.current_operation()
+        axes, planes, centers = self.element_context_cache.get(operation["index"], (None, None, None))
+        if axes is None or planes is None or centers is None:
+            axes, planes, centers = viewer.display_symmetry_elements(
+                self.render_data,
+                self.atom_mappings,
+                operation["index"],
+                element_index=None,
+            )
+        direction = None
+        if is_pure_translation_operation(operation):
+            direction = visual_translation_direction_cart(self.render_data, operation, self.atom_mappings)
+        if direction is None:
+            direction = operation_view_direction_cart(self.render_data, operation, axes, planes, centers)
+        if direction is None:
+            return None
+        direction = viewer.normalize(direction)
+        center = operation_focus_point_cart(self.render_data, operation, axes, planes, centers, self.display_mode)
+        distance = max(viewer.display_scene_span(self.render_data, self.display_mode) * 1.8, 1.0)
+        up = camera_up_vector(direction)
+        return center, direction, up, distance
+
+    def set_camera_view(self, center: np.ndarray, direction: np.ndarray, up: np.ndarray, distance: float) -> None:
+        self.plotter.camera_position = [
+            tuple(center + direction * distance),
+            tuple(center),
+            tuple(up),
+        ]
+        self.plotter.reset_camera_clipping_range()
+
+    def rotate_current_camera(self, direction: str, angle_deg: float) -> None:
+        angle = float(np.clip(angle_deg, 0.0, 180.0))
+        if angle <= 1e-8:
+            return
+        position = np.asarray(self.plotter.camera.GetPosition(), dtype=float)
+        focal_point = np.asarray(self.plotter.camera.GetFocalPoint(), dtype=float)
+        up = viewer.normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
+        radius_vector = position - focal_point
+        if np.linalg.norm(radius_vector) < 1e-10:
+            return
+        view_direction = viewer.normalize(focal_point - position)
+        screen_right = viewer.normalize(np.cross(view_direction, up))
+        if direction == "right":
+            axis = up
+            signed_angle = angle
+        elif direction == "left":
+            axis = up
+            signed_angle = -angle
+        elif direction == "up":
+            axis = screen_right
+            signed_angle = -angle
+        elif direction == "down":
+            axis = screen_right
+            signed_angle = angle
+        else:
+            return
+
+        rotated_radius = rotate_vector(radius_vector, axis, np.deg2rad(signed_angle))
+        rotated_up = rotate_vector(up, axis, np.deg2rad(signed_angle))
+        self.plotter.camera_position = [
+            tuple(focal_point + rotated_radius),
+            tuple(focal_point),
+            tuple(viewer.normalize(rotated_up)),
+        ]
+        self.plotter.reset_camera_clipping_range()
+
+    def display_center(self) -> np.ndarray:
+        return viewer.display_scene_center(self.render_data, self.display_mode)
+
+    def reset_view_center(self) -> None:
+        new_center = self.display_center()
+        position = np.asarray(self.plotter.camera.GetPosition(), dtype=float)
+        focal_point = np.asarray(self.plotter.camera.GetFocalPoint(), dtype=float)
+        up = viewer.normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
+        shift = new_center - focal_point
+        self.plotter.camera_position = [
+            tuple(position + shift),
+            tuple(new_center),
+            tuple(up),
+        ]
+        self.plotter.reset_camera_clipping_range()
+
+    def recenter_camera_for_display_mode(self, old_display_mode: str, new_display_mode: str) -> None:
+        old_center = viewer.display_scene_center(self.render_data, old_display_mode)
+        new_center = viewer.display_scene_center(self.render_data, new_display_mode)
+        shift = new_center - old_center
+        if np.linalg.norm(shift) < 1e-10:
+            return
+        position = np.asarray(self.plotter.camera.GetPosition(), dtype=float)
+        focal_point = np.asarray(self.plotter.camera.GetFocalPoint(), dtype=float)
+        up = viewer.normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
+        self.plotter.camera_position = [
+            tuple(position + shift),
+            tuple(focal_point + shift),
+            tuple(up),
+        ]
+        self.plotter.reset_camera_clipping_range()
+
+    def save_current_gif(self, *, suffix: str | None = None, timestamp: str | None = None) -> bool:
+        if not self.paths:
+            self.set_gif_status("skipped: no animation path")
+            return False
+        operation = self.current_operation()
+        output_path = self.gif_output_path(operation, custom=self.using_custom_paths, suffix=suffix, timestamp=timestamp)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        original_frame = float(self.frame_position)
+        frames = max(self.frame_count // 2, 24)
+        multiplier = self.custom_speed_multiplier if self.using_custom_paths else operation_speed_multiplier(operation)
+        fps = 10.0 * max(self.speed, 0.1) * multiplier
+        images = []
+        saved = False
+        self.set_gif_status(f"writing {output_path}")
+        try:
+            for frame in range(frames):
+                s = frame / max(frames - 1, 1)
+                self.update_atoms(s)
+                self.plotter.render()
+                image = self.plotter.screenshot(return_img=True)
+                if image is not None:
+                    images.append(image)
+            if images:
+                imageio.mimsave(output_path, images, fps=fps)
+                self.set_gif_status(f"saved {output_path}")
+                saved = True
+            else:
+                self.set_gif_status("failed: no frames captured")
+        except Exception as exc:
+            self.set_gif_status(f"failed: {exc}")
+        finally:
+            self.frame_position = original_frame
+            self.update_atoms(original_frame / max(self.frame_count - 1, 1))
+        return saved
+
+    def save_three_view_gifs(self) -> None:
+        if not self.paths:
+            self.set_gif_status("skipped: no animation path")
+            return
+        basis = self.operation_camera_basis()
+        if basis is None:
+            self.set_gif_status("skipped: no view direction")
+            return
+
+        center, front_direction, front_up, distance = basis
+        front_direction = viewer.normalize(front_direction)
+        front_up = viewer.normalize(front_up)
+        right_direction = viewer.normalize(np.cross(front_direction, front_up))
+        top_direction = front_up
+        top_up = viewer.normalize(-front_direction)
+        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        original_camera_position = self.plotter.camera_position
+        views = [
+            ("front", front_direction, front_up),
+            ("right", right_direction, front_up),
+            ("top", top_direction, top_up),
+        ]
+        failed_labels = []
+        try:
+            for label, direction, up in views:
+                self.set_camera_view(center, direction, up, distance)
+                if not self.save_current_gif(suffix=label, timestamp=timestamp):
+                    failed_labels.append(label)
+            if failed_labels:
+                self.set_gif_status(f"3-view GIF incomplete; failed: {', '.join(failed_labels)}")
+            else:
+                self.set_gif_status(f"saved 3-view GIFs ({timestamp})")
+        finally:
+            self.plotter.camera_position = original_camera_position
+            self.plotter.reset_camera_clipping_range()
+
+    def gif_output_path(
+        self,
+        operation: dict,
+        *,
+        custom: bool = False,
+        suffix: str | None = None,
+        timestamp: str | None = None,
+    ) -> Path:
+        stem = self.json_path.stem
+        scope = self.scope or "representative"
+        timestamp = timestamp or dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        op_label = "custom" if custom else f"op{int(operation['index']):03d}"
+        suffix_part = f"_{suffix}" if suffix else ""
+        filename = f"{stem}_{op_label}_{scope}{suffix_part}_{timestamp}.gif"
+        return export_gif_dir(self.json_path) / stem / filename
+
+    def set_gif_status(self, status: str) -> None:
+        with self.state_lock:
+            self.shared_state["gif_status"] = status
+
+    def build_custom_animation_paths(
+        self,
+        atom_indices: list[int],
+        W_frac: np.ndarray,
+        t_frac: np.ndarray,
+        *,
+        op_type: str = "matrix",
+        op_params: dict | None = None,
+        unit_cell_only: bool = False,
+    ) -> dict[int, dict]:
+        """Build operation-aware animation paths for a user-supplied (W|t) operation."""
+        unit_cell = self.render_data.get("unit_cell")
+        if unit_cell is None:
+            return {}
+        lattice = np.asarray(unit_cell["lattice"], dtype=float)
+        W_cart = lattice.T @ W_frac @ np.linalg.inv(lattice.T)
+        t_cart = t_frac @ lattice
+        op_params = op_params or {}
+
+        # Build symmetry element dicts so build_operation_path can use arcs/reflections
+        axis_dict: dict | None = None
+        plane_dict: dict | None = None
+        center_dict: dict | None = None
+
+        if op_type in ("rotation", "screw"):
+            uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
+            d_cart = viewer.normalize(uvw @ lattice)
+            p_cart = np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice
+            axis_dict = {"point_cart": p_cart.tolist(), "direction_cart": d_cart.tolist()}
+        elif op_type in ("mirror", "glide"):
+            hkl = np.asarray(op_params.get("normal", [0, 0, 1]), dtype=float)
+            n_cart = viewer.normalize(np.linalg.inv(lattice) @ hkl)
+            p_cart = np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice
+            plane_dict = {"point_cart": p_cart.tolist(), "normal_cart": n_cart.tolist()}
+        elif op_type == "inversion":
+            c_cart = np.asarray(op_params.get("center", [0, 0, 0]), dtype=float) @ lattice
+            center_dict = {"point_cart": c_cart.tolist()}
+        elif op_type == "rotoinversion":
+            uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
+            d_cart = viewer.normalize(uvw @ lattice)
+            c_cart = np.asarray(op_params.get("center", [0, 0, 0]), dtype=float) @ lattice
+            axis_dict = {"point_cart": c_cart.tolist(), "direction_cart": d_cart.tolist()}
+            center_dict = {"point_cart": c_cart.tolist()}
+
+        # Map to kind strings expected by build_operation_path
+        _kind_map = {
+            "rotation": "rotation_n",
+            "screw": "screw_n",
+            "mirror": "mirror",
+            "glide": "glide",
+            "inversion": "inversion",
+            "rotoinversion": "rotoinversion_or_improper_n",
+        }
+        kind = _kind_map.get(op_type, "identity")
+        angle_deg = float(op_params.get("angle", 90)) if op_params else 90.0
+        fake_op = {"kind": kind, "angle_deg": angle_deg, "order": None, "matrix_cart": None}
+
+        idx_set = set(int(i) for i in atom_indices)
+        paths = {}
+        for item in self.animated_atoms:
+            atom = item["atom"]
+            if atom["index"] not in idx_set:
+                continue
+            start = np.asarray(atom["cart"], dtype=float)
+            target = W_cart @ start + t_cart
+            path = viewer.build_operation_path(
+                start, target, fake_op,
+                axis=axis_dict, plane=plane_dict, center=center_dict,
+            )
+            if unit_cell_only:
+                path["unit_cell_only"] = True
+            paths[atom["index"]] = path
+        return paths
+
+    def apply_custom_check(self, result: dict | None) -> None:
+        self.clear_custom_check_actors()
+        if not result or result.get("error"):
+            return
+
+        elements = result.get("elements") or {}
+        axes = elements.get("axes") or []
+        planes = elements.get("planes") or []
+        centers = elements.get("centers") or []
+        if axes or planes or centers:
+            self.custom_check_actors.extend(
+                viewer.add_symmetry_element_actors(
+                    self.plotter,
+                    self.render_data,
+                    axes,
+                    planes,
+                    centers,
+                    display_mode=self.display_mode,
+                )
+            )
+        direction = result.get("view_direction_cart")
+        if direction is not None:
+            self.custom_view_direction_cart = np.asarray(direction, dtype=float)
+        self.custom_focus_cart = custom_focus_point_cart(result, self.render_data, self.display_mode)
+
+        if not result.get("unmapped"):
+            return
+        unmapped_set = {item["source"] for item in result["unmapped"]}
+        span = viewer.scene_span(self.render_data)
+        for item in self.animated_atoms:
+            atom = item["atom"]
+            if atom["index"] not in unmapped_set:
+                continue
+            center = np.asarray(atom["cart"], dtype=float) + np.asarray(item["display_shift_cart"], dtype=float)
+            radius = viewer.atom_radius(atom["atomic_number"], span) * 1.28
+            sphere = pv.Sphere(radius=radius, center=center, theta_resolution=24, phi_resolution=14)
+            actor = self.plotter.add_mesh(
+                sphere,
+                color="#ff8a80",
+                style="wireframe",
+                line_width=1,
+                opacity=0.55,
+            )
+            self.custom_check_actors.append(actor)
+
+    def clear_custom_check_actors(self) -> None:
+        for actor in self.custom_check_actors:
+            try:
+                self.plotter.remove_actor(actor)
+            except Exception:
+                pass
+        self.custom_check_actors = []
+        self.custom_view_direction_cart = None
+        self.custom_focus_cart = None
+        self.custom_speed_multiplier = 1.0
+
+
+
+def operation_speed_multiplier(operation: dict) -> float:
+    kind = str(operation.get("kind", ""))
+    if kind == "mirror" or kind == "inversion" or "translation" in kind or "glide" in kind:
+        return 2.0
+    return 1.0
+
+
+def custom_operation_speed_multiplier(op_type: str) -> float:
+    if op_type in {"mirror", "inversion", "translation", "glide"}:
+        return 2.0
+    return 1.0
+
+
+def export_gif_dir(json_path: Path) -> Path:
+    if json_path.parent.name == "json" and json_path.parent.parent.name == "exports":
+        return json_path.parent.parent / "gifs"
+    if json_path.parent.name == "exports":
+        return json_path.parent / "gifs"
+    return json_path.parent / "gifs"
+
