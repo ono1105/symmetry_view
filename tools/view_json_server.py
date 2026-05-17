@@ -13,6 +13,12 @@ import _bootstrap  # noqa: F401
 import logging
 import numpy as np
 
+from crystal_viewer.export_pipeline import (
+    DEFAULT_JSON_EXPORT_DIR,
+    default_json_output_path,
+    export_analysis_to_json,
+)
+from tools.view_json_pyvista import atom_color
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
     check_custom_operation,
@@ -58,6 +64,7 @@ def make_handler(
                             "frac_label": atom_frac_label(atom),
                             "cart": atom.get("cart"),
                             "asymmetric_index": atom.get("asymmetric_index"),
+                            "default_color": atom_color(atom),
                         }
                         for atom in atoms
                     ]
@@ -111,12 +118,17 @@ def make_handler(
                 "playing",
                 "reset",
                 "selected_atoms",
+                "element_colors",
+                "atom_colors",
                 "speed",
+                "projection_mode",
                 "display_mode",
                 "active_mode",
                 "scope",
                 "view_request_id",
                 "reset_view_request_id",
+                "view_center_request_id",
+                "view_center_frac",
                 "camera_request_id",
                 "camera_direction",
                 "camera_angle",
@@ -181,13 +193,80 @@ def operation_exists(operations: list[dict], operation_index: int) -> bool:
     return any(operation["index"] == operation_index for operation in operations)
 
 
+def resolve_viewer_json_path(
+    input_path: Path,
+    *,
+    json_output: Path | None,
+    json_dir: Path,
+    tolerance_cart: float,
+    indent: int,
+) -> Path:
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+
+    suffix = input_path.suffix.lower()
+    if suffix == ".json":
+        if json_output is not None:
+            raise ValueError("--json-output can only be used when the input is a CIF file.")
+        return input_path
+
+    if suffix == ".cif":
+        output_path = (
+            json_output
+            if json_output is not None
+            else default_json_output_path(input_path, json_dir)
+        )
+        print(f"Analyzing CIF: {input_path}", flush=True)
+        output_path = export_analysis_to_json(
+            input_path,
+            mode="crystal",
+            output_path=output_path,
+            tolerance_cart=tolerance_cart,
+            indent=indent,
+        )
+        print(f"Wrote JSON: {output_path}", flush=True)
+        return output_path
+
+    raise ValueError(f"Unsupported input file type: {input_path.suffix}. Use .json or .cif.")
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Browser controls + PyVista view for exported symmetry JSON.")
-    parser.add_argument("json_path", type=Path)
+    parser = argparse.ArgumentParser(
+        description="Browser controls + PyVista view for exported symmetry JSON or CIF."
+    )
+    parser.add_argument(
+        "input_path",
+        type=Path,
+        help="Exported JSON, or a CIF file to analyze and export first.",
+    )
     parser.add_argument("--operation", type=int, default=None, help="Initial operation index.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5173)
     parser.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically.")
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        default=None,
+        help="Where to write the generated JSON when input_path is a CIF file.",
+    )
+    parser.add_argument(
+        "--json-dir",
+        type=Path,
+        default=DEFAULT_JSON_EXPORT_DIR,
+        help="Directory for generated JSON when input_path is a CIF file and --json-output is not set.",
+    )
+    parser.add_argument(
+        "--tolerance-cart",
+        type=float,
+        default=1e-2,
+        help="Atom mapping tolerance in Angstrom for CIF export.",
+    )
+    parser.add_argument(
+        "--indent",
+        type=int,
+        default=2,
+        help="JSON indentation for generated CIF exports.",
+    )
     parser.add_argument(
         "--expanded",
         action="store_true",
@@ -195,7 +274,15 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    payload = json.loads(args.json_path.read_text(encoding="utf-8"))
+    json_path = resolve_viewer_json_path(
+        args.input_path,
+        json_output=args.json_output,
+        json_dir=args.json_dir,
+        tolerance_cart=args.tolerance_cart,
+        indent=args.indent,
+    )
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
     render_data = payload["render_data"]
     operations = render_data["operations"]
     first_operation = operations[0]["index"] if operations else 0
@@ -208,14 +295,20 @@ def main() -> int:
         "operation_index": initial_operation,
         "playing": False,
         "reset": False,
-        "scope": "selected",
+        "source_kind": payload.get("source_kind", render_data.get("metadata", {}).get("mode", "crystal")),
+        "scope": "displayed",
         "selected_atoms": initial_selected_atoms,
+        "element_colors": {},
+        "atom_colors": {},
         "speed": 1.0,
+        "projection_mode": "perspective",
         "display_mode": display_mode,
         "active_mode": "standard",
         "gif_status": "",
         "gif_request_id": None,
         "gif_3view_request_id": None,
+        "view_center_request_id": None,
+        "view_center_frac": None,
         "custom_op_check_id": None,
         "custom_op_result": None,
     }
@@ -240,7 +333,7 @@ def main() -> int:
         open_url(url)
 
     app = BrowserControlledViewer(
-        args.json_path,
+        json_path,
         display_mode=display_mode,
         initial_operation=initial_operation,
         scope=shared_state["scope"],

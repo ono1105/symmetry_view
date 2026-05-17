@@ -88,6 +88,14 @@ Open the browser-controlled viewer:
 This starts a local control panel at `http://127.0.0.1:5173/` and keeps PyVista responsible for the 3D view. The browser UI includes an operation list, operation filter, atom checkbox list, atom filter, Play, Stop, and Reset. Operation rows show the operation symbol plus the selected representative axis `[uvw]`, plane normal `(hkl)`, or center/point fractional coordinate.
 The operation list can be sorted by operation number, operation symbol, full axis/plane/center entry, or direction only. It can also be filtered to one selected operation or one selected axis/plane direction.
 
+The browser-controlled viewer can also take a CIF file directly. In that mode it first analyzes the CIF, writes a JSON export under `exports/json/`, then opens the generated JSON with the existing viewer path:
+
+```bash
+.venv/bin/python tools/view_json_server.py examples/structures/f2_pd.cif --no-browser
+```
+
+Use `--json-output path/to/file.json` to choose the generated JSON path, or `--json-dir exports/json` to choose the output directory.
+
 For smoother interactive playback, the GUI defaults to source atoms only. Use `--expanded` when you need the half-cell periodic display clones:
 
 ```bash

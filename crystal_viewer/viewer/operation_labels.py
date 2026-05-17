@@ -234,11 +234,11 @@ def operation_focus_point_cart(
 ) -> np.ndarray:
     effective_axis = axes[0] if axes else effective_axis_from_operation(operation, centers)
     if effective_axis is not None:
-        return display_point_cart(render_data, effective_axis["point_cart"], display_mode)
+        return np.asarray(effective_axis["point_cart"], dtype=float)
     if planes:
-        return display_point_cart(render_data, planes[0]["point_cart"], display_mode)
+        return np.asarray(planes[0]["point_cart"], dtype=float)
     if centers:
-        return display_point_cart(render_data, centers[0]["point_cart"], display_mode)
+        return np.asarray(centers[0]["point_cart"], dtype=float)
     return viewer.display_scene_center(render_data, display_mode)
 
 
@@ -247,7 +247,7 @@ def custom_focus_point_cart(result: dict, render_data: dict, display_mode: str) 
     for key in ("axes", "planes", "centers"):
         items = elements.get(key) or []
         if items:
-            return display_point_cart(render_data, items[0]["point_cart"], display_mode)
+            return np.asarray(items[0]["point_cart"], dtype=float)
     return None
 
 
@@ -532,4 +532,3 @@ def rotate_vector(vector: np.ndarray, axis: np.ndarray, angle_rad: float) -> np.
         + np.cross(axis, vector) * np.sin(angle_rad)
         + axis * np.dot(axis, vector) * (1.0 - np.cos(angle_rad))
     )
-

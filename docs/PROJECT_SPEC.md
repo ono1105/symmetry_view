@@ -132,6 +132,7 @@ Known intentional differences:
 ```text
 The first GUI is native PyVista and JSON-only for now.
 Open CIF / Analyze Symmetry buttons are not implemented yet.
+The browser-controlled viewer can accept a CIF path on the CLI and auto-export JSON before opening it.
 Mouse-based selected atom interaction is not implemented yet.
 Puzzle UI is not implemented yet.
 Molecular analysis is already implemented, although early crystal-only specs deferred it.

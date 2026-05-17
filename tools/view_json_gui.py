@@ -161,13 +161,12 @@ class NativePyVistaViewer:
                 pass
 
     def create_start_markers(self) -> None:
-        span = viewer.scene_span(self.render_data)
         for item in self.animated_atoms:
             if item.get("marker_actor") is not None:
                 continue
             atom = item["atom"]
             center = np.asarray(atom["cart"], dtype=float) + item["display_shift_cart"]
-            radius = viewer.atom_radius(atom["atomic_number"], span)
+            radius = self.atom_radius(atom["atomic_number"])
             marker = self.sphere_mesh(atom["atomic_number"], radius)
             actor = self.plotter.add_mesh(
                 marker,
@@ -239,9 +238,8 @@ class NativePyVistaViewer:
                 actor.SetPosition(*center)
             return cached
 
-        span = viewer.scene_span(self.render_data)
-        radius = viewer.atom_radius(atom["atomic_number"], span)
-        color = viewer.ELEMENT_COLORS.get(atom["element"], "#9aa5b1")
+        radius = self.atom_radius(atom["atomic_number"])
+        color = self.atom_color(atom)
         mesh = self.sphere_mesh(atom["atomic_number"], radius)
         actor = self.plotter.add_mesh(mesh, color=color, smooth_shading=False)
         actor.SetPosition(*center)
@@ -270,6 +268,15 @@ class NativePyVistaViewer:
             )
             self.sphere_mesh_cache[key] = mesh
         return mesh
+
+    def atom_radius(self, atomic_number: int) -> float:
+        return viewer.display_atom_radius(
+            {"atomic_number": atomic_number},
+            self.render_data,
+        )
+
+    def atom_color(self, atom: dict) -> str:
+        return viewer.atom_color(atom)
 
     def build_paths(self) -> None:
         operation = self.current_operation()

@@ -81,6 +81,10 @@ HTML = """<!doctype html>
       background: #7dd3fc;
       color: #081017;
     }
+    .projection-button.selected {
+      background: #7dd3fc;
+      color: #081017;
+    }
     .mode-button.selected {
       background: #7dd3fc;
       color: #081017;
@@ -182,6 +186,14 @@ HTML = """<!doctype html>
     .button-row.flush {
       margin-top: 0;
     }
+    .camera-block {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .camera-block:last-of-type {
+      margin-bottom: 0;
+    }
     .camera-grid {
       display: grid;
       grid-template-columns: 1fr auto 1fr;
@@ -197,6 +209,16 @@ HTML = """<!doctype html>
       width: 88px;
       text-align: center;
     }
+    .view-center-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(62px, 1fr));
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .view-center-row input {
+      width: 100%;
+      text-align: right;
+    }
     .atom-list {
       max-height: 280px;
       overflow: auto;
@@ -211,6 +233,34 @@ HTML = """<!doctype html>
       align-items: baseline;
       padding: 4px 2px;
       font-size: 13px;
+    }
+    .atom-row input[type="color"] {
+      width: 28px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      flex: 0 0 auto;
+    }
+    .element-color-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .element-color-item {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      color: #cbd5e1;
+      font-size: 13px;
+    }
+    .element-color-item input[type="color"] {
+      width: 30px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      background: transparent;
     }
     .check-row {
       display: flex;
@@ -528,23 +578,42 @@ HTML = """<!doctype html>
         </div>
         <p class="hint">Play the selected operation and save the current view as a GIF.</p>
         <h2 class="section-title">Camera</h2>
-        <div class="button-row flush">
-          <button id="view-direction" class="secondary">View along direction</button>
-          <button id="reset-view" class="secondary">Reset view center</button>
+        <div class="camera-block">
+          <label for="camera-angle">Rotate current view</label>
+          <div class="camera-grid">
+            <span></span>
+            <button id="camera-up" class="secondary">Up</button>
+            <span></span>
+            <button id="camera-left" class="secondary">Left</button>
+            <input id="camera-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1">
+            <button id="camera-right" class="secondary">Right</button>
+            <span></span>
+            <button id="camera-down" class="secondary">Down</button>
+            <span></span>
+          </div>
         </div>
-        <label for="camera-angle">Rotate current view</label>
-        <div class="camera-grid">
-          <span></span>
-          <button id="camera-up" class="secondary">Up</button>
-          <span></span>
-          <button id="camera-left" class="secondary">Left</button>
-          <input id="camera-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1">
-          <button id="camera-right" class="secondary">Right</button>
-          <span></span>
-          <button id="camera-down" class="secondary">Down</button>
-          <span></span>
+        <div class="camera-block">
+          <label>Projection</label>
+          <div class="button-row flush" id="projection-controls">
+            <button class="secondary projection-button selected" data-projection-mode="perspective">Perspective</button>
+            <button class="secondary projection-button" data-projection-mode="orthographic">Orthographic</button>
+          </div>
         </div>
-        <p class="hint">Align to the selected axis, plane normal, or translation direction, then rotate the current view.</p>
+        <div class="camera-block">
+          <div class="button-row flush">
+            <button id="view-direction" class="secondary">View along direction</button>
+            <button id="reset-view" class="secondary">Reset view center</button>
+          </div>
+          <label id="view-center-label">View center [x y z] — fractional</label>
+          <div class="view-center-row">
+            <input type="number" id="view-center-x" value="0.5" step="any" placeholder="x">
+            <input type="number" id="view-center-y" value="0.5" step="any" placeholder="y">
+            <input type="number" id="view-center-z" value="0.5" step="any" placeholder="z">
+          </div>
+          <div class="button-row flush">
+            <button id="apply-view-center" class="secondary">Apply center</button>
+          </div>
+        </div>
         <h2 class="section-title">Display</h2>
         <label>Range</label>
         <div class="button-row flush" id="display-controls">
@@ -557,6 +626,8 @@ HTML = """<!doctype html>
       </section>
       <section class="panel">
         <h2 class="section-title">Atoms</h2>
+        <label>Element colors</label>
+        <div class="element-color-list" id="element-colors"></div>
         <label>Element filter</label>
         <div class="direction-filter-list" id="atom-element-filter"></div>
         <label>Animated atoms</label>
@@ -581,6 +652,7 @@ let atomElementFilterValue = "";
 let summariesReady = false;
 let activeMode = "standard";
 let customUnmappedAtoms = new Set();
+let sourceKind = "crystal";
 
 async function api(path, options) {
   const response = await fetch(path, options);
@@ -616,6 +688,20 @@ function atomText(atom) {
     ? ""
     : ` asym=${atom.asymmetric_index}`;
   return `${atom.index}: ${atom.element}${frac}${asym}`;
+}
+
+function normalizeColor(value, fallback = "#9aa5b1") {
+  const text = String(value || "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(text)) return text.toLowerCase();
+  return fallback;
+}
+
+function atomEffectiveColor(atom) {
+  const atomColors = state.atom_colors || {};
+  const elementColors = state.element_colors || {};
+  return normalizeColor(
+    atomColors[String(atom.index)] || elementColors[atom.element] || atom.default_color,
+  );
 }
 
 function renderOperations() {
@@ -814,6 +900,31 @@ function renderAtomElementFilter() {
   }
 }
 
+function renderElementColorControls() {
+  const root = document.getElementById("element-colors");
+  const elements = [...new Set(atoms.map(atom => atom.element))].sort(compareText);
+  const elementColors = state.element_colors || {};
+  root.innerHTML = "";
+  for (const element of elements) {
+    const sample = atoms.find(atom => atom.element === element);
+    const label = document.createElement("div");
+    label.className = "element-color-item";
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = normalizeColor(elementColors[element] || (sample && sample.default_color));
+    input.addEventListener("change", () => {
+      const next = Object.assign({}, state.element_colors || {});
+      next[element] = input.value;
+      postState({element_colors: next});
+    });
+    const span = document.createElement("span");
+    span.textContent = element;
+    label.appendChild(input);
+    label.appendChild(span);
+    root.appendChild(label);
+  }
+}
+
 function renderAtoms() {
   const root = document.getElementById("atoms");
   const selected = new Set(state.selected_atoms || []);
@@ -829,6 +940,15 @@ function renderAtoms() {
     checkbox.value = atom.index;
     checkbox.checked = selected.has(atom.index);
     checkbox.addEventListener("change", onAtomSelectionChange);
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = atomEffectiveColor(atom);
+    colorInput.title = `Color for atom ${atom.index}`;
+    colorInput.addEventListener("change", () => {
+      const next = Object.assign({}, state.atom_colors || {});
+      next[String(atom.index)] = colorInput.value;
+      postState({atom_colors: next});
+    });
     const span = document.createElement("span");
     span.appendChild(renderHtml(text));
     if (customUnmappedAtoms.has(atom.index)) {
@@ -838,6 +958,7 @@ function renderAtoms() {
       span.appendChild(badge);
     }
     label.appendChild(checkbox);
+    label.appendChild(colorInput);
     label.appendChild(span);
     root.appendChild(label);
   }
@@ -854,6 +975,13 @@ function syncDisplayButtons() {
   const displayMode = state.display_mode || "source";
   for (const button of document.querySelectorAll(".display-button")) {
     button.classList.toggle("selected", button.dataset.displayMode === displayMode);
+  }
+}
+
+function syncProjectionButtons() {
+  const projectionMode = state.projection_mode || "perspective";
+  for (const button of document.querySelectorAll(".projection-button")) {
+    button.classList.toggle("selected", button.dataset.projectionMode === projectionMode);
   }
 }
 
@@ -892,10 +1020,27 @@ function renderStatus() {
     `mode: ${activeMode}\\n` +
     `operation: ${activeMode === "custom" ? (copMatrix ? "custom " + copMatrix.op_type : "custom unchecked") : (operation ? stripHtml(optionText(operation)) : state.operation_index)}\\n` +
     `speed: ${state.speed || 1.0}x\\n` +
+    `projection: ${state.projection_mode || "perspective"}\\n` +
     `display: ${state.display_mode || "source"}\\n` +
     `scope: ${scopeLabel}\\n` +
     `selected atoms: ${selected}\\n` +
     `gif: ${state.gif_status || "-"}`;
+}
+
+function viewCenterValue(id, fallback = 0) {
+  const value = Number(document.getElementById(id).value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function applyViewCenter() {
+  postState({
+    view_center_request_id: Date.now(),
+    view_center_frac: [
+      viewCenterValue("view-center-x"),
+      viewCenterValue("view-center-y"),
+      viewCenterValue("view-center-z"),
+    ],
+  });
 }
 
 async function postState(update) {
@@ -906,7 +1051,9 @@ async function postState(update) {
   });
   syncSpeedButtons();
   syncDisplayButtons();
+  syncProjectionButtons();
   syncAtomModeButtons();
+  renderElementColorControls();
   renderOperations();
   renderAtoms();
   renderStatus();
@@ -973,12 +1120,19 @@ for (const button of document.querySelectorAll(".display-button")) {
     reset: true,
   }));
 }
+for (const button of document.querySelectorAll(".projection-button")) {
+  button.addEventListener("click", () => postState({
+    projection_mode: button.dataset.projectionMode,
+    playing: false,
+  }));
+}
 document.getElementById("view-direction").addEventListener("click", () => {
   postState({view_request_id: Date.now()});
 });
 document.getElementById("reset-view").addEventListener("click", () => {
   postState({reset_view_request_id: Date.now()});
 });
+document.getElementById("apply-view-center").addEventListener("click", applyViewCenter);
 document.getElementById("save-gif").addEventListener("click", () => {
   if (activeMode === "custom") {
     sendCurrentCustomAnimation(false);
@@ -1234,10 +1388,19 @@ async function boot() {
   atoms = atomInfo.atoms;
   st.textContent = `Loaded ${operations.length} operations, ${atoms.length} atoms`;
   state = await api("/api/state");
+  if (state.source_kind) sourceKind = state.source_kind;
+  if (sourceKind !== "crystal") {
+    document.getElementById("view-center-label").textContent = "View center [x y z] — Cartesian Å";
+    for (const id of ["view-center-x", "view-center-y", "view-center-z"]) {
+      document.getElementById(id).value = "0";
+    }
+  }
   renderDirectionFilter();
   renderAtomElementFilter();
+  renderElementColorControls();
   syncSpeedButtons();
   syncDisplayButtons();
+  syncProjectionButtons();
   syncAtomModeButtons();
   renderOperations();
   renderAtoms();

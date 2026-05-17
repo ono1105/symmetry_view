@@ -45,10 +45,14 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_operation_index: int | None = None
         self.last_scope: str | None = None
         self.last_selected_atoms: tuple[int, ...] | None = None
+        self.last_element_colors: tuple[tuple[str, str], ...] | None = None
+        self.last_atom_colors: tuple[tuple[str, str], ...] | None = None
         self.last_display_mode: str | None = self.display_mode
+        self.last_projection_mode: str | None = None
         self.last_active_mode: str | None = None
         self.last_view_request_id: int | None = None
         self.last_reset_view_request_id: int | None = None
+        self.last_view_center_request_id: int | None = None
         self.last_camera_request_id: int | None = None
         self.last_gif_request_id: int | None = None
         self.last_gif_3view_request_id: int | None = None
@@ -76,11 +80,16 @@ class BrowserControlledViewer(NativePyVistaViewer):
             requested_playing = bool(self.shared_state["playing"])
             scope = str(self.shared_state.get("scope", "representative"))
             selected_atoms = tuple(int(index) for index in self.shared_state.get("selected_atoms", []))
+            element_colors = dict(self.shared_state.get("element_colors", {}))
+            atom_colors = dict(self.shared_state.get("atom_colors", {}))
             speed = float(self.shared_state.get("speed", 1.0))
+            projection_mode = str(self.shared_state.get("projection_mode", "perspective"))
             display_mode = str(self.shared_state.get("display_mode", self.display_mode))
             active_mode = str(self.shared_state.get("active_mode", "standard"))
             view_request_id = self.shared_state.get("view_request_id")
             reset_view_request_id = self.shared_state.get("reset_view_request_id")
+            view_center_request_id = self.shared_state.get("view_center_request_id")
+            view_center_frac = self.shared_state.get("view_center_frac")
             camera_request_id = self.shared_state.get("camera_request_id")
             camera_direction = str(self.shared_state.get("camera_direction", ""))
             camera_angle = float(self.shared_state.get("camera_angle", 90.0))
@@ -93,6 +102,22 @@ class BrowserControlledViewer(NativePyVistaViewer):
             reset = bool(self.shared_state.pop("reset", False))
 
         self.speed = max(speed, 0.1)
+
+        projection_mode = "orthographic" if projection_mode == "orthographic" else "perspective"
+        if projection_mode != self.last_projection_mode:
+            self.set_projection_mode(projection_mode)
+            self.last_projection_mode = projection_mode
+            should_render = True
+
+        element_colors_key = tuple(sorted((str(key), str(value)) for key, value in element_colors.items()))
+        atom_colors_key = tuple(sorted((str(key), str(value)) for key, value in atom_colors.items()))
+        if element_colors_key != self.last_element_colors or atom_colors_key != self.last_atom_colors:
+            self.element_colors = element_colors
+            self.atom_colors = atom_colors
+            self.apply_atom_colors()
+            self.last_element_colors = element_colors_key
+            self.last_atom_colors = atom_colors_key
+            should_render = True
 
         if active_mode != self.last_active_mode:
             if active_mode == "custom":
@@ -158,6 +183,15 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if reset_view_request_id is not None and reset_view_request_id != self.last_reset_view_request_id:
             self.reset_view_center()
             self.last_reset_view_request_id = reset_view_request_id
+            should_render = True
+
+        if view_center_request_id is not None and view_center_request_id != self.last_view_center_request_id:
+            try:
+                self.set_manual_view_center(view_center_frac)
+            except Exception as exc:
+                self.set_gif_status(f"view center failed: {exc}")
+                should_update_status = True
+            self.last_view_center_request_id = view_center_request_id
             should_render = True
 
         if camera_request_id is not None and camera_request_id != self.last_camera_request_id:
@@ -298,6 +332,31 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.element_actor_cache = {}
         self.element_actors = []
 
+    def atom_color(self, atom: dict) -> str:
+        return viewer.atom_color(
+            atom,
+            element_colors=getattr(self, "element_colors", {}),
+            atom_colors=getattr(self, "atom_colors", {}),
+        )
+
+    def apply_atom_colors(self) -> None:
+        for item in self.animated_atoms:
+            actor = item.get("actor")
+            if actor is None:
+                continue
+            color = self.atom_color(item["atom"])
+            try:
+                actor.GetProperty().SetColor(*viewer.color_to_rgb(color))
+            except Exception:
+                pass
+
+    def set_projection_mode(self, projection_mode: str) -> None:
+        if projection_mode == "orthographic":
+            self.plotter.camera.ParallelProjectionOn()
+        else:
+            self.plotter.camera.ParallelProjectionOff()
+        self.plotter.reset_camera_clipping_range()
+
     def toggle_play_from_keyboard(self) -> None:
         with self.state_lock:
             self.shared_state["playing"] = not bool(self.shared_state["playing"])
@@ -395,7 +454,23 @@ class BrowserControlledViewer(NativePyVistaViewer):
         return viewer.display_scene_center(self.render_data, self.display_mode)
 
     def reset_view_center(self) -> None:
-        new_center = self.display_center()
+        self.set_camera_center(self.display_center())
+
+    def set_manual_view_center(self, center_frac: list[float] | tuple[float, ...] | None) -> None:
+        if center_frac is None or len(center_frac) != 3:
+            raise ValueError("enter three fractional coordinates")
+        center_frac_array = np.asarray(center_frac, dtype=float)
+        if not np.all(np.isfinite(center_frac_array)):
+            raise ValueError("view center must contain finite numbers")
+        unit_cell = self.render_data.get("unit_cell")
+        if unit_cell is None:
+            new_center = center_frac_array
+        else:
+            lattice = np.asarray(unit_cell["lattice"], dtype=float)
+            new_center = center_frac_array @ lattice
+        self.set_camera_center(new_center)
+
+    def set_camera_center(self, new_center: np.ndarray) -> None:
         position = np.asarray(self.plotter.camera.GetPosition(), dtype=float)
         focal_point = np.asarray(self.plotter.camera.GetFocalPoint(), dtype=float)
         up = viewer.normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
@@ -616,13 +691,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if not result.get("unmapped"):
             return
         unmapped_set = {item["source"] for item in result["unmapped"]}
-        span = viewer.scene_span(self.render_data)
         for item in self.animated_atoms:
             atom = item["atom"]
             if atom["index"] not in unmapped_set:
                 continue
             center = np.asarray(atom["cart"], dtype=float) + np.asarray(item["display_shift_cart"], dtype=float)
-            radius = viewer.atom_radius(atom["atomic_number"], span) * 1.28
+            radius = self.atom_radius(atom["atomic_number"]) * 1.28
             sphere = pv.Sphere(radius=radius, center=center, theta_resolution=24, phi_resolution=14)
             actor = self.plotter.add_mesh(
                 sphere,
@@ -665,4 +739,3 @@ def export_gif_dir(json_path: Path) -> Path:
     if json_path.parent.name == "exports":
         return json_path.parent / "gifs"
     return json_path.parent / "gifs"
-
