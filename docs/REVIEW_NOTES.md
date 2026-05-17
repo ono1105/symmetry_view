@@ -1955,3 +1955,89 @@ for renderer in self.plotter.renderers:
 - `custom_op_check_id` / `custom_op_animate` / `reset` 等の shared_state 読み取りがすべてロック内に統一された（race condition なし）。
 - `active_mode` フィールドで standard/custom の状態管理が明確化された。
 - `custom_speed_multiplier` で操作種別ごとの速度調整ができるようになった。
+
+---
+
+## Claude 実装 (2026-05-17): view_json_server.py 分割リファクタリングのレビュー
+
+Codex が `view_json_server.py` の大部分を `crystal_viewer/viewer/` パッケージに分割した。
+以下は新モジュール (`pyvista_controller.py`, `custom_operation.py`, `operation_labels.py`, `browser_ui.py`) のレビュー結果。
+
+### リグレッションなし（正常に移植された部分）
+
+- `shared_state` の全読み取りが `state_lock` 内に統一されたまま維持されている ✓
+- `last_custom_op_check_id` を `apply_custom_check()` 呼び出し前に更新するパターンが維持されている ✓
+- `active_mode` が standard に戻る際に `using_custom_paths = False` + `build_paths()` が呼ばれる ✓
+- `build_custom_animation_paths` の拡張表示モードにおける `start_override` の数学的扱いが正しい ✓
+- `operation_summaries` が起動時に（バックグラウンドスレッドなしで）呼ばれるようになった（速度改善） ✓
+- `apply_custom_check` の例外が `gif_status` 経由でユーザーに通知されるようになった ✓
+
+### 新機能（正常に実装）
+
+- `apply_custom_check` が赤い球に加え、カスタム操作の対称要素（軸・面・点）も PyVista 上に表示するようになった。
+- `custom_matrix_validity_error()` が W の直交性（det = ±1、W^T W = I）を事前検証するようになった。
+- `save_three_view_gifs()` で front/right/top の3方向 GIF を一括保存できるようになった。
+- `operation_camera_basis()` が分離され、"View along direction" と 3-view GIF 両方で再利用される。
+- `export_gif_dir()` でエクスポート先ディレクトリの決定ロジックが統一された。
+
+### 発見したバグ
+
+#### Bug (中): 拡張表示モードでアンマップ原子ハイライトの位置がずれる
+
+**場所:** `pyvista_controller.py:609-622` `apply_custom_check()`
+
+**問題:**
+```python
+for atom in self.render_data.get("atoms", []):
+    center = np.asarray(atom["cart"], dtype=float)  # ← 常にソース位置
+```
+`render_data["atoms"]` の `atom["cart"]` はユニットセル内の原点基準座標。拡張表示モード（±1/4 など）では、同じ原子が `display_shift_cart` だけずれた位置に表示される。ハイライト球はソース位置に置かれ、実際の表示位置からズレる。
+
+**以前の実装:** `self.animated_atoms` をループして `item["display_shift_cart"]` を加算していた（"source" モードでは問題なく、拡張モードでも正しく機能していた）。
+
+**提案修正:**
+```python
+for item in self.animated_atoms:
+    atom = item["atom"]
+    if atom["index"] not in unmapped_set:
+        continue
+    center = np.asarray(atom["cart"], dtype=float) + item["display_shift_cart"]
+    # ... 以下変更なし
+```
+
+---
+
+#### Bug (低): 対称要素アクターキャッシュが表示モード変更のたびに肥大化
+
+**場所:** `pyvista_controller.py:260` `show_element_actors()`
+
+**問題:**
+```python
+cache_key = (operation_index, self.display_mode)
+```
+キャッシュに `display_mode` を含めたことで、操作と表示モードの組み合わせごとに新しいアクターセットが生成される。古い表示モードのアクターは `hide_element_actors()` で非表示にされるだけで、プロッタから削除されない（`remove_actor` なし）。
+
+192 操作 × 5 表示モードを全て選択すると 960 セットのアクターが GPU メモリに蓄積する可能性がある。
+
+**提案修正案:**
+1. 表示モード変更時に `element_actor_cache` の全エントリを `remove_actor` してからクリアする
+2. または表示モードが変わったら前の `display_mode` のキャッシュエントリのみ削除する
+
+---
+
+#### Potential Bug (低): `infer_screw_symbol` が純粋 2 回軸を "2_1" と誤判定する可能性
+
+**場所:** `operation_labels.py:88-91`
+
+```python
+if screw == 0:
+    if int(order) == 2:
+        return "2_1"
+    return None
+```
+
+`screw = int(round(fraction * order)) % order` が 0 になるのは、軸方向への投影が 0 または 1 周期分（丸め誤差を含む）の場合。2 回軸で `screw == 0` は「軸方向変位なし」を意味し、純粋な 2 回回転である可能性が高い。これを "2_1" と返すのは誤判定になりうる。
+
+ただし、この関数はシンボルに "?" が含まれる場合のみ呼ばれる（つまり spglib がすでに判定に失敗した場合）ので、実害は限定的。
+
+**確認事項:** `screw == 0, order == 2` が正当な 2_1 ケース（例: 投影が 1.0 周期にほぼ一致して mod 演算で 0 になった場合）を意図しているなら、コメントで明記すること。そうでなければ `return None` に修正。
