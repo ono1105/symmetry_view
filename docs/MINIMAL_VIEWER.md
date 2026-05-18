@@ -96,6 +96,8 @@ The browser-controlled viewer can also take a CIF file directly. In that mode it
 
 Use `--json-output path/to/file.json` to choose the generated JSON path, or `--json-dir exports/json` to choose the output directory.
 
+After the browser-controlled viewer is running, the `Open CIF` control can load another local CIF file without restarting the server. The uploaded CIF is analyzed, exported to the same JSON directory, and the PyVista view is rebuilt in place.
+
 For smoother interactive playback, the GUI defaults to source atoms only. Use `--expanded` when you need the half-cell periodic display clones:
 
 ```bash

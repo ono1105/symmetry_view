@@ -49,6 +49,7 @@ class NativePyVistaViewer:
         self.frame_position = 0.0
         self.frame_count = 96
         self.speed = 1.0
+        self.timer_interval_ms = 33
         self.status_actor = None
 
         self.plotter = pv.Plotter()
@@ -63,7 +64,11 @@ class NativePyVistaViewer:
 
         self.add_controls()
         self.set_operation_position(self.initial_operation_position())
-        self.plotter.add_timer_event(max_steps=1000000, duration=33, callback=self.on_timer)
+        self.plotter.add_timer_event(
+            max_steps=1000000,
+            duration=self.timer_interval_ms,
+            callback=self.on_timer,
+        )
         self.plotter.show()
 
     def initial_operation_position(self) -> int:

@@ -2040,4 +2040,149 @@ if screw == 0:
 
 ただし、この関数はシンボルに "?" が含まれる場合のみ呼ばれる（つまり spglib がすでに判定に失敗した場合）ので、実害は限定的。
 
+---
+
+## Claude レビュー (2026-05-17) — browser-ui 分割後リファクタ
+
+対象ファイル: `crystal_viewer/viewer/browser_ui.py`, `operation_labels.py`, `pyvista_controller.py`, `tools/view_json_server.py`
+
+---
+
+### Bug (中): `renderDirectionFilter` でフィルタリセット後に `renderOperations` が呼ばれない
+
+**場所:** `crystal_viewer/viewer/browser_ui.py:775-778`
+
+```js
+if (directionFilterValue && !directions.some(([value]) => value === directionFilterValue)) {
+  directionFilterValue = "";
+  renderDirectionFilter();   // renderOperations() は呼ばれない
+}
+```
+
+**状況:** `refreshState()` が `summaries_ready` を検知して `operations` を更新したとき、
+`renderDirectionFilter()` が呼ばれる。このとき選択中の方向が新 operations に存在しない場合、
+上記ブランチに入り `directionFilterValue = ""` にして再帰呼び出しするが、
+`renderOperations()` が呼ばれないため操作リストが旧フィルタのまま（空）になる。
+
+**修正案:**
+```js
+if (directionFilterValue && !directions.some(([value]) => value === directionFilterValue)) {
+  directionFilterValue = "";
+  renderDirectionFilter();
+  renderOperations();   // 追加
+}
+```
+
+---
+
+### Bug (小): `formatSymbol` が `_0` を変換しない
+
+**場所:** `crystal_viewer/viewer/browser_ui.py:689-696`
+
+`_1`〜`_6` は下付き文字に変換されるが `_0` の変換がない。
+`6_0` のような notation があった場合に `6_0` のまま表示される。
+
+**修正案:** `replaceAll("_0", "₀")` を先頭に追加するか、まとめて正規表現に置き換える:
+```js
+return String(symbol).replace(/_([0-6])/g, (_, d) => "₀₁₂₃₄₅₆"[Number(d)]);
+```
+
+---
+
+### Potential Bug (中): `build_custom_animation_paths` が `matrix_cart: None` の fake_op を渡す
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py:717`
+
+```python
+fake_op = {"kind": kind, "angle_deg": angle_deg, "order": None, "matrix_cart": None}
+```
+
+`viewer.build_operation_path` がアーク/反射パスを構築するとき `matrix_cart` を使う可能性がある。
+`None` を渡した場合に直線補間にフォールバックするかどうかは `view_json_pyvista.py` の実装次第。
+カスタム操作（rotation/screw/mirror/glide）のアニメーションが正しくアーク・反射パスを描くか
+実機で確認すること。
+
+---
+
+### Bug (小): `fmtFrac` が `r ≈ 1.0` を正しく処理しない
+
+**場所:** `crystal_viewer/viewer/browser_ui.py:831-839`
+
+Python側 `format_fraction` は `abs(value - 1.0) < 1e-8` のとき "0" を返すが、
+JS側 `fmtFrac` には `r ≈ 1.0` のガードがない。
+`point_label` 経由では事前ラップされるので通常発生しないが、
+将来の呼び出し元が未ラップの `1.0` を渡すと `"2/2"` などが表示される。
+
+**修正案:** 既存の `r < 1e-8` チェックの隣に追加:
+```js
+if (Math.abs(r) < 1e-8 || Math.abs(r - 1.0) < 1e-8) return "0";
+```
+
+---
+
+### 効率: `boot()` の API 呼び出しが直列
+
+**場所:** `crystal_viewer/viewer/browser_ui.py:1483-1490`
+
+```js
+const info = await api("/api/operations");
+const atomInfo = await api("/api/atoms");
+state = await api("/api/state");
+```
+
+3 呼び出しが直列のため、サーバー起動時に往復時間 × 3 がかかる。
+`Promise.all` で並列化すれば起動時間を短縮できる:
+
+```js
+const [info, atomInfo, st] = await Promise.all([
+  api("/api/operations"),
+  api("/api/atoms"),
+  api("/api/state"),
+]);
+operations = info.operations;
+summariesReady = Boolean(info.summaries_ready);
+atoms = atomInfo.atoms;
+state = st;
+```
+
+---
+
+### 効率: `refreshState` が多重実行される可能性
+
+**場所:** `crystal_viewer/viewer/browser_ui.py:1504`
+
+```js
+setInterval(refreshState, 500);
+```
+
+`refreshState` は `async` だが `setInterval` は Promise を待たない。
+GIF 保存中などサーバー応答が遅い場合、複数の `refreshState` が同時実行され
+状態の上書き競合が起きうる。
+
+**修正案:**
+```js
+let _refreshing = false;
+setInterval(async () => {
+  if (_refreshing) return;
+  _refreshing = true;
+  try { await refreshState(); } finally { _refreshing = false; }
+}, 500);
+```
+
+---
+
+### 効率: `element_colors_key` がフレームごとに生成される
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py:132-133`
+
+```python
+element_colors_key = tuple(sorted((str(key), str(value)) for key, value in element_colors.items()))
+atom_colors_key    = tuple(sorted((str(key), str(value)) for key, value in atom_colors.items()))
+```
+
+タイマーは 33ms 毎に発火し、変化がなくてもこのソート＋タプル生成が毎回実行される。
+色数が多い構造では無視できないコスト。
+元データを dict として保持し `tuple(sorted(d.items()))` を直接比較するか、
+変更フラグを `shared_state` に持たせて差分があるときだけ更新する設計が望ましい。
+
 **確認事項:** `screw == 0, order == 2` が正当な 2_1 ケース（例: 投影が 1.0 周期にほぼ一致して mod 演算で 0 になった場合）を意図しているなら、コメントで明記すること。そうでなければ `return None` に修正。

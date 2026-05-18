@@ -134,6 +134,22 @@ HTML = """<!doctype html>
     button.secondary {
       background: #cbd5e1;
     }
+    button:disabled {
+      cursor: wait;
+      opacity: 0.48;
+    }
+    .saving-gif button:not(#save-gif):not(#save-gif-3view),
+    .saving-gif input,
+    .saving-gif select {
+      pointer-events: none;
+      opacity: 0.55;
+    }
+    .saving-gif #save-gif,
+    .saving-gif #save-gif-3view {
+      background: #f8fafc;
+      color: #111418;
+      cursor: wait;
+    }
     .grid {
       display: grid;
       grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
@@ -145,6 +161,17 @@ HTML = """<!doctype html>
       justify-content: space-between;
       gap: 16px;
       margin-bottom: 16px;
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .file-input {
+      max-width: 220px;
+      padding: 7px;
     }
     .panel {
       background: #151a20;
@@ -371,9 +398,13 @@ HTML = """<!doctype html>
 <main>
   <div class="topbar">
     <h1>Symmetry Controls</h1>
-    <div class="button-row flush" id="mode-controls">
-      <button class="secondary mode-button selected" data-mode="standard">Symmetry operation</button>
-      <button class="secondary mode-button" data-mode="custom">Custom operation</button>
+    <div class="topbar-actions">
+      <input id="cif-file" class="file-input" type="file" accept=".cif,.txt">
+      <button id="import-cif" class="secondary">Open CIF</button>
+      <div class="button-row flush" id="mode-controls">
+        <button class="secondary mode-button selected" data-mode="standard">Symmetry operation</button>
+        <button class="secondary mode-button" data-mode="custom">Custom operation</button>
+      </div>
     </div>
   </div>
   <div class="grid">
@@ -564,8 +595,7 @@ HTML = """<!doctype html>
       <section class="panel">
         <h2 class="section-title">Animation</h2>
         <div class="button-row flush">
-          <button id="play">Play</button>
-          <button id="stop" class="secondary">Stop</button>
+          <button id="play-toggle">Start</button>
           <button id="reset" class="secondary">Reset</button>
           <button id="save-gif" class="secondary">Save GIF</button>
           <button id="save-gif-3view" class="secondary">Save 3-view GIFs</button>
@@ -576,7 +606,7 @@ HTML = """<!doctype html>
           <button class="secondary speed-button selected" data-speed="1.0">Normal</button>
           <button class="secondary speed-button" data-speed="2.0">Fast</button>
         </div>
-        <p class="hint">Play the selected operation and save the current view as a GIF.</p>
+        <p class="hint">Start or stop the selected operation and save the current view as a GIF.</p>
         <h2 class="section-title">Camera</h2>
         <div class="camera-block">
           <label for="camera-angle">Rotate current view</label>
@@ -653,6 +683,8 @@ let summariesReady = false;
 let activeMode = "standard";
 let customUnmappedAtoms = new Set();
 let sourceKind = "crystal";
+let importInProgress = false;
+let refreshInProgress = false;
 
 async function api(path, options) {
   const response = await fetch(path, options);
@@ -673,13 +705,8 @@ function renderHtml(text) {
 }
 
 function formatSymbol(symbol) {
-  return String(symbol)
-    .replaceAll("_1", "₁")
-    .replaceAll("_2", "₂")
-    .replaceAll("_3", "₃")
-    .replaceAll("_4", "₄")
-    .replaceAll("_5", "₅")
-    .replaceAll("_6", "₆");
+  const subscripts = "₀₁₂₃₄₅₆";
+  return String(symbol).replace(/_([0-6])/g, (_, digit) => subscripts[Number(digit)]);
 }
 
 function atomText(atom) {
@@ -761,6 +788,7 @@ function renderDirectionFilter() {
   if (directionFilterValue && !directions.some(([value]) => value === directionFilterValue)) {
     directionFilterValue = "";
     renderDirectionFilter();
+    renderOperations();
   }
 }
 
@@ -816,7 +844,7 @@ function fmtMatVal(v) {
 function fmtFrac(v) {
   if (v === null || v === undefined) return "?";
   const r = Math.round(v * 1e9) / 1e9;
-  if (Math.abs(r) < 1e-8) return "0";
+  if (Math.abs(r) < 1e-8 || Math.abs(r - 1.0) < 1e-8) return "0";
   // try to express as a simple fraction with denominator ≤ 24
   for (const d of [2, 3, 4, 6, 8, 12, 24]) {
     const n = Math.round(r * d);
@@ -992,6 +1020,29 @@ function syncAtomModeButtons() {
   }
 }
 
+function syncPlayToggleButton() {
+  const button = document.getElementById("play-toggle");
+  button.textContent = state.playing ? "Stop" : "Start";
+  button.classList.toggle("secondary", Boolean(state.playing));
+}
+
+function isGifSaving() {
+  return String(state.gif_status || "").startsWith("writing ");
+}
+
+function syncGifSavingControls() {
+  const saving = isGifSaving();
+  document.body.classList.toggle("saving-gif", saving);
+  for (const id of ["save-gif", "save-gif-3view", "play-toggle", "reset"]) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = saving;
+  }
+  const saveGif = document.getElementById("save-gif");
+  const save3 = document.getElementById("save-gif-3view");
+  if (saveGif) saveGif.textContent = saving ? "Saving..." : "Save GIF";
+  if (save3) save3.textContent = saving ? "Saving..." : "Save 3-view GIFs";
+}
+
 function selectedAtomIndices() {
   return Array.from(document.querySelectorAll("#atoms input[type=checkbox]:checked"))
     .map(input => Number(input.value));
@@ -1024,6 +1075,8 @@ function renderStatus() {
     `display: ${state.display_mode || "source"}\\n` +
     `scope: ${scopeLabel}\\n` +
     `selected atoms: ${selected}\\n` +
+    `source: ${state.json_path || "-"}\\n` +
+    `import: ${state.import_status || "-"}\\n` +
     `gif: ${state.gif_status || "-"}`;
 }
 
@@ -1043,6 +1096,19 @@ function applyViewCenter() {
   });
 }
 
+function syncSourceKindControls() {
+  sourceKind = state.source_kind || "crystal";
+  const label = document.getElementById("view-center-label");
+  if (sourceKind !== "crystal") {
+    label.textContent = "View center [x y z] — Cartesian Å";
+    for (const id of ["view-center-x", "view-center-y", "view-center-z"]) {
+      document.getElementById(id).value = "0";
+    }
+  } else {
+    label.textContent = "View center [x y z] — fractional";
+  }
+}
+
 async function postState(update) {
   state = await api("/api/state", {
     method: "POST",
@@ -1053,6 +1119,8 @@ async function postState(update) {
   syncDisplayButtons();
   syncProjectionButtons();
   syncAtomModeButtons();
+  syncPlayToggleButton();
+  syncGifSavingControls();
   renderElementColorControls();
   renderOperations();
   renderAtoms();
@@ -1060,13 +1128,70 @@ async function postState(update) {
   renderOperationDetails();
 }
 
-function setActiveMode(mode) {
-  activeMode = mode === "custom" ? "custom" : "standard";
+async function importCifFile() {
+  if (importInProgress) return;
+  const input = document.getElementById("cif-file");
+  const file = input.files && input.files[0];
+  if (!file) {
+    document.getElementById("status").textContent = "Choose a CIF file first.";
+    return;
+  }
+  importInProgress = true;
+  document.getElementById("status").textContent = `Loading ${file.name}...`;
+  try {
+    const content = await file.text();
+    const result = await api("/api/import_cif", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({filename: file.name, content}),
+    });
+    if (!result.ok) {
+      state = result.state || state;
+      renderStatus();
+      throw new Error(result.error || "CIF import failed");
+    }
+    operations = result.operations || [];
+    atoms = result.atoms || [];
+    state = result.state || {};
+    directionFilterValue = "";
+    atomElementFilterValue = "";
+    summariesReady = Boolean(state.summaries_ready);
+    customUnmappedAtoms = new Set();
+    copMatrix = null;
+    document.getElementById("cop-result").hidden = true;
+    activeMode = "standard";
+    syncActiveModeControls();
+    syncSourceKindControls();
+    renderDirectionFilter();
+    renderAtomElementFilter();
+    renderElementColorControls();
+    syncOperationSelection();
+    syncSpeedButtons();
+    syncDisplayButtons();
+    syncProjectionButtons();
+    syncAtomModeButtons();
+    syncPlayToggleButton();
+    syncGifSavingControls();
+    renderOperations();
+    renderAtoms();
+    renderStatus();
+    renderOperationDetails();
+  } finally {
+    importInProgress = false;
+  }
+}
+
+function syncActiveModeControls() {
   document.getElementById("standard-panel").hidden = activeMode !== "standard";
   document.getElementById("custom-panel").hidden = activeMode !== "custom";
   for (const button of document.querySelectorAll(".mode-button")) {
     button.classList.toggle("selected", button.dataset.mode === activeMode);
   }
+}
+
+function setActiveMode(mode) {
+  activeMode = mode === "custom" ? "custom" : "standard";
+  syncActiveModeControls();
   if (activeMode === "standard") {
     customUnmappedAtoms = new Set();
     copMatrix = null;
@@ -1080,35 +1205,60 @@ function setActiveMode(mode) {
 }
 
 async function refreshState() {
-  state = await api("/api/state");
-  syncOperationSelection();
-  syncSpeedButtons();
-  syncDisplayButtons();
-  syncAtomModeButtons();
-  renderStatus();
-  renderOperationDetails();
-  if (!summariesReady && state.summaries_ready) {
-    summariesReady = true;
-    const info = await api("/api/operations");
-    operations = info.operations;
-    renderDirectionFilter();
-    renderOperations();
+  if (refreshInProgress) return;
+  refreshInProgress = true;
+  try {
+    state = await api("/api/state");
+    syncOperationSelection();
+    syncSpeedButtons();
+    syncDisplayButtons();
+    syncProjectionButtons();
+    syncAtomModeButtons();
+    syncPlayToggleButton();
+    renderStatus();
     renderOperationDetails();
+    if (!summariesReady && state.summaries_ready) {
+      summariesReady = true;
+      const info = await api("/api/operations");
+      operations = info.operations;
+      renderDirectionFilter();
+      renderOperations();
+      renderOperationDetails();
+    }
+  } finally {
+    refreshInProgress = false;
   }
 }
 
 document.getElementById("operation-sort").addEventListener("change", renderOperations);
+document.getElementById("import-cif").addEventListener("click", () => {
+  const input = document.getElementById("cif-file");
+  input.value = "";
+  input.click();
+});
+document.getElementById("cif-file").addEventListener("change", () => {
+  importCifFile().catch(error => {
+    document.getElementById("status").textContent = `Import error: ${error}`;
+  });
+});
 for (const button of document.querySelectorAll(".mode-button")) {
   button.addEventListener("click", () => setActiveMode(button.dataset.mode));
 }
-document.getElementById("play").addEventListener("click", () => {
+function startAnimation() {
   if (activeMode === "custom") {
     sendCurrentCustomAnimation(true);
     return;
   }
   postState({playing: true});
+}
+
+document.getElementById("play-toggle").addEventListener("click", () => {
+  if (state.playing) {
+    postState({playing: false});
+  } else {
+    startAnimation();
+  }
 });
-document.getElementById("stop").addEventListener("click", () => postState({playing: false}));
 document.getElementById("reset").addEventListener("click", () => postState({playing: false, reset: true}));
 for (const button of document.querySelectorAll(".speed-button")) {
   button.addEventListener("click", () => postState({speed: Number(button.dataset.speed)}));
@@ -1134,6 +1284,9 @@ document.getElementById("reset-view").addEventListener("click", () => {
 });
 document.getElementById("apply-view-center").addEventListener("click", applyViewCenter);
 document.getElementById("save-gif").addEventListener("click", () => {
+  state.gif_status = "writing GIF...";
+  syncGifSavingControls();
+  renderStatus();
   if (activeMode === "custom") {
     sendCurrentCustomAnimation(false);
     window.setTimeout(() => postState({gif_request_id: Date.now(), playing: false}), 120);
@@ -1142,6 +1295,9 @@ document.getElementById("save-gif").addEventListener("click", () => {
   postState({gif_request_id: Date.now(), playing: false});
 });
 document.getElementById("save-gif-3view").addEventListener("click", () => {
+  state.gif_status = "writing 3-view GIFs...";
+  syncGifSavingControls();
+  renderStatus();
   if (activeMode === "custom") {
     sendCurrentCustomAnimation(false);
     window.setTimeout(() => postState({gif_3view_request_id: Date.now(), playing: false}), 120);
@@ -1280,7 +1436,7 @@ function displayCopResult(result, opType, opParams) {
   }
   if (result.W_frac && result.t_frac) {
     copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac, op_type: opType || "matrix", op_params: opParams || {}, result};
-    html += `<p id="cop-anim-msg" class="hint">Use Play with the current Atoms mode: Clear, selected atoms, Unit cell only, or Displayed all.</p>`;
+    html += `<p id="cop-anim-msg" class="hint">Use Start with the current Atoms mode: Clear, selected atoms, Unit cell only, or Displayed all.</p>`;
   }
   div.innerHTML = html;
   div.hidden = false;
@@ -1380,21 +1536,18 @@ document.getElementById("btn-clear-check").addEventListener("click", async () =>
 async function boot() {
   const st = document.getElementById("status");
   st.textContent = "Connecting…";
-  const info = await api("/api/operations");
+  const [info, atomInfo, stateInfo] = await Promise.all([
+    api("/api/operations"),
+    api("/api/atoms"),
+    api("/api/state"),
+  ]);
   operations = info.operations;
   summariesReady = Boolean(info.summaries_ready);
   st.textContent = `Loaded ${operations.length} operations`;
-  const atomInfo = await api("/api/atoms");
   atoms = atomInfo.atoms;
   st.textContent = `Loaded ${operations.length} operations, ${atoms.length} atoms`;
-  state = await api("/api/state");
-  if (state.source_kind) sourceKind = state.source_kind;
-  if (sourceKind !== "crystal") {
-    document.getElementById("view-center-label").textContent = "View center [x y z] — Cartesian Å";
-    for (const id of ["view-center-x", "view-center-y", "view-center-z"]) {
-      document.getElementById(id).value = "0";
-    }
-  }
+  state = stateInfo;
+  syncSourceKindControls();
   renderDirectionFilter();
   renderAtomElementFilter();
   renderElementColorControls();
@@ -1402,11 +1555,17 @@ async function boot() {
   syncDisplayButtons();
   syncProjectionButtons();
   syncAtomModeButtons();
+  syncPlayToggleButton();
+  syncGifSavingControls();
   renderOperations();
   renderAtoms();
   renderStatus();
   renderOperationDetails();
-  setInterval(refreshState, 500);
+  setInterval(() => {
+    refreshState().catch(error => {
+      document.getElementById("status").textContent = `Refresh error: ${error}`;
+    });
+  }, 1000);
 }
 boot().catch(error => {
   document.getElementById("status").textContent = `Boot error: ${error}`;

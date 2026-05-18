@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import threading
+import time
 from pathlib import Path
 
 import imageio.v2 as imageio
 import numpy as np
 import pyvista as pv
+from PIL import Image, ImageDraw, ImageFont
 
 from tools import view_json_pyvista as viewer
 from tools.view_json_gui import NativePyVistaViewer
@@ -28,12 +31,15 @@ class BrowserControlledViewer(NativePyVistaViewer):
         shared_state: dict,
         state_lock: threading.Lock,
         element_context_cache: dict[int, tuple[list[dict], list[dict], list[dict]]] | None = None,
+        viewer_session=None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.shared_state = shared_state
         self.state_lock = state_lock
         self.element_context_cache = element_context_cache or {}
+        self.viewer_session = viewer_session
+        self.timer_interval_ms = 100
         # Disable VTK depth peeling to prevent transparency-related warning loops
         # on WSL/Mesa drivers. Translucent objects render without correct sorting
         # but without recursive PyVista→logging→VTK→PyVista error floods.
@@ -49,6 +55,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_atom_colors: tuple[tuple[str, str], ...] | None = None
         self.last_display_mode: str | None = self.display_mode
         self.last_projection_mode: str | None = None
+        self.last_reload_request_id: int | None = shared_state.get("reload_request_id")
         self.last_active_mode: str | None = None
         self.last_view_request_id: int | None = None
         self.last_reset_view_request_id: int | None = None
@@ -63,6 +70,10 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.custom_speed_multiplier: float = 1.0
         self.last_custom_op_animate_id: object = None
         self.using_custom_paths: bool = False
+        self.debug_timer = os.environ.get("CRYSTAL_VIEWER_DEBUG_TIMER") == "1"
+        self.debug_tick_count = 0
+        self.debug_render_count = 0
+        self.debug_last_report = time.monotonic()
 
     def add_controls(self) -> None:
         self.plotter.add_key_event("space", self.toggle_play_from_keyboard)
@@ -95,6 +106,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             camera_angle = float(self.shared_state.get("camera_angle", 90.0))
             gif_request_id = self.shared_state.get("gif_request_id")
             gif_3view_request_id = self.shared_state.get("gif_3view_request_id")
+            reload_request_id = self.shared_state.get("reload_request_id")
             custom_op_check_id = self.shared_state.get("custom_op_check_id")
             clear_custom_check = bool(self.shared_state.pop("clear_custom_check", False))
             custom_op_result = self.shared_state.get("custom_op_result")
@@ -102,6 +114,22 @@ class BrowserControlledViewer(NativePyVistaViewer):
             reset = bool(self.shared_state.pop("reset", False))
 
         self.speed = max(speed, 0.1)
+
+        if reload_request_id is not None and reload_request_id != self.last_reload_request_id:
+            self.reload_from_session(
+                display_mode=display_mode,
+                operation_index=operation_index,
+                scope=scope,
+                selected_atoms=selected_atoms,
+            )
+            self.last_reload_request_id = reload_request_id
+            self.last_operation_index = operation_index
+            self.last_scope = scope
+            self.last_selected_atoms = selected_atoms
+            self.last_display_mode = display_mode
+            self.last_active_mode = active_mode
+            self.last_custom_op_check_id = None
+            should_render = True
 
         projection_mode = "orthographic" if projection_mode == "orthographic" else "perspective"
         if projection_mode != self.last_projection_mode:
@@ -268,7 +296,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             if self.frame_position >= self.frame_count - 1:
                 self.frame_position = 0.0
             multiplier = self.custom_speed_multiplier if self.using_custom_paths else operation_speed_multiplier(self.current_operation())
-            frame_step = self.speed * multiplier
+            frame_step = self.speed * multiplier * (self.timer_interval_ms / 33.0)
             self.frame_position = min(self.frame_position + frame_step, self.frame_count - 1)
             self.update_atoms(self.frame_position / max(self.frame_count - 1, 1))
             should_render = True
@@ -284,6 +312,22 @@ class BrowserControlledViewer(NativePyVistaViewer):
             should_render = True
         if should_render:
             self.plotter.render()
+        if self.debug_timer:
+            self.debug_tick_count += 1
+            if should_render:
+                self.debug_render_count += 1
+            now = time.monotonic()
+            if now - self.debug_last_report >= 5.0:
+                print(
+                    "viewer timer:",
+                    f"ticks={self.debug_tick_count}",
+                    f"renders={self.debug_render_count}",
+                    f"playing={self.playing}",
+                    flush=True,
+                )
+                self.debug_tick_count = 0
+                self.debug_render_count = 0
+                self.debug_last_report = now
 
     def set_operation_index(self, operation_index: int) -> None:
         for position, operation in enumerate(self.operations):
@@ -331,6 +375,57 @@ class BrowserControlledViewer(NativePyVistaViewer):
                     pass
         self.element_actor_cache = {}
         self.element_actors = []
+
+    def reload_from_session(
+        self,
+        *,
+        display_mode: str,
+        operation_index: int,
+        scope: str,
+        selected_atoms: tuple[int, ...],
+    ) -> None:
+        if self.viewer_session is None:
+            return
+        self.playing = False
+        self.frame_position = 0.0
+        self.custom_check_actors = []
+        self.custom_view_direction_cart = None
+        self.custom_focus_cart = None
+        self.custom_speed_multiplier = 1.0
+        self.last_custom_op_animate_id = None
+        self.using_custom_paths = False
+
+        self.json_path = self.viewer_session.json_path
+        self.payload = self.viewer_session.payload
+        self.render_data = self.viewer_session.render_data
+        self.atom_mappings = self.payload.get("atom_mappings")
+        self.operations = self.render_data["operations"]
+        self.element_context_cache = self.viewer_session.element_context_cache
+        self.operation_position = 0
+        self.scope = scope
+        self.selected_atoms = selected_atoms
+        self.display_mode = display_mode
+
+        self.element_actors = []
+        self.element_actor_cache = {}
+        self.start_marker_actors = []
+        self.animated_atoms = []
+        self.atom_actor_cache = {}
+        self.sphere_mesh_cache = {}
+        self.paths = {}
+        self.status_actor = None
+
+        self.plotter.clear()
+        self.plotter.set_background("#101216")
+        self.display_mode = ""
+        self.rebuild_display_atoms(display_mode)
+        if self.render_data.get("unit_cell"):
+            viewer.add_unit_cell(self.plotter, self.render_data["unit_cell"])
+        self.plotter.add_axes()
+        self.set_operation_index(operation_index)
+        self.plotter.reset_camera()
+        self.set_projection_mode(str(self.shared_state.get("projection_mode", "perspective")))
+        self.update_status()
 
     def atom_color(self, atom: dict) -> str:
         return viewer.atom_color(
@@ -498,7 +593,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
         ]
         self.plotter.reset_camera_clipping_range()
 
-    def save_current_gif(self, *, suffix: str | None = None, timestamp: str | None = None) -> bool:
+    def save_current_gif(
+        self,
+        *,
+        suffix: str | None = None,
+        timestamp: str | None = None,
+        label_text: str | None = None,
+    ) -> bool:
         if not self.paths:
             self.set_gif_status("skipped: no animation path")
             return False
@@ -519,9 +620,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 self.plotter.render()
                 image = self.plotter.screenshot(return_img=True)
                 if image is not None:
+                    if label_text:
+                        image = add_gif_label(image, label_text)
                     images.append(image)
             if images:
-                imageio.mimsave(output_path, images, fps=fps)
+                hold_frames = max(1, int(round(fps)))
+                images.extend([images[-1].copy() for _ in range(hold_frames)])
+                imageio.mimsave(output_path, images, fps=fps, loop=0)
                 self.set_gif_status(f"saved {output_path}")
                 saved = True
             else:
@@ -559,7 +664,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         try:
             for label, direction, up in views:
                 self.set_camera_view(center, direction, up, distance)
-                if not self.save_current_gif(suffix=label, timestamp=timestamp):
+                if not self.save_current_gif(suffix=label, timestamp=timestamp, label_text=label):
                     failed_labels.append(label)
             if failed_labels:
                 self.set_gif_status(f"3-view GIF incomplete; failed: {', '.join(failed_labels)}")
@@ -644,7 +749,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
         }
         kind = _kind_map.get(op_type, "identity")
         angle_deg = float(op_params.get("angle", 90)) if op_params else 90.0
-        fake_op = {"kind": kind, "angle_deg": angle_deg, "order": None, "matrix_cart": None}
+        fake_op = {
+            "kind": kind,
+            "angle_deg": angle_deg,
+            "order": None,
+            "matrix_cart": W_cart.tolist(),
+            "translation_cart": t_cart.tolist(),
+        }
 
         idx_set = set(int(i) for i in atom_indices)
         paths = {}
@@ -739,3 +850,45 @@ def export_gif_dir(json_path: Path) -> Path:
     if json_path.parent.name == "exports":
         return json_path.parent / "gifs"
     return json_path.parent / "gifs"
+
+
+def add_gif_label(image: np.ndarray, label: str) -> np.ndarray:
+    pil_image = Image.fromarray(np.asarray(image))
+    draw = ImageDraw.Draw(pil_image, "RGBA")
+    text = str(label).lower()
+    width, height = pil_image.size
+    font_size = max(24, min(width, height) // 12)
+    font = gif_label_font(font_size)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    padding_x = max(12, font_size // 2)
+    padding_y = max(8, font_size // 3)
+    box_width = bbox[2] - bbox[0] + padding_x * 2
+    box_height = bbox[3] - bbox[1] + padding_y * 2
+    x = 14
+    y = 14
+    draw.rectangle(
+        (x, y, x + box_width, y + box_height),
+        fill=(0, 0, 0, 185),
+        outline=(255, 255, 255, 230),
+        width=max(2, font_size // 14),
+    )
+    draw.text(
+        (x + padding_x, y + padding_y - bbox[1]),
+        text,
+        font=font,
+        fill=(255, 255, 255, 255),
+    )
+    return np.asarray(pil_image)
+
+
+def gif_label_font(font_size: int):
+    for font_name in (
+        "Inter-Bold.otf",
+        "NotoSans-Bold.ttf",
+        "DejaVuSans-Bold.ttf",
+    ):
+        try:
+            return ImageFont.truetype(font_name, font_size)
+        except OSError:
+            continue
+    return ImageFont.load_default()

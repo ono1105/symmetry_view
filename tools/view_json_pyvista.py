@@ -423,11 +423,24 @@ def display_mode_margin(display_mode: str) -> float:
 
 def add_unit_cell(plotter: pv.Plotter, unit_cell: dict) -> None:
     vertices = np.asarray(unit_cell["vertices_cart"], dtype=float)
-    lines = []
+    edge_colors = {
+        (0, 1): "#ff0000",
+        (2, 4): "#ff0000",
+        (3, 5): "#ff0000",
+        (6, 7): "#ff0000",
+        (0, 2): "#00b000",
+        (1, 4): "#00b000",
+        (3, 6): "#00b000",
+        (5, 7): "#00b000",
+        (0, 3): "#2468ff",
+        (1, 5): "#2468ff",
+        (2, 6): "#2468ff",
+        (4, 7): "#2468ff",
+    }
     for start, end in unit_cell["edges"]:
-        lines.extend([2, int(start), int(end)])
-    mesh = pv.PolyData(vertices, lines=np.asarray(lines))
-    plotter.add_mesh(mesh, color="#d6dde6", line_width=2)
+        edge = (int(start), int(end))
+        line = pv.Line(vertices[edge[0]], vertices[edge[1]])
+        plotter.add_mesh(line, color=edge_colors.get(edge, "#d6dde6"), line_width=3)
 
 
 def add_symmetry_elements(
