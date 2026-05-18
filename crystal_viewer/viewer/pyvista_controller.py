@@ -51,8 +51,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_operation_index: int | None = None
         self.last_scope: str | None = None
         self.last_selected_atoms: tuple[int, ...] | None = None
-        self.last_element_colors: tuple[tuple[str, str], ...] | None = None
-        self.last_atom_colors: tuple[tuple[str, str], ...] | None = None
+        self.last_element_colors: dict[str, str] | None = None
+        self.last_atom_colors: dict[str, str] | None = None
         self.last_display_mode: str | None = self.display_mode
         self.last_projection_mode: str | None = None
         self.last_reload_request_id: int | None = shared_state.get("reload_request_id")
@@ -137,14 +137,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.last_projection_mode = projection_mode
             should_render = True
 
-        element_colors_key = tuple(sorted((str(key), str(value)) for key, value in element_colors.items()))
-        atom_colors_key = tuple(sorted((str(key), str(value)) for key, value in atom_colors.items()))
-        if element_colors_key != self.last_element_colors or atom_colors_key != self.last_atom_colors:
+        if element_colors != self.last_element_colors or atom_colors != self.last_atom_colors:
             self.element_colors = element_colors
             self.atom_colors = atom_colors
             self.apply_atom_colors()
-            self.last_element_colors = element_colors_key
-            self.last_atom_colors = atom_colors_key
+            self.last_element_colors = dict(element_colors)
+            self.last_atom_colors = dict(atom_colors)
             should_render = True
 
         if active_mode != self.last_active_mode:

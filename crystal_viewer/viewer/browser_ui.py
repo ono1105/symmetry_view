@@ -176,6 +176,17 @@ HTML = """<!doctype html>
     .path-input {
       width: min(360px, 42vw);
     }
+    .path-open-group {
+      display: grid;
+      gap: 4px;
+      min-width: min(520px, 100%);
+    }
+    .path-hint {
+      max-width: 520px;
+      color: #91a0b3;
+      font-size: 12px;
+      line-height: 1.3;
+    }
     .panel {
       background: #151a20;
       border: 1px solid #29313c;
@@ -404,8 +415,14 @@ HTML = """<!doctype html>
     <div class="topbar-actions">
       <input id="cif-file" class="file-input" type="file" accept=".cif,.txt">
       <button id="import-cif" class="secondary">Open CIF</button>
-      <input id="open-path-input" class="path-input" type="text" placeholder="/mnt/c/.../file.cif, C:\\...\\file.cif, or exports/json/file.json">
-      <button id="open-path" class="secondary">Open path</button>
+      <div class="path-open-group">
+        <div class="button-row flush">
+          <input id="open-path-input" class="path-input" type="text" list="open-path-history" placeholder="/mnt/c/.../file.cif, C:\\...\\file.cif, or exports/json/file.json">
+          <datalist id="open-path-history"></datalist>
+          <button id="open-path" class="secondary">Open path</button>
+        </div>
+        <div class="path-hint">Open path reads from WSL directly. Use /mnt/c/... or C:\\... for Windows files.</div>
+      </div>
       <div class="button-row flush" id="mode-controls">
         <button class="secondary mode-button selected" data-mode="standard">Symmetry operation</button>
         <button class="secondary mode-button" data-mode="custom">Custom operation</button>
@@ -690,6 +707,8 @@ let customUnmappedAtoms = new Set();
 let sourceKind = "crystal";
 let importInProgress = false;
 let refreshInProgress = false;
+const OPEN_PATH_HISTORY_KEY = "crystal-viewer-open-path-history";
+let openPathHistory = [];
 
 async function api(path, options) {
   const response = await fetch(path, options);
@@ -734,6 +753,44 @@ function atomEffectiveColor(atom) {
   return normalizeColor(
     atomColors[String(atom.index)] || elementColors[atom.element] || atom.default_color,
   );
+}
+
+function loadOpenPathHistory() {
+  try {
+    const value = JSON.parse(localStorage.getItem(OPEN_PATH_HISTORY_KEY) || "[]");
+    if (Array.isArray(value)) {
+      openPathHistory = value.filter(item => typeof item === "string" && item.trim()).slice(0, 12);
+    }
+  } catch {
+    openPathHistory = [];
+  }
+}
+
+function saveOpenPathHistory() {
+  try {
+    localStorage.setItem(OPEN_PATH_HISTORY_KEY, JSON.stringify(openPathHistory.slice(0, 12)));
+  } catch {
+    // Ignore private browsing and storage quota failures.
+  }
+}
+
+function renderOpenPathHistory() {
+  const root = document.getElementById("open-path-history");
+  if (!root) return;
+  root.innerHTML = "";
+  for (const path of openPathHistory) {
+    const option = document.createElement("option");
+    option.value = path;
+    root.appendChild(option);
+  }
+}
+
+function rememberOpenPath(path) {
+  const normalized = String(path || "").trim();
+  if (!normalized) return;
+  openPathHistory = [normalized, ...openPathHistory.filter(item => item !== normalized)].slice(0, 12);
+  saveOpenPathHistory();
+  renderOpenPathHistory();
 }
 
 function renderOperations() {
@@ -1173,6 +1230,7 @@ async function openStructurePath() {
       body: JSON.stringify({path}),
     });
     applyLoadedStructure(result, "Open path failed");
+    rememberOpenPath(path);
   } finally {
     importInProgress = false;
   }
@@ -1579,6 +1637,8 @@ document.getElementById("btn-clear-check").addEventListener("click", async () =>
 async function boot() {
   const st = document.getElementById("status");
   st.textContent = "Connecting…";
+  loadOpenPathHistory();
+  renderOpenPathHistory();
   const [info, atomInfo, stateInfo] = await Promise.all([
     api("/api/operations"),
     api("/api/atoms"),
