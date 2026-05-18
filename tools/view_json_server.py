@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import threading
 import tempfile
 import webbrowser
@@ -35,6 +36,11 @@ logging.getLogger("vtkmodules").setLevel(logging.ERROR)
 
 
 UPLOAD_CIF_DIR = Path(tempfile.gettempdir()) / "symmetry_view_cif_uploads"
+DEFAULT_STARTER_PATHS = (
+    Path("exports/json/halite.json"),
+    Path("exports/json/f2_pd.json"),
+    Path("exports/json/jacobsite.json"),
+)
 
 
 class ViewerSession:
@@ -146,6 +152,16 @@ def write_uploaded_cif(filename: str, content: str) -> Path:
     return cif_path
 
 
+def user_path_from_text(text: str) -> Path:
+    stripped = text.strip().strip('"')
+    match = re.match(r"^([A-Za-z]):[\\/](.*)$", stripped)
+    if match:
+        drive = match.group(1).lower()
+        rest = match.group(2).replace("\\", "/")
+        return Path("/mnt") / drive / rest
+    return Path(stripped).expanduser()
+
+
 def make_handler(
     session: ViewerSession,
     shared_state: dict,
@@ -222,6 +238,10 @@ def make_handler(
                 self.handle_import_cif(payload)
                 return
 
+            if path == "/api/open_path":
+                self.handle_open_path(payload)
+                return
+
             if path != "/api/state":
                 self.send_error(404)
                 return
@@ -274,37 +294,59 @@ def make_handler(
                     indent=indent,
                 )
                 new_payload = json.loads(json_path.read_text(encoding="utf-8"))
-                new_session = ViewerSession(json_path, new_payload)
-                with state_lock:
-                    preserved = {
-                        "speed": shared_state.get("speed", 1.0),
-                        "projection_mode": shared_state.get("projection_mode", "perspective"),
-                        "display_mode": shared_state.get("display_mode", default_display_mode),
-                        "reload_request_id": shared_state.get("reload_request_id"),
-                    }
-                    session.replace_from(new_session)
-                    next_state = initial_state_for_payload(
-                        new_payload,
-                        initial_operation=None,
-                        display_mode=default_display_mode,
-                        preserved=preserved,
-                    )
-                    next_state["reload_request_id"] = int(shared_state.get("reload_request_id") or 0) + 1
-                    next_state["import_status"] = f"loaded {filename} -> {json_path}"
-                    next_state["json_path"] = str(json_path)
-                    shared_state.clear()
-                    shared_state.update(next_state)
-                    body = {
-                        "ok": True,
-                        "json_path": str(json_path),
-                        "operations": session.operation_summary_items,
-                        "atoms": atom_api_items(session.atoms),
-                        "state": dict(shared_state),
-                    }
+                self.load_payload(json_path, new_payload, f"loaded {filename} -> {json_path}")
             except Exception as exc:
                 with state_lock:
                     shared_state["import_status"] = f"import failed: {exc}"
                     body = {"ok": False, "error": str(exc), "state": dict(shared_state)}
+                self.send_json(body)
+
+        def handle_open_path(self, payload: dict) -> None:
+            input_path = user_path_from_text(str(payload.get("path") or ""))
+            try:
+                json_path = resolve_viewer_json_path(
+                    input_path,
+                    json_output=None,
+                    json_dir=json_dir,
+                    tolerance_cart=tolerance_cart,
+                    indent=indent,
+                )
+                new_payload = json.loads(json_path.read_text(encoding="utf-8"))
+                self.load_payload(json_path, new_payload, f"loaded path {input_path} -> {json_path}")
+            except Exception as exc:
+                with state_lock:
+                    shared_state["import_status"] = f"open path failed: {exc}"
+                    body = {"ok": False, "error": str(exc), "state": dict(shared_state)}
+                self.send_json(body)
+
+        def load_payload(self, json_path: Path, new_payload: dict, import_status: str) -> None:
+            new_session = ViewerSession(json_path, new_payload)
+            with state_lock:
+                preserved = {
+                    "speed": shared_state.get("speed", 1.0),
+                    "projection_mode": shared_state.get("projection_mode", "perspective"),
+                    "display_mode": shared_state.get("display_mode", default_display_mode),
+                    "reload_request_id": shared_state.get("reload_request_id"),
+                }
+                session.replace_from(new_session)
+                next_state = initial_state_for_payload(
+                    new_payload,
+                    initial_operation=None,
+                    display_mode=default_display_mode,
+                    preserved=preserved,
+                )
+                next_state["reload_request_id"] = int(shared_state.get("reload_request_id") or 0) + 1
+                next_state["import_status"] = import_status
+                next_state["json_path"] = str(json_path)
+                shared_state.clear()
+                shared_state.update(next_state)
+                body = {
+                    "ok": True,
+                    "json_path": str(json_path),
+                    "operations": session.operation_summary_items,
+                    "atoms": atom_api_items(session.atoms),
+                    "state": dict(shared_state),
+                }
             self.send_json(body)
 
         def send_json(self, body: dict) -> None:
@@ -392,6 +434,16 @@ def resolve_viewer_json_path(
     raise ValueError(f"Unsupported input file type: {input_path.suffix}. Use .json or .cif.")
 
 
+def default_starter_path() -> Path:
+    for path in DEFAULT_STARTER_PATHS:
+        if path.exists():
+            return path
+    raise FileNotFoundError(
+        "No input_path was provided and no starter JSON was found. "
+        "Provide a JSON/CIF path, or create exports/json/halite.json."
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Browser controls + PyVista view for exported symmetry JSON or CIF."
@@ -399,6 +451,7 @@ def main() -> int:
     parser.add_argument(
         "input_path",
         type=Path,
+        nargs="?",
         help="Exported JSON, or a CIF file to analyze and export first.",
     )
     parser.add_argument("--operation", type=int, default=None, help="Initial operation index.")
@@ -436,8 +489,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    input_path = args.input_path if args.input_path is not None else default_starter_path()
     json_path = resolve_viewer_json_path(
-        args.input_path,
+        input_path,
         json_output=args.json_output,
         json_dir=args.json_dir,
         tolerance_cart=args.tolerance_cart,

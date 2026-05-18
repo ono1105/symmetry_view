@@ -173,6 +173,9 @@ HTML = """<!doctype html>
       max-width: 220px;
       padding: 7px;
     }
+    .path-input {
+      width: min(360px, 42vw);
+    }
     .panel {
       background: #151a20;
       border: 1px solid #29313c;
@@ -401,6 +404,8 @@ HTML = """<!doctype html>
     <div class="topbar-actions">
       <input id="cif-file" class="file-input" type="file" accept=".cif,.txt">
       <button id="import-cif" class="secondary">Open CIF</button>
+      <input id="open-path-input" class="path-input" type="text" placeholder="/mnt/c/.../file.cif, C:\\...\\file.cif, or exports/json/file.json">
+      <button id="open-path" class="secondary">Open path</button>
       <div class="button-row flush" id="mode-controls">
         <button class="secondary mode-button selected" data-mode="standard">Symmetry operation</button>
         <button class="secondary mode-button" data-mode="custom">Custom operation</button>
@@ -1145,40 +1150,66 @@ async function importCifFile() {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({filename: file.name, content}),
     });
-    if (!result.ok) {
-      state = result.state || state;
-      renderStatus();
-      throw new Error(result.error || "CIF import failed");
-    }
-    operations = result.operations || [];
-    atoms = result.atoms || [];
-    state = result.state || {};
-    directionFilterValue = "";
-    atomElementFilterValue = "";
-    summariesReady = Boolean(state.summaries_ready);
-    customUnmappedAtoms = new Set();
-    copMatrix = null;
-    document.getElementById("cop-result").hidden = true;
-    activeMode = "standard";
-    syncActiveModeControls();
-    syncSourceKindControls();
-    renderDirectionFilter();
-    renderAtomElementFilter();
-    renderElementColorControls();
-    syncOperationSelection();
-    syncSpeedButtons();
-    syncDisplayButtons();
-    syncProjectionButtons();
-    syncAtomModeButtons();
-    syncPlayToggleButton();
-    syncGifSavingControls();
-    renderOperations();
-    renderAtoms();
-    renderStatus();
-    renderOperationDetails();
+    applyLoadedStructure(result, "CIF import failed");
   } finally {
     importInProgress = false;
   }
+}
+
+async function openStructurePath() {
+  if (importInProgress) return;
+  const input = document.getElementById("open-path-input");
+  const path = input.value.trim();
+  if (!path) {
+    document.getElementById("status").textContent = "Enter a WSL-readable CIF or JSON path.";
+    return;
+  }
+  importInProgress = true;
+  document.getElementById("status").textContent = `Opening ${path}...`;
+  try {
+    const result = await api("/api/open_path", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path}),
+    });
+    applyLoadedStructure(result, "Open path failed");
+  } finally {
+    importInProgress = false;
+  }
+}
+
+function applyLoadedStructure(result, fallbackError) {
+  if (!result.ok) {
+    state = result.state || state;
+    renderStatus();
+    throw new Error(result.error || fallbackError);
+  }
+  operations = result.operations || [];
+  atoms = result.atoms || [];
+  state = result.state || {};
+  directionFilterValue = "";
+  atomElementFilterValue = "";
+  summariesReady = Boolean(state.summaries_ready);
+  customUnmappedAtoms = new Set();
+  copMatrix = null;
+  document.getElementById("cop-result").hidden = true;
+  activeMode = "standard";
+  syncActiveModeControls();
+  syncSourceKindControls();
+  renderDirectionFilter();
+  renderAtomElementFilter();
+  renderElementColorControls();
+  syncOperationSelection();
+  syncSpeedButtons();
+  syncDisplayButtons();
+  syncProjectionButtons();
+  syncAtomModeButtons();
+  syncPlayToggleButton();
+  syncGifSavingControls();
+  renderOperations();
+  renderAtoms();
+  renderStatus();
+  renderOperationDetails();
 }
 
 function syncActiveModeControls() {
@@ -1240,6 +1271,18 @@ document.getElementById("cif-file").addEventListener("change", () => {
   importCifFile().catch(error => {
     document.getElementById("status").textContent = `Import error: ${error}`;
   });
+});
+document.getElementById("open-path").addEventListener("click", () => {
+  openStructurePath().catch(error => {
+    document.getElementById("status").textContent = `Open path error: ${error}`;
+  });
+});
+document.getElementById("open-path-input").addEventListener("keydown", event => {
+  if (event.key === "Enter") {
+    openStructurePath().catch(error => {
+      document.getElementById("status").textContent = `Open path error: ${error}`;
+    });
+  }
 });
 for (const button of document.querySelectorAll(".mode-button")) {
   button.addEventListener("click", () => setActiveMode(button.dataset.mode));

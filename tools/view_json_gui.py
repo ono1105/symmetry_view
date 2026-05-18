@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import _bootstrap  # noqa: F401
@@ -14,6 +15,18 @@ import pyvista as pv
 # Suppress them here so the console stays readable.
 logging.getLogger("pyvista").setLevel(logging.ERROR)
 logging.getLogger("vtkmodules").setLevel(logging.ERROR)
+
+if os.environ.get("CRYSTAL_VIEWER_VTK_WARNINGS") != "1":
+    try:
+        pv.set_error_output_file(os.devnull)
+    except Exception:
+        pass
+    try:
+        import vtk
+
+        vtk.vtkObject.GlobalWarningDisplayOff()
+    except Exception:
+        pass
 
 from tools import view_json_pyvista as viewer
 

@@ -85,6 +85,12 @@ Open the browser-controlled viewer:
 .venv/bin/python tools/view_json_server.py exports/json/jacobsite.json
 ```
 
+If no input path is provided, the viewer starts from `exports/json/halite.json` when available:
+
+```bash
+.venv/bin/python tools/view_json_server.py --no-browser
+```
+
 This starts a local control panel at `http://127.0.0.1:5173/` and keeps PyVista responsible for the 3D view. The browser UI includes an operation list, operation filter, atom checkbox list, atom filter, Play, Stop, and Reset. Operation rows show the operation symbol plus the selected representative axis `[uvw]`, plane normal `(hkl)`, or center/point fractional coordinate.
 The operation list can be sorted by operation number, operation symbol, full axis/plane/center entry, or direction only. It can also be filtered to one selected operation or one selected axis/plane direction.
 
@@ -97,6 +103,8 @@ The browser-controlled viewer can also take a CIF file directly. In that mode it
 Use `--json-output path/to/file.json` to choose the generated JSON path, or `--json-dir exports/json` to choose the output directory.
 
 After the browser-controlled viewer is running, the `Open CIF` control can load another local CIF file without restarting the server. The uploaded CIF is analyzed, exported to the same JSON directory, and the PyVista view is rebuilt in place.
+
+When running from WSL, `Open path` is usually faster for large Windows-side files because it lets the server read a WSL-accessible path directly instead of uploading the file through the browser. It accepts Linux paths such as `/mnt/c/.../sample.cif`, Windows drive paths such as `C:\...\sample.cif`, and existing JSON paths such as `exports/json/sample.json`.
 
 For smoother interactive playback, the GUI defaults to source atoms only. Use `--expanded` when you need the half-cell periodic display clones:
 
