@@ -109,6 +109,7 @@ def main() -> int:
 
     if args.show_mapping:
         print_mapping(atom_mappings, args.operation)
+        return 0
 
     if args.animate and args.operation is None:
         parser.error("--animate requires --operation")
