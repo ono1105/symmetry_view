@@ -415,9 +415,11 @@ HTML = """<!doctype html>
     <div class="topbar-actions">
       <input id="cif-file" class="file-input" type="file" accept=".cif,.txt">
       <button id="import-cif" class="secondary">Open CIF</button>
+      <input id="molecule-file" class="file-input" type="file" accept=".xyz,.txt">
+      <button id="import-molecule" class="secondary">Open XYZ</button>
       <div class="path-open-group">
         <div class="button-row flush">
-          <input id="open-path-input" class="path-input" type="text" list="open-path-history" placeholder="/mnt/c/.../file.cif, C:\\...\\file.cif, or exports/json/file.json">
+          <input id="open-path-input" class="path-input" type="text" list="open-path-history" placeholder="/mnt/c/.../file.cif, C:\\...\\file.xyz, or exports/json/file.json">
           <datalist id="open-path-history"></datalist>
           <button id="open-path" class="secondary">Open path</button>
         </div>
@@ -1213,6 +1215,29 @@ async function importCifFile() {
   }
 }
 
+async function importMoleculeFile() {
+  if (importInProgress) return;
+  const input = document.getElementById("molecule-file");
+  const file = input.files && input.files[0];
+  if (!file) {
+    document.getElementById("status").textContent = "Choose an XYZ file first.";
+    return;
+  }
+  importInProgress = true;
+  document.getElementById("status").textContent = `Loading ${file.name}...`;
+  try {
+    const content = await file.text();
+    const result = await api("/api/import_molecule", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({filename: file.name, content}),
+    });
+    applyLoadedStructure(result, "Molecule import failed");
+  } finally {
+    importInProgress = false;
+  }
+}
+
 async function openStructurePath() {
   if (importInProgress) return;
   const input = document.getElementById("open-path-input");
@@ -1327,6 +1352,16 @@ document.getElementById("import-cif").addEventListener("click", () => {
 });
 document.getElementById("cif-file").addEventListener("change", () => {
   importCifFile().catch(error => {
+    document.getElementById("status").textContent = `Import error: ${error}`;
+  });
+});
+document.getElementById("import-molecule").addEventListener("click", () => {
+  const input = document.getElementById("molecule-file");
+  input.value = "";
+  input.click();
+});
+document.getElementById("molecule-file").addEventListener("change", () => {
+  importMoleculeFile().catch(error => {
     document.getElementById("status").textContent = `Import error: ${error}`;
   });
 });

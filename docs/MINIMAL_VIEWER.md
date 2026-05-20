@@ -106,6 +106,12 @@ After the browser-controlled viewer is running, the `Open CIF` control can load 
 
 When running from WSL, `Open path` is usually faster for large Windows-side files because it lets the server read a WSL-accessible path directly instead of uploading the file through the browser. It accepts Linux paths such as `/mnt/c/.../sample.cif`, Windows drive paths such as `C:\...\sample.cif`, and existing JSON paths such as `exports/json/sample.json`.
 
+Molecule files can be opened as XYZ through the browser `Open XYZ` control, through `Open path`, or directly on the command line. They are analyzed as molecular point groups and exported to JSON before loading:
+
+```bash
+.venv/bin/python tools/view_json_server.py examples/water.xyz --no-browser
+```
+
 For smoother interactive playback, the GUI defaults to source atoms only. Use `--expanded` when you need the half-cell periodic display clones:
 
 ```bash

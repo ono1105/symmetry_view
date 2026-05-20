@@ -36,6 +36,7 @@ logging.getLogger("vtkmodules").setLevel(logging.ERROR)
 
 
 UPLOAD_CIF_DIR = Path(tempfile.gettempdir()) / "symmetry_view_cif_uploads"
+UPLOAD_MOLECULE_DIR = Path(tempfile.gettempdir()) / "symmetry_view_molecule_uploads"
 DEFAULT_BROWSER_IMPORT_JSON_DIR = DEFAULT_JSON_EXPORT_DIR / "imported"
 DEFAULT_STARTER_PATHS = (
     Path("exports/json/halite.json"),
@@ -141,16 +142,24 @@ def atom_api_items(atoms: list[dict]) -> list[dict]:
     ]
 
 
-def write_uploaded_cif(filename: str, content: str) -> Path:
+def write_uploaded_text(filename: str, content: str, *, upload_dir: Path, suffix: str, label: str) -> Path:
     if not content.strip():
-        raise ValueError("CIF content is empty.")
+        raise ValueError(f"{label} content is empty.")
     if len(content.encode("utf-8")) > 20 * 1024 * 1024:
-        raise ValueError("CIF upload is too large.")
+        raise ValueError(f"{label} upload is too large.")
     slug = slug_from_path(filename or "uploaded_structure")
-    cif_path = UPLOAD_CIF_DIR / f"{slug}.cif"
-    cif_path.parent.mkdir(parents=True, exist_ok=True)
-    cif_path.write_text(content, encoding="utf-8")
-    return cif_path
+    path = upload_dir / f"{slug}{suffix}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def write_uploaded_cif(filename: str, content: str) -> Path:
+    return write_uploaded_text(filename, content, upload_dir=UPLOAD_CIF_DIR, suffix=".cif", label="CIF")
+
+
+def write_uploaded_molecule(filename: str, content: str) -> Path:
+    return write_uploaded_text(filename, content, upload_dir=UPLOAD_MOLECULE_DIR, suffix=".xyz", label="Molecule")
 
 
 def user_path_from_text(text: str) -> Path:
@@ -240,6 +249,10 @@ def make_handler(
                 self.handle_import_cif(payload)
                 return
 
+            if path == "/api/import_molecule":
+                self.handle_import_molecule(payload)
+                return
+
             if path == "/api/open_path":
                 self.handle_open_path(payload)
                 return
@@ -300,6 +313,27 @@ def make_handler(
             except Exception as exc:
                 with state_lock:
                     shared_state["import_status"] = f"import failed: {exc}"
+                    body = {"ok": False, "error": str(exc), "state": dict(shared_state)}
+                self.send_json(body)
+
+        def handle_import_molecule(self, payload: dict) -> None:
+            filename = str(payload.get("filename") or "uploaded_molecule.xyz")
+            content = str(payload.get("content") or "")
+            try:
+                molecule_path = write_uploaded_molecule(filename, content)
+                json_path = default_json_output_path(molecule_path, import_json_dir)
+                json_path = export_analysis_to_json(
+                    molecule_path,
+                    mode="molecule",
+                    output_path=json_path,
+                    tolerance_cart=tolerance_cart,
+                    indent=indent,
+                )
+                new_payload = json.loads(json_path.read_text(encoding="utf-8"))
+                self.load_payload(json_path, new_payload, f"loaded {filename} -> {json_path}")
+            except Exception as exc:
+                with state_lock:
+                    shared_state["import_status"] = f"molecule import failed: {exc}"
                     body = {"ok": False, "error": str(exc), "state": dict(shared_state)}
                 self.send_json(body)
 
@@ -413,7 +447,7 @@ def resolve_viewer_json_path(
     suffix = input_path.suffix.lower()
     if suffix == ".json":
         if json_output is not None:
-            raise ValueError("--json-output can only be used when the input is a CIF file.")
+            raise ValueError("--json-output can only be used when the input is a CIF or XYZ file.")
         return input_path
 
     if suffix == ".cif":
@@ -433,7 +467,24 @@ def resolve_viewer_json_path(
         print(f"Wrote JSON: {output_path}", flush=True)
         return output_path
 
-    raise ValueError(f"Unsupported input file type: {input_path.suffix}. Use .json or .cif.")
+    if suffix == ".xyz":
+        output_path = (
+            json_output
+            if json_output is not None
+            else default_json_output_path(input_path, json_dir)
+        )
+        print(f"Analyzing molecule: {input_path}", flush=True)
+        output_path = export_analysis_to_json(
+            input_path,
+            mode="molecule",
+            output_path=output_path,
+            tolerance_cart=tolerance_cart,
+            indent=indent,
+        )
+        print(f"Wrote JSON: {output_path}", flush=True)
+        return output_path
+
+    raise ValueError(f"Unsupported input file type: {input_path.suffix}. Use .json, .cif, or .xyz.")
 
 
 def default_starter_path() -> Path:
@@ -448,13 +499,13 @@ def default_starter_path() -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Browser controls + PyVista view for exported symmetry JSON or CIF."
+        description="Browser controls + PyVista view for exported symmetry JSON, CIF, or XYZ."
     )
     parser.add_argument(
         "input_path",
         type=Path,
         nargs="?",
-        help="Exported JSON, or a CIF file to analyze and export first.",
+        help="Exported JSON, or a CIF/XYZ file to analyze and export first.",
     )
     parser.add_argument("--operation", type=int, default=None, help="Initial operation index.")
     parser.add_argument("--host", default="127.0.0.1")
@@ -464,13 +515,13 @@ def main() -> int:
         "--json-output",
         type=Path,
         default=None,
-        help="Where to write the generated JSON when input_path is a CIF file.",
+        help="Where to write the generated JSON when input_path is a CIF or XYZ file.",
     )
     parser.add_argument(
         "--json-dir",
         type=Path,
         default=DEFAULT_JSON_EXPORT_DIR,
-        help="Directory for generated JSON when input_path is a CIF file and --json-output is not set.",
+        help="Directory for generated JSON when input_path is a CIF or XYZ file and --json-output is not set.",
     )
     parser.add_argument(
         "--import-json-dir",
@@ -482,13 +533,13 @@ def main() -> int:
         "--tolerance-cart",
         type=float,
         default=1e-2,
-        help="Atom mapping tolerance in Angstrom for CIF export.",
+        help="Atom mapping tolerance in Angstrom for generated CIF/XYZ exports.",
     )
     parser.add_argument(
         "--indent",
         type=int,
         default=2,
-        help="JSON indentation for generated CIF exports.",
+        help="JSON indentation for generated CIF/XYZ exports.",
     )
     parser.add_argument(
         "--expanded",
