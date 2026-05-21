@@ -21,6 +21,26 @@ from .structure_analysis import AnalysisError
 
 
 TOL = 1e-7
+_MOLECULE_ANALYSIS_WARMED = False
+
+
+def warm_molecule_analysis() -> None:
+    """Build the small pymatgen caches used on the first browser XYZ import."""
+    global _MOLECULE_ANALYSIS_WARMED
+    if _MOLECULE_ANALYSIS_WARMED:
+        return
+    methane = Molecule(
+        ["C", "H", "H", "H", "H"],
+        [
+            [0.0, 0.0, 0.0],
+            [0.629118, 0.629118, 0.629118],
+            [-0.629118, -0.629118, 0.629118],
+            [-0.629118, 0.629118, -0.629118],
+            [0.629118, -0.629118, -0.629118],
+        ],
+    )
+    analyze_molecule(methane)
+    _MOLECULE_ANALYSIS_WARMED = True
 
 
 def analyze_molecule_file(

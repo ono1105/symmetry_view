@@ -5,7 +5,10 @@ import json
 import os
 from pathlib import Path
 
-import _bootstrap  # noqa: F401
+try:
+    import _bootstrap  # noqa: F401
+except ModuleNotFoundError:
+    from tools import _bootstrap  # noqa: F401
 
 import logging
 import numpy as np
@@ -259,7 +262,7 @@ class NativePyVistaViewer:
         radius = self.atom_radius(atom["atomic_number"])
         color = self.atom_color(atom)
         mesh = self.sphere_mesh(atom["atomic_number"], radius)
-        actor = self.plotter.add_mesh(mesh, color=color, smooth_shading=False)
+        actor = self.plotter.add_mesh(mesh, color=color, **viewer.ATOM_MESH_STYLE)
         actor.SetPosition(*center)
         cached = {
             "atom": atom,
@@ -320,6 +323,7 @@ class NativePyVistaViewer:
             animation_scope=animation_scope,
             representative_atom=representative_atom,
             selected_atoms=selected_atoms,
+            improper_mode=getattr(self, "improper_mode", "auto"),
         )
         if unit_cell_only:
             for path in self.paths.values():

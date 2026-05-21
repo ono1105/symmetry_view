@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
+import os
+import subprocess
+import sys
 import threading
 import tempfile
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,6 +23,13 @@ from crystal_viewer.export_pipeline import (
     default_json_output_path,
     export_analysis_to_json,
     slug_from_path,
+    warm_molecule_analysis,
+)
+from crystal_viewer.source_kinds import (
+    SOURCE_KIND_CRYSTAL,
+    SOURCE_KIND_EMPTY,
+    SOURCE_KIND_MOLECULE,
+    normalize_source_kind,
 )
 from tools.view_json_pyvista import atom_color
 from crystal_viewer.viewer.custom_operation import (
@@ -44,6 +54,12 @@ DEFAULT_STARTER_PATHS = (
     Path("exports/json/jacobsite.json"),
 )
 EMPTY_VIEWER_JSON_PATH = Path(tempfile.gettempdir()) / "symmetry_view_empty.json"
+DEBUG_IMPORT_TIMING = os.environ.get("CRYSTAL_VIEWER_DEBUG_IMPORT") == "1"
+
+
+def debug_import_timing(label: str, start: float) -> None:
+    if DEBUG_IMPORT_TIMING:
+        print(f"[import] {label} {time.monotonic() - start:.3f}s", flush=True)
 
 
 class ViewerSession:
@@ -72,9 +88,11 @@ class ViewerSession:
 
     @property
     def source_kind(self) -> str:
-        return self.payload.get(
-            "source_kind",
-            self.render_data.get("metadata", {}).get("mode", "crystal"),
+        return normalize_source_kind(
+            self.payload.get(
+                "source_kind",
+                self.render_data.get("metadata", {}).get("mode", SOURCE_KIND_CRYSTAL),
+            )
         )
 
 
@@ -99,7 +117,12 @@ def initial_state_for_payload(
         "operation_index": selected_operation,
         "playing": False,
         "reset": True,
-        "source_kind": payload.get("source_kind", render_data.get("metadata", {}).get("mode", "crystal")),
+        "source_kind": normalize_source_kind(
+            payload.get(
+                "source_kind",
+                render_data.get("metadata", {}).get("mode", SOURCE_KIND_CRYSTAL),
+            )
+        ),
         "structure_loaded": bool(payload.get("structure_loaded", True)),
         "metadata": render_data.get("metadata", {}),
         "scope": "displayed",
@@ -108,6 +131,7 @@ def initial_state_for_payload(
         "atom_colors": {},
         "speed": float(preserved.get("speed", 1.0)),
         "projection_mode": preserved.get("projection_mode", "perspective"),
+        "improper_mode": preserved.get("improper_mode", "auto"),
         "display_mode": preserved.get("display_mode", display_mode),
         "active_mode": "standard",
         "gif_status": "",
@@ -125,6 +149,7 @@ def initial_state_for_payload(
         "custom_op_animate": None,
         "reload_request_id": preserved.get("reload_request_id"),
         "import_status": preserved.get("import_status", ""),
+        "import_in_progress": False,
         "json_path": str(preserved.get("json_path", "")),
         "summaries_ready": True,
     }
@@ -133,11 +158,11 @@ def initial_state_for_payload(
 def empty_viewer_payload() -> dict:
     return {
         "schema_version": 4,
-        "source_kind": "empty",
+        "source_kind": SOURCE_KIND_EMPTY,
         "structure_loaded": False,
         "render_data": {
             "metadata": {
-                "mode": "empty",
+                "mode": SOURCE_KIND_EMPTY,
                 "source_file": "",
                 "formula": "No structure",
                 "symmetry_label": "",
@@ -167,12 +192,12 @@ def empty_viewer_payload() -> dict:
             "bounds_max": [1.0, 1.0, 1.0],
         },
         "atom_mappings": {
-            "mode": "empty",
+            "mode": SOURCE_KIND_EMPTY,
             "complete": True,
             "incomplete_operation_indices": [],
             "mappings": [
                 {
-                    "mode": "empty",
+                    "mode": SOURCE_KIND_EMPTY,
                     "operation_index": 0,
                     "operation_kind": "identity",
                     "complete": True,
@@ -224,16 +249,6 @@ def write_uploaded_cif(filename: str, content: str) -> Path:
 
 def write_uploaded_molecule(filename: str, content: str) -> Path:
     return write_uploaded_text(filename, content, upload_dir=UPLOAD_MOLECULE_DIR, suffix=".xyz", label="Molecule")
-
-
-def user_path_from_text(text: str) -> Path:
-    stripped = text.strip().strip('"')
-    match = re.match(r"^([A-Za-z]):[\\/](.*)$", stripped)
-    if match:
-        drive = match.group(1).lower()
-        rest = match.group(2).replace("\\", "/")
-        return Path("/mnt") / drive / rest
-    return Path(stripped).expanduser()
 
 
 def make_handler(
@@ -317,10 +332,6 @@ def make_handler(
                 self.handle_import_molecule(payload)
                 return
 
-            if path == "/api/open_path":
-                self.handle_open_path(payload)
-                return
-
             if path != "/api/state":
                 self.send_error(404)
                 return
@@ -334,6 +345,7 @@ def make_handler(
                 "atom_colors",
                 "speed",
                 "projection_mode",
+                "improper_mode",
                 "display_mode",
                 "active_mode",
                 "scope",
@@ -359,72 +371,92 @@ def make_handler(
                 body = dict(shared_state)
             self.send_json(body)
 
+        def reserve_load_request(self, payload: dict) -> int:
+            request_id = int(payload.get("request_id") or 0)
+            with state_lock:
+                shared_state["load_request_id"] = max(
+                    int(shared_state.get("load_request_id") or 0),
+                    request_id,
+                )
+                shared_state["import_in_progress"] = True
+            return request_id
+
+        def load_request_is_current(self, request_id: int) -> bool:
+            return request_id == 0 or request_id == int(shared_state.get("load_request_id") or 0)
+
+        def clear_import_if_current(self, request_id: int) -> None:
+            if self.load_request_is_current(request_id):
+                shared_state["import_in_progress"] = False
+
         def handle_import_cif(self, payload: dict) -> None:
+            request_id = self.reserve_load_request(payload)
             filename = str(payload.get("filename") or "uploaded_structure.cif")
             content = str(payload.get("content") or "")
             try:
                 cif_path = write_uploaded_cif(filename, content)
                 json_path = default_json_output_path(cif_path, import_json_dir)
-                json_path = export_analysis_to_json(
+                json_path = export_analysis_to_json_worker(
                     cif_path,
-                    mode="crystal",
+                    mode=SOURCE_KIND_CRYSTAL,
                     output_path=json_path,
                     tolerance_cart=tolerance_cart,
                     indent=indent,
                 )
                 new_payload = json.loads(json_path.read_text(encoding="utf-8"))
-                self.load_payload(json_path, new_payload, f"loaded {filename} -> {json_path}")
+                self.load_payload(json_path, new_payload, f"loaded {filename} -> {json_path}", request_id=request_id)
             except Exception as exc:
                 with state_lock:
+                    self.clear_import_if_current(request_id)
                     shared_state["import_status"] = f"import failed: {exc}"
                     body = {"ok": False, "error": str(exc), "state": dict(shared_state)}
                 self.send_json(body)
 
         def handle_import_molecule(self, payload: dict) -> None:
+            started_at = time.monotonic()
+            request_id = self.reserve_load_request(payload)
             filename = str(payload.get("filename") or "uploaded_molecule.xyz")
             content = str(payload.get("content") or "")
             try:
                 molecule_path = write_uploaded_molecule(filename, content)
+                debug_import_timing("molecule write", started_at)
                 json_path = default_json_output_path(molecule_path, import_json_dir)
-                json_path = export_analysis_to_json(
+                json_path = export_analysis_to_json_worker(
                     molecule_path,
-                    mode="molecule",
+                    mode=SOURCE_KIND_MOLECULE,
                     output_path=json_path,
                     tolerance_cart=tolerance_cart,
                     indent=indent,
                 )
+                debug_import_timing("molecule export", started_at)
                 new_payload = json.loads(json_path.read_text(encoding="utf-8"))
-                self.load_payload(json_path, new_payload, f"loaded {filename} -> {json_path}")
+                debug_import_timing("molecule read-json", started_at)
+                self.load_payload(json_path, new_payload, f"loaded {filename} -> {json_path}", request_id=request_id)
+                debug_import_timing("molecule response", started_at)
             except Exception as exc:
                 with state_lock:
+                    self.clear_import_if_current(request_id)
                     shared_state["import_status"] = f"molecule import failed: {exc}"
                     body = {"ok": False, "error": str(exc), "state": dict(shared_state)}
                 self.send_json(body)
 
-        def handle_open_path(self, payload: dict) -> None:
-            input_path = user_path_from_text(str(payload.get("path") or ""))
-            try:
-                json_path = resolve_viewer_json_path(
-                    input_path,
-                    json_output=None,
-                    json_dir=import_json_dir,
-                    tolerance_cart=tolerance_cart,
-                    indent=indent,
-                )
-                new_payload = json.loads(json_path.read_text(encoding="utf-8"))
-                self.load_payload(json_path, new_payload, f"loaded path {input_path} -> {json_path}")
-            except Exception as exc:
-                with state_lock:
-                    shared_state["import_status"] = f"open path failed: {exc}"
-                    body = {"ok": False, "error": str(exc), "state": dict(shared_state)}
-                self.send_json(body)
-
-        def load_payload(self, json_path: Path, new_payload: dict, import_status: str) -> None:
+        def load_payload(
+            self,
+            json_path: Path,
+            new_payload: dict,
+            import_status: str,
+            *,
+            request_id: int = 0,
+        ) -> None:
             new_session = ViewerSession(json_path, new_payload)
             with state_lock:
+                if not self.load_request_is_current(request_id):
+                    body = {"ok": False, "stale": True, "state": dict(shared_state)}
+                    self.send_json(body)
+                    return
                 preserved = {
                     "speed": shared_state.get("speed", 1.0),
                     "projection_mode": shared_state.get("projection_mode", "perspective"),
+                    "improper_mode": shared_state.get("improper_mode", "auto"),
                     "display_mode": shared_state.get("display_mode", default_display_mode),
                     "reload_request_id": shared_state.get("reload_request_id"),
                 }
@@ -437,6 +469,7 @@ def make_handler(
                 )
                 next_state["reload_request_id"] = int(shared_state.get("reload_request_id") or 0) + 1
                 next_state["structure_loaded"] = True
+                next_state["import_in_progress"] = False
                 next_state["import_status"] = import_status
                 next_state["json_path"] = str(json_path)
                 shared_state.clear()
@@ -494,6 +527,41 @@ def start_server(host: str, port: int, handler: type[BaseHTTPRequestHandler]) ->
     return server
 
 
+def prewarm_browser_imports() -> None:
+    try:
+        warm_molecule_analysis()
+    except Exception as exc:
+        print(f"Molecule import warmup skipped: {exc}", flush=True)
+
+
+def export_analysis_to_json_worker(
+    input_path: Path,
+    *,
+    mode: str,
+    output_path: Path,
+    tolerance_cart: float,
+    indent: int,
+) -> Path:
+    command = [
+        sys.executable,
+        str(Path(__file__).with_name("export_analysis_json.py")),
+        str(input_path),
+        "--mode",
+        mode,
+        "--output",
+        str(output_path),
+        "--tolerance-cart",
+        str(tolerance_cart),
+        "--indent",
+        str(indent),
+    ]
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(message or f"export worker failed with exit code {result.returncode}")
+    return output_path
+
+
 def operation_exists(operations: list[dict], operation_index: int) -> bool:
     return any(operation["index"] == operation_index for operation in operations)
 
@@ -524,7 +592,7 @@ def resolve_viewer_json_path(
         print(f"Analyzing CIF: {input_path}", flush=True)
         output_path = export_analysis_to_json(
             input_path,
-            mode="crystal",
+            mode=SOURCE_KIND_CRYSTAL,
             output_path=output_path,
             tolerance_cart=tolerance_cart,
             indent=indent,
@@ -541,7 +609,7 @@ def resolve_viewer_json_path(
         print(f"Analyzing molecule: {input_path}", flush=True)
         output_path = export_analysis_to_json(
             input_path,
-            mode="molecule",
+            mode=SOURCE_KIND_MOLECULE,
             output_path=output_path,
             tolerance_cart=tolerance_cart,
             indent=indent,
@@ -592,7 +660,7 @@ def main() -> int:
         "--import-json-dir",
         type=Path,
         default=DEFAULT_BROWSER_IMPORT_JSON_DIR,
-        help="Directory for JSON generated by browser Open CIF/Open path imports.",
+        help="Directory for JSON generated by browser Open CIF/Open XYZ imports.",
     )
     parser.add_argument(
         "--tolerance-cart",
@@ -646,12 +714,7 @@ def main() -> int:
         indent=args.indent,
         default_display_mode=display_mode,
     )
-    server = start_server(args.host, args.port, handler)
-    url = f"http://{args.host}:{server.server_port}/"
-    print(f"Control panel: {url}")
-    if not args.no_browser:
-        open_url(url)
-
+    prewarm_browser_imports()
     app = BrowserControlledViewer(
         json_path,
         display_mode=display_mode,
@@ -662,6 +725,12 @@ def main() -> int:
         element_context_cache=session.element_context_cache,
         viewer_session=session,
     )
+    server = start_server(args.host, args.port, handler)
+    url = f"http://{args.host}:{server.server_port}/"
+    print(f"Control panel: {url}")
+    if not args.no_browser:
+        open_url(url)
+
     app.show()
     server.shutdown()
     server.server_close()

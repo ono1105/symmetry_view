@@ -9,6 +9,7 @@ import numpy as np
 
 from .atom_mapping import AtomMappingSet
 from .render_data import RenderData
+from .source_kinds import normalize_source_kind
 
 
 EXPORT_SCHEMA_VERSION = 4
@@ -20,6 +21,7 @@ def export_payload(
     *,
     source_kind: str,
 ) -> dict[str, Any]:
+    source_kind = normalize_source_kind(source_kind)
     return {
         "schema_version": EXPORT_SCHEMA_VERSION,
         "source_kind": source_kind,
@@ -36,6 +38,7 @@ def write_export_json(
     source_kind: str,
     indent: int = 2,
 ) -> None:
+    source_kind = normalize_source_kind(source_kind)
     payload = export_payload(render_data, atom_mappings, source_kind=source_kind)
     Path(path).write_text(
         json.dumps(payload, ensure_ascii=False, indent=indent),

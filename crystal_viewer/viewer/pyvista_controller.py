@@ -55,6 +55,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_atom_colors: dict[str, str] | None = None
         self.last_display_mode: str | None = self.display_mode
         self.last_projection_mode: str | None = None
+        self.last_improper_mode: str | None = None
+        self.improper_mode = str(shared_state.get("improper_mode", "auto"))
         self.last_reload_request_id: int | None = shared_state.get("reload_request_id")
         self.last_active_mode: str | None = None
         self.last_view_request_id: int | None = None
@@ -87,6 +89,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         should_render = False
         should_update_status = False
         with self.state_lock:
+            if self.shared_state.get("import_in_progress"):
+                return
             operation_index = int(self.shared_state["operation_index"])
             requested_playing = bool(self.shared_state["playing"])
             scope = str(self.shared_state.get("scope", "representative"))
@@ -95,6 +99,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             atom_colors = dict(self.shared_state.get("atom_colors", {}))
             speed = float(self.shared_state.get("speed", 1.0))
             projection_mode = str(self.shared_state.get("projection_mode", "perspective"))
+            improper_mode = str(self.shared_state.get("improper_mode", "auto"))
             display_mode = str(self.shared_state.get("display_mode", self.display_mode))
             active_mode = str(self.shared_state.get("active_mode", "standard"))
             view_request_id = self.shared_state.get("view_request_id")
@@ -135,6 +140,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if projection_mode != self.last_projection_mode:
             self.set_projection_mode(projection_mode)
             self.last_projection_mode = projection_mode
+            should_render = True
+
+        if improper_mode != self.last_improper_mode:
+            self.improper_mode = improper_mode
+            self.last_improper_mode = improper_mode
+            self.build_paths()
+            reset = True
             should_render = True
 
         if element_colors != self.last_element_colors or atom_colors != self.last_atom_colors:
@@ -384,6 +396,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
     ) -> None:
         if self.viewer_session is None:
             return
+        debug_start = time.monotonic() if self.debug_timer else None
         self.playing = False
         self.frame_position = 0.0
         self.custom_check_actors = []
@@ -414,16 +427,26 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.status_actor = None
 
         self.plotter.clear()
+        if self.debug_timer:
+            print(f"[viewer] reload clear {time.monotonic() - debug_start:.3f}s", flush=True)
         self.plotter.set_background("#101216")
         self.display_mode = ""
         self.rebuild_display_atoms(display_mode)
+        if self.debug_timer:
+            print(f"[viewer] reload atoms {time.monotonic() - debug_start:.3f}s", flush=True)
         if self.render_data.get("unit_cell"):
             viewer.add_unit_cell(self.plotter, self.render_data["unit_cell"])
         self.plotter.add_axes()
+        if self.debug_timer:
+            print(f"[viewer] reload axes {time.monotonic() - debug_start:.3f}s", flush=True)
         self.set_operation_index(operation_index)
+        if self.debug_timer:
+            print(f"[viewer] reload operation {time.monotonic() - debug_start:.3f}s", flush=True)
         self.plotter.reset_camera()
         self.set_projection_mode(str(self.shared_state.get("projection_mode", "perspective")))
         self.update_status()
+        if self.debug_timer:
+            print(f"[viewer] reload done {time.monotonic() - debug_start:.3f}s", flush=True)
 
     def atom_color(self, atom: dict) -> str:
         return viewer.atom_color(
@@ -473,7 +496,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 return None
             direction = viewer.normalize(direction)
             center = self.custom_focus_cart if self.custom_focus_cart is not None else self.display_center()
-            distance = max(viewer.display_scene_span(self.render_data, self.display_mode) * 1.8, 1.0)
+            distance = self.camera_distance_for_view(center, direction)
             up = camera_up_vector(direction)
             return center, direction, up, distance
 
@@ -495,17 +518,91 @@ class BrowserControlledViewer(NativePyVistaViewer):
             return None
         direction = viewer.normalize(direction)
         center = operation_focus_point_cart(self.render_data, operation, axes, planes, centers, self.display_mode)
-        distance = max(viewer.display_scene_span(self.render_data, self.display_mode) * 1.8, 1.0)
+        distance = self.camera_distance_for_view(center, direction)
         up = camera_up_vector(direction)
         return center, direction, up, distance
 
     def set_camera_view(self, center: np.ndarray, direction: np.ndarray, up: np.ndarray, distance: float) -> None:
+        scale = self.camera_parallel_scale_for_view(center, direction)
         self.plotter.camera_position = [
             tuple(center + direction * distance),
             tuple(center),
             tuple(up),
         ]
+        if self.plotter.camera.GetParallelProjection():
+            self.plotter.camera.SetParallelScale(scale)
         self.plotter.reset_camera_clipping_range()
+
+    def camera_distance_for_view(self, center: np.ndarray, direction: np.ndarray) -> float:
+        radius, depth = self.camera_view_extent(center, direction)
+        angle = np.deg2rad(float(self.plotter.camera.GetViewAngle()))
+        angle = float(np.clip(angle, np.deg2rad(12.0), np.deg2rad(70.0)))
+        perspective_distance = radius / max(np.tan(angle * 0.5), 1e-6)
+        depth_margin = min(depth * 0.2, radius * 1.5)
+        return max(perspective_distance * 1.15 + depth_margin, radius * 2.2, 2.0)
+
+    def camera_parallel_scale_for_view(self, center: np.ndarray, direction: np.ndarray) -> float:
+        radius, _ = self.camera_view_extent(center, direction)
+        return max(radius * 1.15, 0.8)
+
+    def camera_view_extent(self, center: np.ndarray, direction: np.ndarray) -> tuple[float, float]:
+        points = self.camera_reference_points()
+        if points.size == 0:
+            span = viewer.display_scene_span(self.render_data, self.display_mode)
+            radius = max(span * 0.35, 1.0)
+            return radius, span
+
+        center = np.asarray(center, dtype=float)
+        direction = viewer.normalize(np.asarray(direction, dtype=float))
+        offsets = points - center
+        depths = offsets @ direction
+        projected = offsets - np.outer(depths, direction)
+        projected_radii = np.linalg.norm(projected, axis=1)
+        full_radius = float(np.max(projected_radii)) if len(projected_radii) else 1.0
+        robust_radius = float(np.percentile(projected_radii, 85)) if len(projected_radii) > 4 else full_radius
+        scene_span = viewer.display_scene_span(self.render_data, self.display_mode)
+
+        source_kind = str(self.render_data.get("metadata", {}).get("mode", "crystal"))
+        if source_kind == "molecule":
+            radius = full_radius
+        else:
+            local_cap = max(scene_span * 0.22, robust_radius * 1.35, 1.0)
+            radius = min(full_radius, local_cap)
+
+        radius = max(radius, min(scene_span * 0.18, 2.0), 0.8)
+        depth = float(np.max(depths) - np.min(depths)) if len(depths) else scene_span
+        return radius, max(depth, 1.0)
+
+    def camera_reference_points(self) -> np.ndarray:
+        points = []
+        try:
+            points.extend(item["cart"] for item in viewer.display_atom_instances(self.render_data, display_mode=self.display_mode))
+        except Exception:
+            points.extend(np.asarray(atom["cart"], dtype=float) for atom in self.render_data.get("atoms", []))
+
+        unit_cell = self.render_data.get("unit_cell")
+        if unit_cell is not None:
+            lattice = np.asarray(unit_cell["lattice"], dtype=float)
+            if self.display_mode == "source":
+                points.extend(np.asarray(unit_cell["vertices_cart"], dtype=float))
+            else:
+                margin = viewer.display_mode_margin(self.display_mode)
+                lower = -0.5 - margin
+                upper = 0.5 + margin
+                corners = np.asarray(
+                    [
+                        [x, y, z]
+                        for x in (lower, upper)
+                        for y in (lower, upper)
+                        for z in (lower, upper)
+                    ],
+                    dtype=float,
+                )
+                points.extend(corners @ lattice)
+
+        if not points:
+            return np.empty((0, 3), dtype=float)
+        return np.asarray(points, dtype=float)
 
     def rotate_current_camera(self, direction: str, angle_deg: float) -> None:
         angle = float(np.clip(angle_deg, 0.0, 180.0))
@@ -766,6 +863,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
             path = viewer.build_operation_path(
                 start, target, fake_op,
                 axis=axis_dict, plane=plane_dict, center=center_dict,
+                improper_mode=self.improper_mode,
+                source_kind=str(self.render_data.get("metadata", {}).get("mode", "")),
             )
             if unit_cell_only:
                 path["unit_cell_only"] = True

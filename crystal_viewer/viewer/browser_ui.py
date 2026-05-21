@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from ..source_kinds import source_kind_ui_config_json
+
+
 HTML = """<!doctype html>
 <html lang="en">
 <head>
@@ -93,6 +96,14 @@ HTML = """<!doctype html>
       background: #7dd3fc;
       color: #081017;
     }
+    .structure-kind-button.selected {
+      background: #7dd3fc;
+      color: #081017;
+    }
+    .overbar {
+      text-decoration: overline;
+      text-decoration-thickness: 1.5px;
+    }
     .operation-list {
       width: 100%;
       min-height: 280px;
@@ -173,19 +184,23 @@ HTML = """<!doctype html>
       max-width: 220px;
       padding: 7px;
     }
-    .path-input {
-      width: min(360px, 42vw);
-    }
-    .path-open-group {
+    .structure-summary {
       display: grid;
-      gap: 4px;
-      min-width: min(520px, 100%);
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
     }
-    .path-hint {
-      max-width: 520px;
+    .summary-item {
+      display: grid;
+      gap: 3px;
+    }
+    .summary-label {
       color: #91a0b3;
       font-size: 12px;
-      line-height: 1.3;
+    }
+    .summary-value {
+      color: #f8fafc;
+      font-weight: 600;
+      overflow-wrap: anywhere;
     }
     .panel {
       background: #151a20;
@@ -413,18 +428,14 @@ HTML = """<!doctype html>
   <div class="topbar">
     <h1>Symmetry Controls</h1>
     <div class="topbar-actions">
+      <div class="button-row flush" id="structure-kind-controls">
+        <button class="secondary structure-kind-button selected" data-kind="crystal">Crystal</button>
+        <button class="secondary structure-kind-button" data-kind="molecule">Molecule</button>
+      </div>
       <input id="cif-file" class="file-input" type="file" accept=".cif,.txt">
       <button id="import-cif" class="secondary">Open CIF</button>
       <input id="molecule-file" class="file-input" type="file" accept=".xyz,.txt">
       <button id="import-molecule" class="secondary">Open XYZ</button>
-      <div class="path-open-group">
-        <div class="button-row flush">
-          <input id="open-path-input" class="path-input" type="text" list="open-path-history" placeholder="/mnt/c/.../file.cif, C:\\...\\file.xyz, or exports/json/file.json">
-          <datalist id="open-path-history"></datalist>
-          <button id="open-path" class="secondary">Open path</button>
-        </div>
-        <div class="path-hint">Open path reads from WSL directly. Use /mnt/c/... or C:\\... for Windows files.</div>
-      </div>
       <div class="button-row flush" id="mode-controls">
         <button class="secondary mode-button selected" data-mode="standard">Symmetry operation</button>
         <button class="secondary mode-button" data-mode="custom">Custom operation</button>
@@ -433,7 +444,11 @@ HTML = """<!doctype html>
   </div>
   <section class="panel" id="start-panel" hidden>
     <h2 class="section-title">Open Structure</h2>
-    <p class="hint">Open a CIF for crystal symmetry, an XYZ for molecular point-group symmetry, or paste a WSL-readable path.</p>
+    <p class="hint">Open a CIF for crystal symmetry or an XYZ for molecular point-group symmetry.</p>
+  </section>
+  <section class="panel" id="structure-info-panel" hidden>
+    <h2 class="section-title">Structure Info</h2>
+    <div class="structure-summary" id="structure-info"></div>
   </section>
   <div class="grid" id="workspace">
     <div class="left-stack">
@@ -450,7 +465,7 @@ HTML = """<!doctype html>
           </select>
         </div>
         <div>
-          <label>Direction</label>
+          <label id="operation-filter-label">Direction</label>
           <div class="direction-filter-list" id="direction-filter"></div>
         </div>
       </div>
@@ -634,6 +649,14 @@ HTML = """<!doctype html>
           <button class="secondary speed-button selected" data-speed="1.0">Normal</button>
           <button class="secondary speed-button" data-speed="2.0">Fast</button>
         </div>
+        <div>
+          <label for="improper-mode">Improper operation</label>
+          <select id="improper-mode">
+            <option value="auto">Auto</option>
+            <option value="rotoreflection">Rotoreflection</option>
+            <option value="rotoinversion">Rotoinversion</option>
+          </select>
+        </div>
         <p class="hint">Start or stop the selected operation and save the current view as a GIF.</p>
         <h2 class="section-title">Camera</h2>
         <div class="camera-block">
@@ -713,10 +736,11 @@ let summariesReady = false;
 let activeMode = "standard";
 let customUnmappedAtoms = new Set();
 let sourceKind = "crystal";
+let selectedStructureKind = "crystal";
 let importInProgress = false;
 let refreshInProgress = false;
-const OPEN_PATH_HISTORY_KEY = "crystal-viewer-open-path-history";
-let openPathHistory = [];
+let importRequestId = 0;
+const STRUCTURE_KIND_UI = __STRUCTURE_KIND_CONFIG__;
 
 async function api(path, options) {
   const response = await fetch(path, options);
@@ -727,10 +751,10 @@ async function api(path, options) {
 
 function optionText(operation) {
   if (sourceKind === "molecule") {
-    return `op ${operation.index}: ${formatSymbol(operation.display_symbol || operation.symbol)} ${operation.kind || ""}`;
+    return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
   }
   const element = operation.element_summary ? ` | ${operation.element_summary}` : "";
-  return `op ${operation.index}: ${formatSymbol(operation.display_symbol || operation.symbol)}${element}`;
+  return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}${element}`;
 }
 
 function renderHtml(text) {
@@ -741,7 +765,32 @@ function renderHtml(text) {
 
 function formatSymbol(symbol) {
   const subscripts = "₀₁₂₃₄₅₆";
-  return String(symbol).replace(/_([0-6])/g, (_, digit) => subscripts[Number(digit)]);
+  return String(symbol)
+    .replace(/sigma/g, "σ")
+    .replace(/_([0-6])/g, (_, digit) => subscripts[Number(digit)]);
+}
+
+function resolvedImproperMode() {
+  const requested = state.improper_mode || "auto";
+  if (requested === "rotoreflection" || requested === "rotoinversion") return requested;
+  return sourceKind === "molecule" ? "rotoreflection" : "rotoinversion";
+}
+
+function isImproperOperation(operation) {
+  const kind = String(operation.kind || "");
+  return kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection");
+}
+
+function displayOperationSymbol(operation) {
+  if (!isImproperOperation(operation)) {
+    return operation.display_symbol || operation.symbol || "";
+  }
+  const match = String(operation.symbol || "").match(/[0-9]+/);
+  const order = operation.order || (match ? match[0] : "");
+  if (resolvedImproperMode() === "rotoreflection") {
+    return order ? `S${order}` : (operation.display_symbol || operation.symbol || "");
+  }
+  return order ? `<span class="overbar">${order}</span>` : (operation.display_symbol || operation.symbol || "");
 }
 
 function atomText(atom) {
@@ -766,49 +815,11 @@ function atomEffectiveColor(atom) {
   );
 }
 
-function loadOpenPathHistory() {
-  try {
-    const value = JSON.parse(localStorage.getItem(OPEN_PATH_HISTORY_KEY) || "[]");
-    if (Array.isArray(value)) {
-      openPathHistory = value.filter(item => typeof item === "string" && item.trim()).slice(0, 12);
-    }
-  } catch {
-    openPathHistory = [];
-  }
-}
-
-function saveOpenPathHistory() {
-  try {
-    localStorage.setItem(OPEN_PATH_HISTORY_KEY, JSON.stringify(openPathHistory.slice(0, 12)));
-  } catch {
-    // Ignore private browsing and storage quota failures.
-  }
-}
-
-function renderOpenPathHistory() {
-  const root = document.getElementById("open-path-history");
-  if (!root) return;
-  root.innerHTML = "";
-  for (const path of openPathHistory) {
-    const option = document.createElement("option");
-    option.value = path;
-    root.appendChild(option);
-  }
-}
-
-function rememberOpenPath(path) {
-  const normalized = String(path || "").trim();
-  if (!normalized) return;
-  openPathHistory = [normalized, ...openPathHistory.filter(item => item !== normalized)].slice(0, 12);
-  saveOpenPathHistory();
-  renderOpenPathHistory();
-}
-
 function renderOperations() {
   const root = document.getElementById("operations");
   root.innerHTML = "";
   for (const operation of sortedOperations()) {
-    if (directionFilterValue && operation.direction_sort_key !== directionFilterValue) continue;
+    if (directionFilterValue && operationFilterKey(operation) !== directionFilterValue) continue;
     const text = optionText(operation);
     const row = document.createElement("button");
     row.type = "button";
@@ -827,13 +838,13 @@ function renderOperations() {
 
 function renderDirectionFilter() {
   const root = document.getElementById("direction-filter");
-  const directions = [...new Map(
+  const filterType = operationFilterType();
+  document.getElementById("operation-filter-label").textContent =
+    filterType === "symbol" ? "Symbol" : "Direction";
+  const values = [...new Map(
     operations
-      .filter(operation => operation.direction_sort_key && operation.direction_sort_key !== "none")
-      .map(operation => [
-        operation.direction_sort_key,
-        operation.direction_label || operation.direction_filter_label || operation.direction_sort_key,
-      ])
+      .map(operation => [operationFilterKey(operation), operationFilterLabel(operation)])
+      .filter(([value]) => value && value !== "none")
   ).entries()].sort((a, b) => compareText(a[1], b[1]));
   root.innerHTML = "";
   const allButton = document.createElement("button");
@@ -846,7 +857,7 @@ function renderDirectionFilter() {
     renderOperations();
   });
   root.appendChild(allButton);
-  for (const [value, label] of directions) {
+  for (const [value, label] of values) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `direction-chip${value === directionFilterValue ? " selected" : ""}`;
@@ -858,7 +869,7 @@ function renderDirectionFilter() {
     });
     root.appendChild(button);
   }
-  if (directionFilterValue && !directions.some(([value]) => value === directionFilterValue)) {
+  if (directionFilterValue && !values.some(([value]) => value === directionFilterValue)) {
     directionFilterValue = "";
     renderDirectionFilter();
     renderOperations();
@@ -882,7 +893,21 @@ function sortedOperations() {
 }
 
 function sortableSymbol(operation) {
-  return `${operation.display_symbol || operation.symbol || ""}`.replace(/_/g, "");
+  return stripHtml(`${displayOperationSymbol(operation)}`).replace(/_/g, "");
+}
+
+function operationFilterType() {
+  return document.getElementById("operation-sort").value === "symbol" ? "symbol" : "direction";
+}
+
+function operationFilterKey(operation) {
+  if (operationFilterType() === "symbol") return sortableSymbol(operation);
+  return operation.direction_sort_key || "";
+}
+
+function operationFilterLabel(operation) {
+  if (operationFilterType() === "symbol") return formatSymbol(displayOperationSymbol(operation));
+  return operation.direction_label || operation.direction_filter_label || operation.direction_sort_key || "";
 }
 
 function stripHtml(text) {
@@ -897,6 +922,114 @@ function compareText(a, b) {
 
 function compareNumber(a, b) {
   return Number(a) - Number(b);
+}
+
+function basename(path) {
+  const text = String(path || "");
+  if (!text) return "-";
+  const parts = text.split(/[\\\\/]/);
+  return parts[parts.length - 1] || text;
+}
+
+function structureLoadedForSelectedKind() {
+  const loaded = state.structure_loaded !== false && sourceKind !== "empty";
+  return loaded && sourceKind === selectedStructureKind;
+}
+
+function sourceKindConfig(kind) {
+  return STRUCTURE_KIND_UI[kind] || STRUCTURE_KIND_UI.crystal;
+}
+
+function setDefaultOperationSortForSourceKind() {
+  document.getElementById("operation-sort").value = sourceKind === "molecule" ? "symbol" : "index";
+  directionFilterValue = "";
+}
+
+function renderStructureInfo() {
+  const panel = document.getElementById("structure-info-panel");
+  const root = document.getElementById("structure-info");
+  if (!structureLoadedForSelectedKind()) {
+    panel.hidden = true;
+    root.innerHTML = "";
+    return;
+  }
+  const metadata = state.metadata || {};
+  const config = sourceKindConfig(sourceKind);
+  const items = [
+    ["Type", config.label],
+    ["Name", basename(metadata.source_file || state.json_path)],
+    ["Formula", metadata.formula || "-"],
+    [config.symmetryLabel, metadata.symmetry_label || "-"],
+    [
+      "Operations",
+      metadata.operation_count !== undefined && metadata.operation_count !== null
+        ? metadata.operation_count
+        : operations.length,
+    ],
+  ];
+  root.innerHTML = "";
+  for (const [label, value] of items) {
+    const item = document.createElement("div");
+    item.className = "summary-item";
+    const labelEl = document.createElement("div");
+    labelEl.className = "summary-label";
+    labelEl.textContent = label;
+    const valueEl = document.createElement("div");
+    valueEl.className = "summary-value";
+    valueEl.textContent = String(value);
+    item.appendChild(labelEl);
+    item.appendChild(valueEl);
+    root.appendChild(item);
+  }
+  panel.hidden = false;
+}
+
+function syncStructureKindButtons() {
+  for (const button of document.querySelectorAll(".structure-kind-button")) {
+    button.classList.toggle("selected", button.dataset.kind === selectedStructureKind);
+  }
+}
+
+function setStructureKind(kind) {
+  if (importInProgress) {
+    document.getElementById("status").textContent = "Loading in progress. Wait for it to finish.";
+    return;
+  }
+  selectedStructureKind = kind === "molecule" ? "molecule" : "crystal";
+  if (!structureLoadedForSelectedKind() && activeMode === "custom") {
+    activeMode = "standard";
+    syncActiveModeControls();
+  }
+  syncSourceKindControls();
+  renderStructureInfo();
+  renderStatus();
+}
+
+function syncImportControls() {
+  for (const id of ["import-cif", "cif-file", "import-molecule", "molecule-file"]) {
+    document.getElementById(id).disabled = importInProgress;
+  }
+  for (const button of document.querySelectorAll(".structure-kind-button")) {
+    button.disabled = importInProgress;
+  }
+}
+
+function beginImport(message) {
+  importInProgress = true;
+  const requestId = ++importRequestId;
+  syncImportControls();
+  document.getElementById("status").textContent = message;
+  return requestId;
+}
+
+function finishImport(requestId) {
+  if (requestId !== importRequestId) return;
+  importInProgress = false;
+  syncImportControls();
+}
+
+function isCurrentImport(requestId) {
+  return requestId === importRequestId;
 }
 
 function syncOperationSelection() {
@@ -940,6 +1073,7 @@ function renderOperationDetails() {
     let lines = [];
     lines.push(`${stripHtml(optionText(op))}`);
     lines.push(`point group: ${(state.metadata && state.metadata.symmetry_label) || ""}`);
+    if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
     lines.push("W (cart):");
     if (Wc) {
       for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
@@ -956,6 +1090,7 @@ function renderOperationDetails() {
 
   let lines = [];
   lines.push(`${stripHtml(optionText(op))}`);
+  if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
   lines.push("W (frac):");
   for (const row of W) lines.push(`  [${row.map(fmtMatVal).join("  ")}]`);
   lines.push(`t (frac): ${t.map(fmtFrac).join(",  ")}`);
@@ -1102,6 +1237,10 @@ function syncProjectionButtons() {
   }
 }
 
+function syncImproperModeControl() {
+  document.getElementById("improper-mode").value = state.improper_mode || "auto";
+}
+
 function syncAtomModeButtons() {
   const scope = state.scope || "representative";
   for (const button of document.querySelectorAll(".atom-mode-button")) {
@@ -1148,9 +1287,10 @@ function onAtomSelectionChange() {
 }
 
 function renderStatus() {
-  if (state.structure_loaded === false || (state.source_kind || "") === "empty") {
+  if (!structureLoadedForSelectedKind()) {
+    const config = sourceKindConfig(selectedStructureKind);
     document.getElementById("status").textContent =
-      "No structure loaded. Open CIF, Open XYZ, or use Open path.\\n" +
+      `No ${selectedStructureKind} loaded. Open a ${config.inputLabel}, JSON, or path.\\n` +
       `import: ${state.import_status || "-"}`;
     return;
   }
@@ -1193,30 +1333,32 @@ function applyViewCenter() {
 
 function syncSourceKindControls() {
   sourceKind = state.source_kind || "crystal";
-  const loaded = state.structure_loaded !== false && sourceKind !== "empty";
-  document.getElementById("workspace").hidden = !loaded;
-  document.getElementById("start-panel").hidden = loaded;
-  document.getElementById("import-cif").hidden = loaded && sourceKind === "molecule";
-  document.getElementById("cif-file").hidden = loaded && sourceKind === "molecule";
-  document.getElementById("import-molecule").hidden = loaded && sourceKind === "crystal";
-  document.getElementById("molecule-file").hidden = loaded && sourceKind === "crystal";
-  document.getElementById("mode-controls").hidden = !loaded || sourceKind !== "crystal";
-  document.getElementById("display-block").hidden = !loaded || sourceKind !== "crystal";
+  syncStructureKindButtons();
+  const loadedForSelected = structureLoadedForSelectedKind();
+  document.getElementById("workspace").hidden = !loadedForSelected;
+  document.getElementById("start-panel").hidden = loadedForSelected;
+  document.getElementById("import-cif").hidden = selectedStructureKind !== "crystal";
+  document.getElementById("cif-file").hidden = selectedStructureKind !== "crystal";
+  document.getElementById("import-molecule").hidden = selectedStructureKind !== "molecule";
+  document.getElementById("molecule-file").hidden = selectedStructureKind !== "molecule";
+  document.getElementById("mode-controls").hidden = !loadedForSelected || sourceKind !== "crystal";
+  document.getElementById("display-block").hidden = !loadedForSelected || sourceKind !== "crystal";
   document.getElementById("unit-cell-atoms").hidden = sourceKind !== "crystal";
+  const config = sourceKindConfig(sourceKind);
   document.querySelector("#standard-panel .section-title").textContent =
-    sourceKind === "molecule" ? "Molecular Operations" : "Operations";
-  if (sourceKind !== "crystal" && activeMode === "custom") {
+    config.operationPanelTitle;
+  if ((!loadedForSelected || sourceKind !== "crystal") && activeMode === "custom") {
     activeMode = "standard";
     syncActiveModeControls();
   }
   const label = document.getElementById("view-center-label");
   if (sourceKind !== "crystal") {
-    label.textContent = "View center [x y z] — Cartesian Å";
+    label.textContent = config.viewCenterLabel;
     for (const id of ["view-center-x", "view-center-y", "view-center-z"]) {
       document.getElementById(id).value = "0";
     }
   } else {
-    label.textContent = "View center [x y z] — fractional";
+    label.textContent = config.viewCenterLabel;
   }
 }
 
@@ -1229,86 +1371,77 @@ async function postState(update) {
   syncSpeedButtons();
   syncDisplayButtons();
   syncProjectionButtons();
+  syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
   syncGifSavingControls();
   renderElementColorControls();
+  renderDirectionFilter();
   renderOperations();
   renderAtoms();
+  renderStructureInfo();
   renderStatus();
   renderOperationDetails();
 }
 
 async function importCifFile() {
-  if (importInProgress) return;
+  if (importInProgress) {
+    document.getElementById("status").textContent = "Loading in progress. Wait for it to finish.";
+    return;
+  }
   const input = document.getElementById("cif-file");
   const file = input.files && input.files[0];
   if (!file) {
     document.getElementById("status").textContent = "Choose a CIF file first.";
     return;
   }
-  importInProgress = true;
-  document.getElementById("status").textContent = `Loading ${file.name}...`;
+  const requestId = beginImport(`Loading ${file.name}...`);
   try {
     const content = await file.text();
     const result = await api("/api/import_cif", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({filename: file.name, content}),
+      body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
+    if (!isCurrentImport(requestId)) return;
     applyLoadedStructure(result, "CIF import failed");
   } finally {
-    importInProgress = false;
+    finishImport(requestId);
   }
 }
 
 async function importMoleculeFile() {
-  if (importInProgress) return;
+  if (importInProgress) {
+    document.getElementById("status").textContent = "Loading in progress. Wait for it to finish.";
+    return;
+  }
   const input = document.getElementById("molecule-file");
   const file = input.files && input.files[0];
   if (!file) {
     document.getElementById("status").textContent = "Choose an XYZ file first.";
     return;
   }
-  importInProgress = true;
-  document.getElementById("status").textContent = `Loading ${file.name}...`;
+  const requestId = beginImport(`Loading ${file.name}...`);
   try {
     const content = await file.text();
     const result = await api("/api/import_molecule", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({filename: file.name, content}),
+      body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
+    if (!isCurrentImport(requestId)) return;
     applyLoadedStructure(result, "Molecule import failed");
   } finally {
-    importInProgress = false;
-  }
-}
-
-async function openStructurePath() {
-  if (importInProgress) return;
-  const input = document.getElementById("open-path-input");
-  const path = input.value.trim();
-  if (!path) {
-    document.getElementById("status").textContent = "Enter a WSL-readable CIF or JSON path.";
-    return;
-  }
-  importInProgress = true;
-  document.getElementById("status").textContent = `Opening ${path}...`;
-  try {
-    const result = await api("/api/open_path", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({path}),
-    });
-    applyLoadedStructure(result, "Open path failed");
-    rememberOpenPath(path);
-  } finally {
-    importInProgress = false;
+    finishImport(requestId);
   }
 }
 
 function applyLoadedStructure(result, fallbackError) {
+  if (result.stale) {
+    state = result.state || state;
+    renderStatus();
+    return;
+  }
   if (!result.ok) {
     state = result.state || state;
     renderStatus();
@@ -1317,6 +1450,11 @@ function applyLoadedStructure(result, fallbackError) {
   operations = result.operations || [];
   atoms = result.atoms || [];
   state = result.state || {};
+  if (state.source_kind === "crystal" || state.source_kind === "molecule") {
+    selectedStructureKind = state.source_kind;
+  }
+  sourceKind = state.source_kind || "crystal";
+  setDefaultOperationSortForSourceKind();
   directionFilterValue = "";
   atomElementFilterValue = "";
   summariesReady = Boolean(state.summaries_ready);
@@ -1333,11 +1471,13 @@ function applyLoadedStructure(result, fallbackError) {
   syncSpeedButtons();
   syncDisplayButtons();
   syncProjectionButtons();
+  syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
   syncGifSavingControls();
   renderOperations();
   renderAtoms();
+  renderStructureInfo();
   renderStatus();
   renderOperationDetails();
 }
@@ -1374,8 +1514,10 @@ async function refreshState() {
     syncSpeedButtons();
     syncDisplayButtons();
     syncProjectionButtons();
+    syncImproperModeControl();
     syncAtomModeButtons();
     syncPlayToggleButton();
+    renderStructureInfo();
     renderStatus();
     renderOperationDetails();
     if (!summariesReady && state.summaries_ready) {
@@ -1391,7 +1533,14 @@ async function refreshState() {
   }
 }
 
-document.getElementById("operation-sort").addEventListener("change", renderOperations);
+document.getElementById("operation-sort").addEventListener("change", () => {
+  directionFilterValue = "";
+  renderDirectionFilter();
+  renderOperations();
+});
+for (const button of document.querySelectorAll(".structure-kind-button")) {
+  button.addEventListener("click", () => setStructureKind(button.dataset.kind));
+}
 document.getElementById("import-cif").addEventListener("click", () => {
   const input = document.getElementById("cif-file");
   input.value = "";
@@ -1411,18 +1560,6 @@ document.getElementById("molecule-file").addEventListener("change", () => {
   importMoleculeFile().catch(error => {
     document.getElementById("status").textContent = `Import error: ${error}`;
   });
-});
-document.getElementById("open-path").addEventListener("click", () => {
-  openStructurePath().catch(error => {
-    document.getElementById("status").textContent = `Open path error: ${error}`;
-  });
-});
-document.getElementById("open-path-input").addEventListener("keydown", event => {
-  if (event.key === "Enter") {
-    openStructurePath().catch(error => {
-      document.getElementById("status").textContent = `Open path error: ${error}`;
-    });
-  }
 });
 for (const button of document.querySelectorAll(".mode-button")) {
   button.addEventListener("click", () => setActiveMode(button.dataset.mode));
@@ -1459,6 +1596,13 @@ for (const button of document.querySelectorAll(".projection-button")) {
     playing: false,
   }));
 }
+document.getElementById("improper-mode").addEventListener("change", event => {
+  postState({
+    improper_mode: event.target.value,
+    playing: false,
+    reset: true,
+  });
+});
 document.getElementById("view-direction").addEventListener("click", () => {
   postState({view_request_id: Date.now()});
 });
@@ -1719,8 +1863,6 @@ document.getElementById("btn-clear-check").addEventListener("click", async () =>
 async function boot() {
   const st = document.getElementById("status");
   st.textContent = "Connecting…";
-  loadOpenPathHistory();
-  renderOpenPathHistory();
   const [info, atomInfo, stateInfo] = await Promise.all([
     api("/api/operations"),
     api("/api/atoms"),
@@ -1732,6 +1874,11 @@ async function boot() {
   atoms = atomInfo.atoms;
   st.textContent = `Loaded ${operations.length} operations, ${atoms.length} atoms`;
   state = stateInfo;
+  if (state.source_kind === "crystal" || state.source_kind === "molecule") {
+    selectedStructureKind = state.source_kind;
+  }
+  sourceKind = state.source_kind || "crystal";
+  setDefaultOperationSortForSourceKind();
   syncSourceKindControls();
   renderDirectionFilter();
   renderAtomElementFilter();
@@ -1739,11 +1886,13 @@ async function boot() {
   syncSpeedButtons();
   syncDisplayButtons();
   syncProjectionButtons();
+  syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
   syncGifSavingControls();
   renderOperations();
   renderAtoms();
+  renderStructureInfo();
   renderStatus();
   renderOperationDetails();
   setInterval(() => {
@@ -1759,3 +1908,5 @@ boot().catch(error => {
 </body>
 </html>
 """
+
+HTML = HTML.replace("__STRUCTURE_KIND_CONFIG__", source_kind_ui_config_json())

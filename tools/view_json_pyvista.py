@@ -14,6 +14,7 @@ import numpy as np
 import pyvista as pv
 
 from crystal_viewer.viewer.atom_style import (
+    ATOM_MESH_STYLE,
     atom_color,
     atom_radius,
     color_to_rgb,
@@ -194,7 +195,7 @@ def add_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "ex
             theta_resolution=24,
             phi_resolution=16,
         )
-        plotter.add_mesh(sphere, color=color, smooth_shading=True)
+        plotter.add_mesh(sphere, color=color, **ATOM_MESH_STYLE)
 
 
 def add_animated_atoms(
@@ -219,7 +220,9 @@ def add_animated_atoms(
             phi_resolution=phi_resolution,
         )
         mesh = base.copy()
-        actor = plotter.add_mesh(mesh, color=color, smooth_shading=smooth_shading)
+        mesh_style = dict(ATOM_MESH_STYLE)
+        mesh_style["smooth_shading"] = smooth_shading
+        actor = plotter.add_mesh(mesh, color=color, **mesh_style)
         actor.SetPosition(*center)
         animated.append(
             {
@@ -504,6 +507,7 @@ def animation_paths(
     animation_scope: str = "all",
     representative_atom: int | None = None,
     selected_atoms: tuple[int, ...] = (),
+    improper_mode: str = "auto",
 ) -> dict[int, dict]:
     atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
     axis, plane, center, reference_entry, shared_shift, shared_angle = select_animation_context(
@@ -561,6 +565,8 @@ def animation_paths(
             center=center,
             angle_override=shared_angle,
             translation_override=translation_override,
+            improper_mode=improper_mode,
+            source_kind=str(render_data.get("metadata", {}).get("mode", "")),
         )
     return paths
 
@@ -721,6 +727,8 @@ def animation_context_score(
             center=center,
             angle_override=shared_angle,
             translation_override=translation_override,
+            improper_mode="auto",
+            source_kind=str(render_data.get("metadata", {}).get("mode", "")),
         )
         worst = max(worst, max_path_residual(path))
         if worst >= threshold:
@@ -1165,6 +1173,8 @@ def build_operation_path(
     center: dict | None,
     angle_override: float | None = None,
     translation_override: np.ndarray | None = None,
+    improper_mode: str = "auto",
+    source_kind: str = "",
 ) -> dict:
     kind = str(operation["kind"])
     axis = effective_rotation_axis(operation, axis, center)
@@ -1190,7 +1200,17 @@ def build_operation_path(
     if "glide" in kind:
         return glide_path(start, target, plane, translation_override=translation_override)
     if "rotoinversion" in kind or "rotoreflection" in kind or "improper" in kind:
-        return improper_path(start, target, operation, axis, plane, center, angle_override=angle_override)
+        return improper_path(
+            start,
+            target,
+            operation,
+            axis,
+            plane,
+            center,
+            angle_override=angle_override,
+            improper_mode=improper_mode,
+            source_kind=source_kind,
+        )
     if kind.startswith("rotation"):
         return rotation_path(start, target, operation, axis, angle_override=angle_override)
     if kind == "mirror":
@@ -1209,7 +1229,7 @@ def rotation_path(
     angle_override: float | None = None,
 ) -> dict:
     angle_deg = operation_angle_deg(operation)
-    if axis is None or angle_deg is None:
+    if axis is None or (angle_deg is None and angle_override is None):
         return translation_path(start, target)
     axis_point = np.asarray(axis["point_cart"], dtype=float)
     axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
@@ -1313,14 +1333,21 @@ def improper_path(
     center: dict | None,
     *,
     angle_override: float | None = None,
+    improper_mode: str = "auto",
+    source_kind: str = "",
 ) -> dict:
     axis = effective_rotation_axis(operation, axis, center)
+    mode = preferred_improper_mode(operation, improper_mode, source_kind)
+    plane = plane or improper_reflection_plane(axis)
+    center = center or improper_inversion_center(axis)
+    if angle_override is None:
+        angle_override = improper_rotation_angle(operation, axis, mode)
     rotated = rotation_path(start, target, operation, axis, angle_override=angle_override)
     if rotated["type"] != "rotation":
-        if "rotoinversion" in str(operation["kind"]):
+        if mode == "rotoinversion":
             return inversion_path(start, target, center)
         return mirror_path(start, target, plane)
-    if "rotoinversion" in str(operation["kind"]):
+    if mode == "rotoinversion":
         if center is None:
             return translation_path(start, target)
         return {
@@ -1332,19 +1359,56 @@ def improper_path(
             "angle": rotated["angle"],
             "center": np.asarray(center["point_cart"], dtype=float),
         }
+    if plane is None:
+        return translation_path(start, target)
+    return {
+        "type": "rotoreflection",
+        "start": start,
+        "target": target,
+        "axis_point": rotated["axis_point"],
+        "axis_direction": rotated["axis_direction"],
+        "angle": rotated["angle"],
+        "plane_point": np.asarray(plane["point_cart"], dtype=float),
+        "plane_normal": normalize(np.asarray(plane["normal_cart"], dtype=float)),
+    }
+
+
+def preferred_improper_mode(operation: dict, requested: str, source_kind: str) -> str:
+    if requested in ("rotoreflection", "rotoinversion"):
+        return requested
+    kind = str(operation.get("kind", ""))
+    if "rotoreflection" in kind or "improper" in kind:
+        return "rotoreflection" if source_kind == "molecule" else "rotoinversion"
+    return "rotoinversion"
+
+
+def improper_reflection_plane(axis: dict | None) -> dict | None:
+    if axis is None:
+        return None
+    return {
+        "point_cart": axis["point_cart"],
+        "normal_cart": axis["direction_cart"],
+    }
+
+
+def improper_inversion_center(axis: dict | None) -> dict | None:
+    if axis is None:
+        return None
+    return {"point_cart": axis["point_cart"]}
+
+
+def improper_rotation_angle(operation: dict, axis: dict | None, mode: str) -> float | None:
+    if axis is None or operation.get("matrix_cart") is None:
+        return None
+    matrix = np.asarray(operation["matrix_cart"], dtype=float)
+    axis_direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
+    if mode == "rotoreflection":
+        normal = axis_direction.reshape(3, 1)
+        reflection = np.eye(3) - 2.0 * (normal @ normal.T)
+        rotation = reflection @ matrix
     else:
-        if plane is None:
-            return translation_path(start, target)
-        return {
-            "type": "rotoreflection",
-            "start": start,
-            "target": target,
-            "axis_point": rotated["axis_point"],
-            "axis_direction": rotated["axis_direction"],
-            "angle": rotated["angle"],
-            "plane_point": np.asarray(plane["point_cart"], dtype=float),
-            "plane_normal": normalize(np.asarray(plane["normal_cart"], dtype=float)),
-        }
+        rotation = -matrix
+    return signed_rotation_angle_from_matrix(rotation, axis_direction)
 
 
 def translation_path(start: np.ndarray, target: np.ndarray) -> dict:

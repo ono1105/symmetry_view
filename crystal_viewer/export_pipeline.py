@@ -6,8 +6,9 @@ from typing import Any
 
 from .atom_mapping import atom_mappings_from_analysis
 from .json_export import export_payload, write_export_json
-from .molecule_analysis import analyze_molecule_file
+from .molecule_analysis import analyze_molecule_file, warm_molecule_analysis
 from .render_data import render_data_from_analysis
+from .source_kinds import SOURCE_KIND_CRYSTAL, SOURCE_KIND_MOLECULE
 from .structure_analysis import analyze_cif
 
 
@@ -28,9 +29,9 @@ def default_json_output_path(
 
 
 def analyze_for_export(path: str | Path, *, mode: str):
-    if mode == "crystal":
+    if mode == SOURCE_KIND_CRYSTAL:
         return analyze_cif(path)
-    if mode == "molecule":
+    if mode == SOURCE_KIND_MOLECULE:
         return analyze_molecule_file(path)
     raise ValueError(f"unsupported export mode: {mode}")
 
