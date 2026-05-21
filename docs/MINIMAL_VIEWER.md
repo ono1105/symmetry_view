@@ -85,7 +85,7 @@ Open the browser-controlled viewer:
 .venv/bin/python tools/view_json_server.py exports/json/jacobsite.json
 ```
 
-If no input path is provided, the viewer starts from `exports/json/halite.json` when available:
+If no input path is provided, the viewer starts with no structure loaded. Use the browser controls to open a CIF, XYZ, JSON, or WSL-readable path:
 
 ```bash
 .venv/bin/python tools/view_json_server.py --no-browser

@@ -43,6 +43,7 @@ DEFAULT_STARTER_PATHS = (
     Path("exports/json/f2_pd.json"),
     Path("exports/json/jacobsite.json"),
 )
+EMPTY_VIEWER_JSON_PATH = Path(tempfile.gettempdir()) / "symmetry_view_empty.json"
 
 
 class ViewerSession:
@@ -99,6 +100,8 @@ def initial_state_for_payload(
         "playing": False,
         "reset": True,
         "source_kind": payload.get("source_kind", render_data.get("metadata", {}).get("mode", "crystal")),
+        "structure_loaded": bool(payload.get("structure_loaded", True)),
+        "metadata": render_data.get("metadata", {}),
         "scope": "displayed",
         "selected_atoms": selected_atoms,
         "element_colors": {},
@@ -125,6 +128,67 @@ def initial_state_for_payload(
         "json_path": str(preserved.get("json_path", "")),
         "summaries_ready": True,
     }
+
+
+def empty_viewer_payload() -> dict:
+    return {
+        "schema_version": 4,
+        "source_kind": "empty",
+        "structure_loaded": False,
+        "render_data": {
+            "metadata": {
+                "mode": "empty",
+                "source_file": "",
+                "formula": "No structure",
+                "symmetry_label": "",
+                "operation_count": 1,
+            },
+            "atoms": [],
+            "asymmetric_atoms": [],
+            "operations": [
+                {
+                    "index": 0,
+                    "label": "0: load a structure",
+                    "kind": "identity",
+                    "order": 1,
+                    "angle_deg": 0.0,
+                    "symbol": "load",
+                    "matrix_frac": None,
+                    "translation_frac": None,
+                    "matrix_cart": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    "translation_cart": [0.0, 0.0, 0.0],
+                }
+            ],
+            "axes": [],
+            "planes": [],
+            "centers": [],
+            "unit_cell": None,
+            "bounds_min": [0.0, 0.0, 0.0],
+            "bounds_max": [1.0, 1.0, 1.0],
+        },
+        "atom_mappings": {
+            "mode": "empty",
+            "complete": True,
+            "incomplete_operation_indices": [],
+            "mappings": [
+                {
+                    "mode": "empty",
+                    "operation_index": 0,
+                    "operation_kind": "identity",
+                    "complete": True,
+                    "atom_to_atom": [],
+                    "max_distance": 0.0,
+                    "unmatched_atoms": [],
+                    "entries": [],
+                }
+            ],
+        },
+    }
+
+
+def write_empty_viewer_json() -> Path:
+    EMPTY_VIEWER_JSON_PATH.write_text(json.dumps(empty_viewer_payload(), indent=2), encoding="utf-8")
+    return EMPTY_VIEWER_JSON_PATH
 
 
 def atom_api_items(atoms: list[dict]) -> list[dict]:
@@ -372,6 +436,7 @@ def make_handler(
                     preserved=preserved,
                 )
                 next_state["reload_request_id"] = int(shared_state.get("reload_request_id") or 0) + 1
+                next_state["structure_loaded"] = True
                 next_state["import_status"] = import_status
                 next_state["json_path"] = str(json_path)
                 shared_state.clear()
@@ -548,7 +613,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    input_path = args.input_path if args.input_path is not None else default_starter_path()
+    input_path = args.input_path if args.input_path is not None else write_empty_viewer_json()
     json_path = resolve_viewer_json_path(
         input_path,
         json_output=args.json_output,

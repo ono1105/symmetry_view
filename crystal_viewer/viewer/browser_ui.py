@@ -431,7 +431,11 @@ HTML = """<!doctype html>
       </div>
     </div>
   </div>
-  <div class="grid">
+  <section class="panel" id="start-panel" hidden>
+    <h2 class="section-title">Open Structure</h2>
+    <p class="hint">Open a CIF for crystal symmetry, an XYZ for molecular point-group symmetry, or paste a WSL-readable path.</p>
+  </section>
+  <div class="grid" id="workspace">
     <div class="left-stack">
     <section class="panel" id="standard-panel">
       <h2 class="section-title">Operations</h2>
@@ -668,14 +672,16 @@ HTML = """<!doctype html>
             <button id="apply-view-center" class="secondary">Apply center</button>
           </div>
         </div>
-        <h2 class="section-title">Display</h2>
-        <label>Range</label>
-        <div class="button-row flush" id="display-controls">
-          <button class="secondary display-button selected" data-display-mode="source">Unit cell</button>
-          <button class="secondary display-button" data-display-mode="expanded_quarter">±1/4</button>
-          <button class="secondary display-button" data-display-mode="expanded_half">±1/2</button>
-          <button class="secondary display-button" data-display-mode="expanded_0_75">±3/4</button>
-          <button class="secondary display-button" data-display-mode="expanded_1_0">±1</button>
+        <div id="display-block">
+          <h2 class="section-title">Display</h2>
+          <label>Range</label>
+          <div class="button-row flush" id="display-controls">
+            <button class="secondary display-button selected" data-display-mode="source">Unit cell</button>
+            <button class="secondary display-button" data-display-mode="expanded_quarter">±1/4</button>
+            <button class="secondary display-button" data-display-mode="expanded_half">±1/2</button>
+            <button class="secondary display-button" data-display-mode="expanded_0_75">±3/4</button>
+            <button class="secondary display-button" data-display-mode="expanded_1_0">±1</button>
+          </div>
         </div>
       </section>
       <section class="panel">
@@ -720,6 +726,9 @@ async function api(path, options) {
 }
 
 function optionText(operation) {
+  if (sourceKind === "molecule") {
+    return `op ${operation.index}: ${formatSymbol(operation.display_symbol || operation.symbol)} ${operation.kind || ""}`;
+  }
   const element = operation.element_summary ? ` | ${operation.element_summary}` : "";
   return `op ${operation.index}: ${formatSymbol(operation.display_symbol || operation.symbol)}${element}`;
 }
@@ -925,6 +934,22 @@ function renderOperationDetails() {
   }
   const op = operations.find(o => o.index === state.operation_index);
   if (!op) { div.textContent = ""; return; }
+  if (sourceKind === "molecule") {
+    const Wc = op.matrix_cart;
+    const tc = op.translation_cart;
+    let lines = [];
+    lines.push(`${stripHtml(optionText(op))}`);
+    lines.push(`point group: ${(state.metadata && state.metadata.symmetry_label) || ""}`);
+    lines.push("W (cart):");
+    if (Wc) {
+      for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
+    }
+    if (tc && tc.some(v => Math.abs(v) > 1e-8)) {
+      lines.push(`t (cart): ${tc.map(v => v.toFixed(4)).join(",  ")} Å`);
+    }
+    div.textContent = lines.join("\\n");
+    return;
+  }
   const W = op.matrix_frac;
   const t = op.translation_frac;
   if (!W || !t) { div.textContent = ""; return; }
@@ -1123,6 +1148,12 @@ function onAtomSelectionChange() {
 }
 
 function renderStatus() {
+  if (state.structure_loaded === false || (state.source_kind || "") === "empty") {
+    document.getElementById("status").textContent =
+      "No structure loaded. Open CIF, Open XYZ, or use Open path.\\n" +
+      `import: ${state.import_status || "-"}`;
+    return;
+  }
   const operation = operations.find(op => op.index === state.operation_index);
   const selected = state.selected_atoms && state.selected_atoms.length
     ? state.selected_atoms.join(", ")
@@ -1162,6 +1193,22 @@ function applyViewCenter() {
 
 function syncSourceKindControls() {
   sourceKind = state.source_kind || "crystal";
+  const loaded = state.structure_loaded !== false && sourceKind !== "empty";
+  document.getElementById("workspace").hidden = !loaded;
+  document.getElementById("start-panel").hidden = loaded;
+  document.getElementById("import-cif").hidden = loaded && sourceKind === "molecule";
+  document.getElementById("cif-file").hidden = loaded && sourceKind === "molecule";
+  document.getElementById("import-molecule").hidden = loaded && sourceKind === "crystal";
+  document.getElementById("molecule-file").hidden = loaded && sourceKind === "crystal";
+  document.getElementById("mode-controls").hidden = !loaded || sourceKind !== "crystal";
+  document.getElementById("display-block").hidden = !loaded || sourceKind !== "crystal";
+  document.getElementById("unit-cell-atoms").hidden = sourceKind !== "crystal";
+  document.querySelector("#standard-panel .section-title").textContent =
+    sourceKind === "molecule" ? "Molecular Operations" : "Operations";
+  if (sourceKind !== "crystal" && activeMode === "custom") {
+    activeMode = "standard";
+    syncActiveModeControls();
+  }
   const label = document.getElementById("view-center-label");
   if (sourceKind !== "crystal") {
     label.textContent = "View center [x y z] — Cartesian Å";
