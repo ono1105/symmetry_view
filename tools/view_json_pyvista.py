@@ -268,8 +268,15 @@ def add_symmetry_elements(
     operation_index: int | None,
     element_index: int | None = None,
     display_mode: str = "source",
+    improper_mode: str = "auto",
 ) -> list:
-    axes, planes, centers = display_symmetry_elements(render_data, atom_mappings, operation_index, element_index)
+    axes, planes, centers = display_symmetry_elements(
+        render_data,
+        atom_mappings,
+        operation_index,
+        element_index,
+        improper_mode=improper_mode,
+    )
     return add_symmetry_element_actors(plotter, render_data, axes, planes, centers, display_mode=display_mode)
 
 
@@ -335,9 +342,11 @@ def display_symmetry_elements(
     atom_mappings: dict | None,
     operation_index: int | None,
     element_index: int | None,
+    *,
+    improper_mode: str = "auto",
 ) -> tuple[list[dict], list[dict], list[dict]]:
+    operation = operation_by_index(render_data["operations"], operation_index)
     if operation_index is not None and element_index is None and atom_mappings is not None:
-        operation = operation_by_index(render_data["operations"], operation_index)
         mapping = selected_mapping(atom_mappings, operation_index)
         if operation is not None and mapping is not None:
             atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
@@ -349,17 +358,56 @@ def display_symmetry_elements(
                 element_index=None,
                 representative_atom=None,
             )
-            return (
+            return visual_improper_elements(
+                render_data,
+                operation,
                 [axis] if axis is not None else [],
                 [plane] if plane is not None else [],
                 [center] if center is not None else [],
+                improper_mode=improper_mode,
             )
 
-    return (
+    axes, planes, centers = (
         selected_elements(render_data["axes"], operation_index, element_index),
         selected_elements(render_data["planes"], operation_index, element_index),
         selected_elements(render_data["centers"], operation_index, element_index),
     )
+    if operation is None:
+        return axes, planes, centers
+    return visual_improper_elements(
+        render_data,
+        operation,
+        axes,
+        planes,
+        centers,
+        improper_mode=improper_mode,
+    )
+
+
+def visual_improper_elements(
+    render_data: dict,
+    operation: dict,
+    axes: list[dict],
+    planes: list[dict],
+    centers: list[dict],
+    *,
+    improper_mode: str,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    kind = str(operation.get("kind", ""))
+    if "rotoinversion" not in kind and "rotoreflection" not in kind and "improper" not in kind:
+        return axes, planes, centers
+
+    mode = preferred_improper_mode(operation, improper_mode, render_source_kind(render_data))
+    axis = axes[0] if axes else None
+    if mode == "rotoreflection" and axis is not None and not planes:
+        plane = improper_reflection_plane(axis)
+        if plane is not None:
+            planes = [plane]
+    elif mode == "rotoinversion" and axis is not None and not centers:
+        center = improper_inversion_center(axis)
+        if center is not None:
+            centers = [center]
+    return axes, planes, centers
 
 
 def add_displacements(
@@ -1382,12 +1430,22 @@ def preferred_improper_mode(operation: dict, requested: str, source_kind: str) -
     return "rotoinversion"
 
 
+def render_source_kind(render_data: dict) -> str:
+    return str((render_data.get("metadata") or {}).get("mode") or "crystal")
+
+
 def improper_reflection_plane(axis: dict | None) -> dict | None:
     if axis is None:
         return None
+    normal = normalize(np.asarray(axis["direction_cart"], dtype=float))
+    basis1, basis2 = plane_basis_from_normal_cart(normal)
     return {
         "point_cart": axis["point_cart"],
-        "normal_cart": axis["direction_cart"],
+        "normal_cart": normal,
+        "basis1_cart": basis1,
+        "basis2_cart": basis2,
+        "label": "rotoreflection mirror plane",
+        "operation_indices": axis.get("operation_indices", ()),
     }
 
 
@@ -1395,6 +1453,16 @@ def improper_inversion_center(axis: dict | None) -> dict | None:
     if axis is None:
         return None
     return {"point_cart": axis["point_cart"]}
+
+
+def plane_basis_from_normal_cart(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    normal = normalize(normal)
+    helper = np.array([1.0, 0.0, 0.0])
+    if abs(float(np.dot(normal, helper))) > 0.9:
+        helper = np.array([0.0, 1.0, 0.0])
+    basis1 = normalize(np.cross(normal, helper))
+    basis2 = normalize(np.cross(normal, basis1))
+    return basis1, basis2
 
 
 def improper_rotation_angle(operation: dict, axis: dict | None, mode: str) -> float | None:

@@ -23,7 +23,6 @@ from crystal_viewer.export_pipeline import (
     default_json_output_path,
     export_analysis_to_json,
     slug_from_path,
-    warm_molecule_analysis,
 )
 from crystal_viewer.source_kinds import (
     SOURCE_KIND_CRYSTAL,
@@ -527,13 +526,6 @@ def start_server(host: str, port: int, handler: type[BaseHTTPRequestHandler]) ->
     return server
 
 
-def prewarm_browser_imports() -> None:
-    try:
-        warm_molecule_analysis()
-    except Exception as exc:
-        print(f"Molecule import warmup skipped: {exc}", flush=True)
-
-
 def export_analysis_to_json_worker(
     input_path: Path,
     *,
@@ -714,7 +706,6 @@ def main() -> int:
         indent=args.indent,
         default_display_mode=display_mode,
     )
-    prewarm_browser_imports()
     app = BrowserControlledViewer(
         json_path,
         display_mode=display_mode,

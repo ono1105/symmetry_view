@@ -6,7 +6,7 @@ from typing import Any
 
 from .atom_mapping import atom_mappings_from_analysis
 from .json_export import export_payload, write_export_json
-from .molecule_analysis import analyze_molecule_file, warm_molecule_analysis
+from .molecule_analysis import analyze_molecule_file
 from .render_data import render_data_from_analysis
 from .source_kinds import SOURCE_KIND_CRYSTAL, SOURCE_KIND_MOLECULE
 from .structure_analysis import analyze_cif

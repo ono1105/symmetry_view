@@ -21,26 +21,6 @@ from .structure_analysis import AnalysisError
 
 
 TOL = 1e-7
-_MOLECULE_ANALYSIS_WARMED = False
-
-
-def warm_molecule_analysis() -> None:
-    """Build the small pymatgen caches used on the first browser XYZ import."""
-    global _MOLECULE_ANALYSIS_WARMED
-    if _MOLECULE_ANALYSIS_WARMED:
-        return
-    methane = Molecule(
-        ["C", "H", "H", "H", "H"],
-        [
-            [0.0, 0.0, 0.0],
-            [0.629118, 0.629118, 0.629118],
-            [-0.629118, -0.629118, 0.629118],
-            [-0.629118, 0.629118, -0.629118],
-            [0.629118, -0.629118, -0.629118],
-        ],
-    )
-    analyze_molecule(methane)
-    _MOLECULE_ANALYSIS_WARMED = True
 
 
 def analyze_molecule_file(
@@ -245,11 +225,11 @@ def classify_molecular_operation(
     if np.linalg.norm(rotation + identity) < 1e-6:
         return "inversion"
     if det == 1:
-        return f"rotation_{order}"
+        return "rotation_unknown" if order is None else f"rotation_{order}"
     if det == -1 and abs(trace - 1.0) < 1e-3:
         return "mirror"
     if det == -1:
-        return f"improper_{order}"
+        return "improper_unknown" if order is None else f"improper_{order}"
     return "unknown"
 
 
@@ -261,9 +241,9 @@ def operation_symbol(kind: str, order: int | None) -> str:
     if kind == "mirror":
         return "sigma"
     if kind.startswith("rotation_"):
-        return f"C{order}"
+        return f"C{order}" if order is not None else "C∞"
     if kind.startswith("improper_"):
-        return f"S{order}"
+        return f"S{order}" if order is not None else "S∞"
     return kind
 
 

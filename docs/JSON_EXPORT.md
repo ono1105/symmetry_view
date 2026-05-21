@@ -22,13 +22,13 @@ Crystal:
 Molecule:
 
 ```bash
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/json/water.json
+.venv/bin/python tools/export_analysis_json.py examples/molecules/water.xyz --mode molecule -o exports/json/water.json
 ```
 
 Stdout export is also supported:
 
 ```bash
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule
+.venv/bin/python tools/export_analysis_json.py examples/molecules/water.xyz --mode molecule
 ```
 
 ## Top-Level Shape

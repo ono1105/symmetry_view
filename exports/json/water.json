@@ -4,7 +4,7 @@
   "render_data": {
     "metadata": {
       "mode": "molecule",
-      "source_file": "examples/water.xyz",
+      "source_file": "examples/molecules/water.xyz",
       "formula": "H2O",
       "symmetry_label": "C2v",
       "operation_count": 4

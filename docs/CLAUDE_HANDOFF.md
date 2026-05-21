@@ -51,7 +51,7 @@ tools/
 
 ```bash
 .venv/bin/python tools/analyze_structure.py examples/structures/jacobsite.cif
-.venv/bin/python tools/analyze_molecule.py examples/water.xyz
+.venv/bin/python tools/analyze_molecule.py examples/molecules/water.xyz
 .venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/json/f2_pd.json
 .venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --list-operations
 .venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --operation 25 --animate --animation-fps 6 --animation-speed 0.5

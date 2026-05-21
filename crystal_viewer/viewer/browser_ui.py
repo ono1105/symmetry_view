@@ -100,10 +100,6 @@ HTML = """<!doctype html>
       background: #7dd3fc;
       color: #081017;
     }
-    .overbar {
-      text-decoration: overline;
-      text-decoration-thickness: 1.5px;
-    }
     .operation-list {
       width: 100%;
       min-height: 280px;
@@ -790,7 +786,7 @@ function displayOperationSymbol(operation) {
   if (resolvedImproperMode() === "rotoreflection") {
     return order ? `S${order}` : (operation.display_symbol || operation.symbol || "");
   }
-  return order ? `<span class="overbar">${order}</span>` : (operation.display_symbol || operation.symbol || "");
+  return order ? `<span class="overline">${order}</span>` : (operation.display_symbol || operation.symbol || "");
 }
 
 function atomText(atom) {
@@ -1074,8 +1070,8 @@ function renderOperationDetails() {
     lines.push(`${stripHtml(optionText(op))}`);
     lines.push(`point group: ${(state.metadata && state.metadata.symmetry_label) || ""}`);
     if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
-    lines.push("W (cart):");
     if (Wc) {
+      lines.push("W (cart):");
       for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
     }
     if (tc && tc.some(v => Math.abs(v) > 1e-8)) {

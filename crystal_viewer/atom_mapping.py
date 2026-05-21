@@ -163,6 +163,7 @@ def molecule_operation_mapping(
     tolerance_cart: float,
 ) -> OperationAtomMapping:
     atoms = result.molecule.atoms
+    atoms_by_atomic_number = atoms_grouped_by_atomic_number(atoms)
     entries = []
     unmatched = []
 
@@ -172,7 +173,7 @@ def molecule_operation_mapping(
         target_atom, distance = find_matching_molecule_atom(
             transformed_cart,
             atom.atomic_number,
-            atoms,
+            atoms_by_atomic_number,
         )
         if target_atom is None or distance > tolerance_cart:
             unmatched.append(atom.index)
@@ -222,18 +223,23 @@ def find_matching_crystal_atom(
 def find_matching_molecule_atom(
     transformed_cart: np.ndarray,
     atomic_number: int,
-    atoms,
+    atoms_by_atomic_number,
 ):
     best_atom = None
     best_distance = float("inf")
-    for candidate in atoms:
-        if candidate.atomic_number != atomic_number:
-            continue
+    for candidate in atoms_by_atomic_number.get(atomic_number, ()):
         distance = np.linalg.norm(transformed_cart - np.asarray(candidate.cart, dtype=float))
         if distance < best_distance:
             best_atom = candidate
             best_distance = float(distance)
     return best_atom, best_distance
+
+
+def atoms_grouped_by_atomic_number(atoms) -> dict[int, tuple]:
+    grouped: dict[int, list] = {}
+    for atom in atoms:
+        grouped.setdefault(atom.atomic_number, []).append(atom)
+    return {atomic_number: tuple(items) for atomic_number, items in grouped.items()}
 
 
 def choose_nearest_periodic_image(

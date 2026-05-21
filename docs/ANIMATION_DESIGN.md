@@ -221,7 +221,7 @@ Minimum checks:
 
 ```bash
 .venv/bin/python -m py_compile tools/view_json_pyvista.py crystal_viewer/render_data.py
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/json/water.json
+.venv/bin/python tools/export_analysis_json.py examples/molecules/water.xyz --mode molecule -o exports/json/water.json
 .venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/json/f2_pd.json
 .venv/bin/python tools/view_json_pyvista.py exports/json/water.json --list-operations
 ```

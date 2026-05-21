@@ -145,6 +145,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if improper_mode != self.last_improper_mode:
             self.improper_mode = improper_mode
             self.last_improper_mode = improper_mode
+            self.clear_element_actor_cache()
             self.build_paths()
             reset = True
             should_render = True
@@ -346,9 +347,9 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 return
 
     def show_element_actors(self, operation_index: int) -> None:
-        cache_key = (operation_index, self.display_mode)
+        cache_key = (operation_index, self.display_mode, self.improper_mode)
         if cache_key not in self.element_actor_cache:
-            cached = self.element_context_cache.get(operation_index)
+            cached = self.element_context_cache.get(operation_index) if self.improper_mode == "auto" else None
             if cached is not None:
                 axes, planes, centers = cached
                 actors = viewer.add_symmetry_element_actors(
@@ -367,6 +368,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                     operation_index=operation_index,
                     element_index=None,
                     display_mode=self.display_mode,
+                    improper_mode=self.improper_mode,
                 )
             self.element_actor_cache[cache_key] = actors
         self.element_actors = self.element_actor_cache[cache_key]
@@ -501,13 +503,15 @@ class BrowserControlledViewer(NativePyVistaViewer):
             return center, direction, up, distance
 
         operation = self.current_operation()
-        axes, planes, centers = self.element_context_cache.get(operation["index"], (None, None, None))
+        cached = self.element_context_cache.get(operation["index"]) if self.improper_mode == "auto" else None
+        axes, planes, centers = cached if cached is not None else (None, None, None)
         if axes is None or planes is None or centers is None:
             axes, planes, centers = viewer.display_symmetry_elements(
                 self.render_data,
                 self.atom_mappings,
                 operation["index"],
                 element_index=None,
+                improper_mode=self.improper_mode,
             )
         direction = None
         if is_pure_translation_operation(operation):
@@ -648,7 +652,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
 
     def set_manual_view_center(self, center_frac: list[float] | tuple[float, ...] | None) -> None:
         if center_frac is None or len(center_frac) != 3:
-            raise ValueError("enter three fractional coordinates")
+            coordinate_label = "fractional" if self.render_data.get("unit_cell") else "Cartesian Å"
+            raise ValueError(f"enter three {coordinate_label} coordinates")
         center_frac_array = np.asarray(center_frac, dtype=float)
         if not np.all(np.isfinite(center_frac_array)):
             raise ValueError("view center must contain finite numbers")

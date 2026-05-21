@@ -10,15 +10,15 @@ Claude によるレビュー結果をまとめています。
 以下のツールが正常に動作することを確認しました。
 
 ```bash
-.venv/bin/python tools/analyze_molecule.py examples/water.xyz     # C2v
-.venv/bin/python tools/analyze_molecule.py examples/methane.xyz   # Td
+.venv/bin/python tools/analyze_molecule.py examples/molecules/water.xyz     # C2v
+.venv/bin/python tools/analyze_molecule.py examples/molecules/methane.xyz   # Td
 .venv/bin/python tools/analyze_structure.py examples/structures/f2_pd.cif           # P2_13, 12 ops, 24 axes
 .venv/bin/python tools/inspect_render_data.py examples/structures/f2_pd.cif --mode crystal
-.venv/bin/python tools/inspect_render_data.py examples/methane.xyz --mode molecule
+.venv/bin/python tools/inspect_render_data.py examples/molecules/methane.xyz --mode molecule
 .venv/bin/python tools/inspect_atom_mapping.py examples/structures/f2_pd.cif --mode crystal
-.venv/bin/python tools/inspect_atom_mapping.py examples/water.xyz --mode molecule
+.venv/bin/python tools/inspect_atom_mapping.py examples/molecules/water.xyz --mode molecule
 .venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
+.venv/bin/python tools/export_analysis_json.py examples/molecules/water.xyz --mode molecule -o exports/water.json
 ```
 
 ---
@@ -195,7 +195,7 @@ UI 実装時に `kind` + `order` から表示文字列を組み立てる関数�
 
 ```bash
 .venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
+.venv/bin/python tools/export_analysis_json.py examples/molecules/water.xyz --mode molecule -o exports/water.json
 ```
 
 両ファイルとも valid JSON であることを確認しました（`python -m json.tool` で検証済み）。
@@ -399,7 +399,7 @@ Codex に伝える際は「線形は一時的、すぐに arc へ切り替える
 
 ```bash
 .venv/bin/python -m py_compile crystal_viewer/render_data.py crystal_viewer/atom_mapping.py  # OK
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/water.json
+.venv/bin/python tools/export_analysis_json.py examples/molecules/water.xyz --mode molecule -o exports/water.json
 .venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/f2_pd.json
 .venv/bin/python tools/view_json_pyvista.py exports/water.json --list-operations   # 4 operations, all mapping=ok
 .venv/bin/python tools/view_json_pyvista.py exports/f2_pd.json --list-operations   # 12 operations, all mapping=ok
@@ -2186,3 +2186,134 @@ atom_colors_key    = tuple(sorted((str(key), str(value)) for key, value in atom_
 変更フラグを `shared_state` に持たせて差分があるときだけ更新する設計が望ましい。
 
 **確認事項:** `screw == 0, order == 2` が正当な 2_1 ケース（例: 投影が 1.0 周期にほぼ一致して mod 演算で 0 になった場合）を意図しているなら、コメントで明記すること。そうでなければ `return None` に修正。
+
+---
+
+## Claude レビュー (2026-05-21) — 分子ビューア追加後
+
+対象ファイル: `crystal_viewer/molecule_analysis.py`, `atom_mapping.py`, `render_data.py`, `viewer/browser_ui.py`, `viewer/pyvista_controller.py`, `tools/view_json_server.py`
+
+---
+
+### Bug (中): `operation_symbol` が "CNone" / "SNone" を返す（線形分子で発生の可能性）
+
+**場所:** `crystal_viewer/molecule_analysis.py:256-267`, `L244-252`
+
+`matrix_order` は order > 24 で `None` を返す。線形分子 (C∞v, D∞h) を pymatgen が高次回転で近似した場合に発生しうる。
+
+```python
+def classify_molecular_operation(...):
+    if det == 1:
+        return f"rotation_{order}"   # order=None → "rotation_None"
+    if det == -1:
+        return f"improper_{order}"   # order=None → "improper_None"
+
+def operation_symbol(kind, order):
+    if kind.startswith("rotation_"):
+        return f"C{order}"           # → "CNone"
+    if kind.startswith("improper_"):
+        return f"S{order}"           # → "SNone"
+```
+
+ミラー操作だけは `convert_operation` で `order is None` のガードあり (L145-146) だが、回転・不正回転には対応していない。
+
+**修正案:**
+```python
+def operation_symbol(kind: str, order: int | None) -> str:
+    ...
+    if kind.startswith("rotation_"):
+        return f"C{order}" if order is not None else "C∞"
+    if kind.startswith("improper_"):
+        return f"S{order}" if order is not None else "S∞"
+```
+
+---
+
+### Bug (小): `set_manual_view_center` のエラーメッセージが分子モードで誤り
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py:650-651`
+
+```python
+raise ValueError("enter three fractional coordinates")
+```
+
+分子モードでは `unit_cell is None` のとき入力値をデカルト Å として扱う (L656-657)。エラーメッセージが "fractional" と表示されるのは誤解を招く。
+
+**修正案:**
+```python
+label = "fractional" if self.render_data.get("unit_cell") else "Cartesian Å"
+raise ValueError(f"enter three {label} coordinates")
+```
+
+---
+
+### Bug (小): `renderOperationDetails` が分子モードで `Wc=null` のとき空ヘッダーを表示
+
+**場所:** `crystal_viewer/viewer/browser_ui.py:1077-1080`
+
+```js
+lines.push("W (cart):");
+if (Wc) {
+  for (const row of Wc) lines.push(...)   // Wc null のとき行列行が出ない
+}
+```
+
+通常 `render_data_from_molecule` は常に `matrix_cart` を設定するので発生しないが、防御的に：
+
+```js
+if (Wc) {
+  lines.push("W (cart):");
+  for (const row of Wc) lines.push(...)
+}
+```
+
+---
+
+### 効率・設計: `warm_molecule_analysis()` がブラウザ XYZ インポートに効かない
+
+**場所:** `tools/view_json_server.py:530-534`, `L537-562`
+
+ブラウザからの XYZ インポートは `export_analysis_to_json_worker` が **別プロセス** (`subprocess.run`) で実行する。
+`warm_molecule_analysis()` はサーバープロセスのメモリ内にだけキャッシュを温めるため、サブプロセスには恩恵がない。
+初回分子インポートは常にサブプロセス起動コスト（Python インタプリタ + pymatgen インポート）が上乗せされる。
+
+**改善案 (2択):**
+- 案A: サーバー内で直接 `export_analysis_to_json` を呼ぶ（エラー分離が失われる）
+- 案B: 起動時にバックグラウンドで `export_analysis_json.py --mode molecule /dev/null` 相当を1回走らせ `.pyc` キャッシュを生成（OS の disk cache 経由で次回起動が速くなる）
+
+---
+
+### 効率: `find_matching_molecule_atom` が O(N²M)
+
+**場所:** `crystal_viewer/atom_mapping.py:222-236`
+
+```python
+for candidate in atoms:
+    if candidate.atomic_number != atomic_number:
+        continue
+    distance = np.linalg.norm(...)
+```
+
+水・メタンでは問題ないが C60 (60原子, 120操作) では 7200 回のノルム計算が走る。
+要素別辞書で O(NM) に改善可能：
+
+```python
+# 事前に atoms_by_element: dict[int, list[AtomSite]] を構築してから渡す
+```
+
+---
+
+### 備考: CSS クラス `.overbar` と `.overline` の重複
+
+**場所:** `crystal_viewer/viewer/browser_ui.py:103`, `L350`
+
+どちらも `text-decoration: overline` で機能は同一。JS が `.overbar`、Python 生成 HTML が `.overline` を使う。バグではないが将来統一推奨。
+
+### Codex 対応 (2026-05-21)
+
+- `CNone` / `SNone` は妥当な指摘。`operation_symbol()` は order 不明時に `C∞` / `S∞` を返し、kind は `rotation_unknown` / `improper_unknown` として保持するよう修正。
+- 分子モードの手入力中心はデカルト Å として扱うため、エラーメッセージを `Cartesian Å` に変更。
+- `Wc=null` の防御として、分子詳細の `W (cart):` ヘッダーは行列がある場合だけ表示。
+- `warm_molecule_analysis()` はブラウザインポートのサブプロセスに効かないため削除。起動時の余計な事前処理も削除。
+- `find_matching_molecule_atom()` は操作ごとに元素別候補を事前構築し、対象元素だけを走査するよう変更。
+- `.overbar` / `.overline` は `.overline` に統一。

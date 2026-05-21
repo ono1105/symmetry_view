@@ -154,8 +154,7 @@ Representative input data:
 ```text
 examples/structures/
 examples/cif/
-examples/water.xyz
-examples/methane.xyz
+examples/molecules/
 ```
 
 Generated JSON samples:

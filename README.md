@@ -27,8 +27,10 @@ examples/
     f2_pd.cif
     jacobsite.cif
     mg2v2o7.cif
-  water.xyz
-  methane.xyz
+  molecules/
+    water.xyz
+    methane.xyz
+    ...
 
 exports/
   json/      共有用JSON
@@ -62,21 +64,21 @@ pip install -r requirements.txt
 分子解析:
 
 ```bash
-.venv/bin/python tools/analyze_molecule.py examples/water.xyz
+.venv/bin/python tools/analyze_molecule.py examples/molecules/water.xyz
 ```
 
 共通描画データ:
 
 ```bash
 .venv/bin/python tools/inspect_render_data.py examples/structures/f2_pd.cif --mode crystal
-.venv/bin/python tools/inspect_render_data.py examples/methane.xyz --mode molecule
+.venv/bin/python tools/inspect_render_data.py examples/molecules/methane.xyz --mode molecule
 ```
 
 原子対応:
 
 ```bash
 .venv/bin/python tools/inspect_atom_mapping.py examples/structures/f2_pd.cif --mode crystal
-.venv/bin/python tools/inspect_atom_mapping.py examples/water.xyz --mode molecule
+.venv/bin/python tools/inspect_atom_mapping.py examples/molecules/water.xyz --mode molecule
 ```
 
 JSON export:
@@ -85,7 +87,7 @@ JSON export:
 .venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/json/f2_pd.json
 .venv/bin/python tools/export_analysis_json.py examples/structures/jacobsite.cif --mode crystal -o exports/json/jacobsite.json
 .venv/bin/python tools/export_analysis_json.py examples/structures/mg2v2o7.cif --mode crystal -o exports/json/mg2v2o7.json
-.venv/bin/python tools/export_analysis_json.py examples/water.xyz --mode molecule -o exports/json/water.json
+.venv/bin/python tools/export_analysis_json.py examples/molecules/water.xyz --mode molecule -o exports/json/water.json
 ```
 
 最小表示:
