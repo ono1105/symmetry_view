@@ -177,8 +177,11 @@ HTML = """<!doctype html>
       flex-wrap: wrap;
     }
     .file-input {
-      max-width: 220px;
-      padding: 7px;
+      display: none;
+    }
+    .example-select {
+      min-width: 260px;
+      max-width: 340px;
     }
     .structure-summary {
       display: grid;
@@ -432,6 +435,8 @@ HTML = """<!doctype html>
       <button id="import-cif" class="secondary">Open CIF</button>
       <input id="molecule-file" class="file-input" type="file" accept=".xyz,.txt">
       <button id="import-molecule" class="secondary">Open XYZ</button>
+      <select id="example-select" class="example-select"></select>
+      <button id="open-example" class="secondary">Open Example</button>
       <div class="button-row flush" id="mode-controls">
         <button class="secondary mode-button selected" data-mode="standard">Symmetry operation</button>
         <button class="secondary mode-button" data-mode="custom">Custom operation</button>
@@ -736,6 +741,8 @@ let selectedStructureKind = "crystal";
 let importInProgress = false;
 let refreshInProgress = false;
 let importRequestId = 0;
+let exampleCatalog = {crystal: [], molecule: []};
+let selectedExamplePath = "";
 const STRUCTURE_KIND_UI = __STRUCTURE_KIND_CONFIG__;
 
 async function api(path, options) {
@@ -893,6 +900,7 @@ function sortableSymbol(operation) {
 }
 
 function operationFilterType() {
+  if (sourceKind === "molecule") return "symbol";
   return document.getElementById("operation-sort").value === "symbol" ? "symbol" : "direction";
 }
 
@@ -937,7 +945,7 @@ function sourceKindConfig(kind) {
 }
 
 function setDefaultOperationSortForSourceKind() {
-  document.getElementById("operation-sort").value = sourceKind === "molecule" ? "symbol" : "index";
+  document.getElementById("operation-sort").value = "index";
   directionFilterValue = "";
 }
 
@@ -997,17 +1005,39 @@ function setStructureKind(kind) {
     syncActiveModeControls();
   }
   syncSourceKindControls();
+  renderExampleOptions();
   renderStructureInfo();
   renderStatus();
 }
 
 function syncImportControls() {
-  for (const id of ["import-cif", "cif-file", "import-molecule", "molecule-file"]) {
+  for (const id of ["import-cif", "cif-file", "import-molecule", "molecule-file", "example-select", "open-example"]) {
     document.getElementById(id).disabled = importInProgress;
   }
   for (const button of document.querySelectorAll(".structure-kind-button")) {
     button.disabled = importInProgress;
   }
+}
+
+function renderExampleOptions() {
+  const select = document.getElementById("example-select");
+  const items = exampleCatalog[selectedStructureKind] || [];
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select example...";
+  select.appendChild(placeholder);
+  for (const item of items) {
+    const option = document.createElement("option");
+    option.value = item.path;
+    const formula = item.formula ? `${item.formula} ` : "";
+    const symmetry = item.symmetry ? ` — ${item.symmetry}` : "";
+    option.textContent = `${formula}${item.name}${symmetry}`;
+    select.appendChild(option);
+  }
+  const hasSelectedExample = items.some(item => item.path === selectedExamplePath);
+  select.value = hasSelectedExample ? selectedExamplePath : "";
+  document.getElementById("open-example").disabled = importInProgress || items.length === 0;
 }
 
 function beginImport(message) {
@@ -1286,7 +1316,7 @@ function renderStatus() {
   if (!structureLoadedForSelectedKind()) {
     const config = sourceKindConfig(selectedStructureKind);
     document.getElementById("status").textContent =
-      `No ${selectedStructureKind} loaded. Open a ${config.inputLabel}, JSON, or path.\\n` +
+      `No ${selectedStructureKind} loaded. Open an example or ${config.inputLabel}.\\n` +
       `import: ${state.import_status || "-"}`;
     return;
   }
@@ -1334,9 +1364,8 @@ function syncSourceKindControls() {
   document.getElementById("workspace").hidden = !loadedForSelected;
   document.getElementById("start-panel").hidden = loadedForSelected;
   document.getElementById("import-cif").hidden = selectedStructureKind !== "crystal";
-  document.getElementById("cif-file").hidden = selectedStructureKind !== "crystal";
   document.getElementById("import-molecule").hidden = selectedStructureKind !== "molecule";
-  document.getElementById("molecule-file").hidden = selectedStructureKind !== "molecule";
+  renderExampleOptions();
   document.getElementById("mode-controls").hidden = !loadedForSelected || sourceKind !== "crystal";
   document.getElementById("display-block").hidden = !loadedForSelected || sourceKind !== "crystal";
   document.getElementById("unit-cell-atoms").hidden = sourceKind !== "crystal";
@@ -1400,7 +1429,7 @@ async function importCifFile() {
       body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    applyLoadedStructure(result, "CIF import failed");
+    applyLoadedStructure(result, "CIF import failed", "");
   } finally {
     finishImport(requestId);
   }
@@ -1426,13 +1455,38 @@ async function importMoleculeFile() {
       body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    applyLoadedStructure(result, "Molecule import failed");
+    applyLoadedStructure(result, "Molecule import failed", "");
   } finally {
     finishImport(requestId);
   }
 }
 
-function applyLoadedStructure(result, fallbackError) {
+async function openSelectedExample() {
+  if (importInProgress) {
+    document.getElementById("status").textContent = "Loading in progress. Wait for it to finish.";
+    return;
+  }
+  const select = document.getElementById("example-select");
+  const path = select.value;
+  if (!path) {
+    document.getElementById("status").textContent = "Choose an example first.";
+    return;
+  }
+  const requestId = beginImport(`Loading ${path}...`);
+  try {
+    const result = await api("/api/open_example", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({kind: selectedStructureKind, path, request_id: requestId}),
+    });
+    if (!isCurrentImport(requestId)) return;
+    applyLoadedStructure(result, "Example load failed", path);
+  } finally {
+    finishImport(requestId);
+  }
+}
+
+function applyLoadedStructure(result, fallbackError, examplePath = "") {
   if (result.stale) {
     state = result.state || state;
     renderStatus();
@@ -1450,6 +1504,7 @@ function applyLoadedStructure(result, fallbackError) {
     selectedStructureKind = state.source_kind;
   }
   sourceKind = state.source_kind || "crystal";
+  selectedExamplePath = examplePath || "";
   setDefaultOperationSortForSourceKind();
   directionFilterValue = "";
   atomElementFilterValue = "";
@@ -1555,6 +1610,11 @@ document.getElementById("import-molecule").addEventListener("click", () => {
 document.getElementById("molecule-file").addEventListener("change", () => {
   importMoleculeFile().catch(error => {
     document.getElementById("status").textContent = `Import error: ${error}`;
+  });
+});
+document.getElementById("open-example").addEventListener("click", () => {
+  openSelectedExample().catch(error => {
+    document.getElementById("status").textContent = `Example load error: ${error}`;
   });
 });
 for (const button of document.querySelectorAll(".mode-button")) {
@@ -1859,10 +1919,11 @@ document.getElementById("btn-clear-check").addEventListener("click", async () =>
 async function boot() {
   const st = document.getElementById("status");
   st.textContent = "Connecting…";
-  const [info, atomInfo, stateInfo] = await Promise.all([
+  const [info, atomInfo, stateInfo, examplesInfo] = await Promise.all([
     api("/api/operations"),
     api("/api/atoms"),
     api("/api/state"),
+    api("/api/examples"),
   ]);
   operations = info.operations;
   summariesReady = Boolean(info.summaries_ready);
@@ -1870,6 +1931,7 @@ async function boot() {
   atoms = atomInfo.atoms;
   st.textContent = `Loaded ${operations.length} operations, ${atoms.length} atoms`;
   state = stateInfo;
+  exampleCatalog = examplesInfo || {crystal: [], molecule: []};
   if (state.source_kind === "crystal" || state.source_kind === "molecule") {
     selectedStructureKind = state.source_kind;
   }

@@ -187,12 +187,13 @@ class NativePyVistaViewer:
                 continue
             atom = item["atom"]
             center = np.asarray(atom["cart"], dtype=float) + item["display_shift_cart"]
-            radius = self.atom_radius(atom["atomic_number"])
+            radius = self.atom_radius(atom["atomic_number"]) * viewer.HIGHLIGHT_RADIUS_SCALE
             marker = self.sphere_mesh(atom["atomic_number"], radius)
             actor = self.plotter.add_mesh(
                 marker,
                 color="#f7dc6f",
                 opacity=0.28,
+                lighting=False,
                 smooth_shading=True,
             )
             actor.SetPosition(*center)
@@ -314,7 +315,7 @@ class NativePyVistaViewer:
         elif self.scope == "unit_cell":
             animation_scope = "selected"
             selected_atoms = tuple(atom["index"] for atom in self.render_data["atoms"])
-        representative_atom = selected_atoms[0] if selected_atoms else None
+        representative_atom = selected_atoms[0] if self.scope == "selected" and selected_atoms else None
         self.paths = viewer.animation_paths(
             self.render_data,
             operation,
@@ -362,7 +363,8 @@ class NativePyVistaViewer:
         del step
         if not self.playing or not self.paths:
             return
-        self.frame_position = min(self.frame_position + self.speed, self.frame_count - 1)
+        multiplier = viewer.operation_speed_multiplier(self.current_operation())
+        self.frame_position = min(self.frame_position + self.speed * multiplier, self.frame_count - 1)
         self.update_atoms(self.frame_position / max(self.frame_count - 1, 1))
         if self.frame_position >= self.frame_count - 1:
             self.playing = False

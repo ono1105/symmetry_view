@@ -710,23 +710,26 @@ class BrowserControlledViewer(NativePyVistaViewer):
         frames = max(self.frame_count // 2, 24)
         multiplier = self.custom_speed_multiplier if self.using_custom_paths else operation_speed_multiplier(operation)
         fps = 10.0 * max(self.speed, 0.1) * multiplier
-        images = []
+        last_image = None
         saved = False
         self.set_gif_status(f"writing {output_path}")
         try:
-            for frame in range(frames):
-                s = frame / max(frames - 1, 1)
-                self.update_atoms(s)
-                self.plotter.render()
-                image = self.plotter.screenshot(return_img=True)
-                if image is not None:
-                    if label_text:
-                        image = add_gif_label(image, label_text)
-                    images.append(image)
-            if images:
-                hold_frames = max(1, int(round(fps)))
-                images.extend([images[-1].copy() for _ in range(hold_frames)])
-                imageio.mimsave(output_path, images, fps=fps, loop=0)
+            with imageio.get_writer(output_path, fps=fps, loop=0) as writer:
+                for frame in range(frames):
+                    s = frame / max(frames - 1, 1)
+                    self.update_atoms(s)
+                    self.plotter.render()
+                    image = self.plotter.screenshot(return_img=True)
+                    if image is not None:
+                        if label_text:
+                            image = add_gif_label(image, label_text)
+                        writer.append_data(image)
+                        last_image = image
+                if last_image is not None:
+                    hold_frames = max(1, int(round(fps)))
+                    for _ in range(hold_frames):
+                        writer.append_data(last_image)
+            if last_image is not None:
                 self.set_gif_status(f"saved {output_path}")
                 saved = True
             else:
@@ -909,7 +912,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             if atom["index"] not in unmapped_set:
                 continue
             center = np.asarray(atom["cart"], dtype=float) + np.asarray(item["display_shift_cart"], dtype=float)
-            radius = self.atom_radius(atom["atomic_number"]) * 1.28
+            radius = self.atom_radius(atom["atomic_number"]) * viewer.HIGHLIGHT_RADIUS_SCALE
             sphere = pv.Sphere(radius=radius, center=center, theta_resolution=24, phi_resolution=14)
             actor = self.plotter.add_mesh(
                 sphere,
@@ -917,6 +920,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 style="wireframe",
                 line_width=1,
                 opacity=0.55,
+                lighting=False,
             )
             self.custom_check_actors.append(actor)
 

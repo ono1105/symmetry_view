@@ -1,0 +1,104 @@
+{
+  "crystal": [
+    {
+      "kind": "crystal",
+      "name": "f2_pd",
+      "path": "examples/structures/f2_pd.cif",
+      "formula": "PdF2",
+      "symmetry": "P2_13"
+    },
+    {
+      "kind": "crystal",
+      "name": "jacobsite",
+      "path": "examples/structures/jacobsite.cif",
+      "formula": "Mn(FeO2)2",
+      "symmetry": "Fd-3m"
+    },
+    {
+      "kind": "crystal",
+      "name": "mg2v2o7",
+      "path": "examples/structures/mg2v2o7.cif",
+      "formula": "Mg2V2O7",
+      "symmetry": "P-1"
+    }
+  ],
+  "molecule": [
+    {
+      "kind": "molecule",
+      "name": "allene",
+      "path": "examples/molecules/allene.xyz",
+      "formula": "H4C3",
+      "symmetry": "D2d"
+    },
+    {
+      "kind": "molecule",
+      "name": "ammonia",
+      "path": "examples/molecules/ammonia.xyz",
+      "formula": "H3N",
+      "symmetry": "C3v"
+    },
+    {
+      "kind": "molecule",
+      "name": "benzene",
+      "path": "examples/molecules/benzene.xyz",
+      "formula": "HC",
+      "symmetry": "D6h"
+    },
+    {
+      "kind": "molecule",
+      "name": "boron_trifluoride",
+      "path": "examples/molecules/boron_trifluoride.xyz",
+      "formula": "BF3",
+      "symmetry": "D3h"
+    },
+    {
+      "kind": "molecule",
+      "name": "carbon_dioxide",
+      "path": "examples/molecules/carbon_dioxide.xyz",
+      "formula": "CO2",
+      "symmetry": "D*h"
+    },
+    {
+      "kind": "molecule",
+      "name": "ethene",
+      "path": "examples/molecules/ethene.xyz",
+      "formula": "H2C",
+      "symmetry": "D2h"
+    },
+    {
+      "kind": "molecule",
+      "name": "hydrogen_chloride",
+      "path": "examples/molecules/hydrogen_chloride.xyz",
+      "formula": "HCl",
+      "symmetry": "C*v"
+    },
+    {
+      "kind": "molecule",
+      "name": "methane",
+      "path": "examples/molecules/methane.xyz",
+      "formula": "H4C",
+      "symmetry": "Td"
+    },
+    {
+      "kind": "molecule",
+      "name": "sulfur_hexafluoride",
+      "path": "examples/molecules/sulfur_hexafluoride.xyz",
+      "formula": "SF6",
+      "symmetry": "Oh"
+    },
+    {
+      "kind": "molecule",
+      "name": "water",
+      "path": "examples/molecules/water.xyz",
+      "formula": "H2O",
+      "symmetry": "C2v"
+    },
+    {
+      "kind": "molecule",
+      "name": "xenon_tetrafluoride",
+      "path": "examples/molecules/xenon_tetrafluoride.xyz",
+      "formula": "XeF4",
+      "symmetry": "D4h"
+    }
+  ]
+}

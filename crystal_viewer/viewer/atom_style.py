@@ -116,11 +116,14 @@ _ELEMENT_RADIUS_CACHE: dict[int, float] = {}
 
 ATOM_MESH_STYLE = {
     "smooth_shading": True,
+    "lighting": False,
     "ambient": 0.35,
     "diffuse": 0.65,
     "specular": 0.12,
     "specular_power": 18,
 }
+
+HIGHLIGHT_RADIUS_SCALE = 0.96
 
 
 def element_radius_angstrom(atomic_number: int) -> float:
@@ -139,11 +142,6 @@ def element_radius_angstrom(atomic_number: int) -> float:
     return value
 
 
-def atom_radius(atomic_number: int, scene_span_value: float) -> float:
-    del scene_span_value
-    return element_radius_angstrom(atomic_number)
-
-
 def display_atom_radius(atom: dict, render_data: dict) -> float:
     radius = element_radius_angstrom(int(atom["atomic_number"]))
     unit_cell = render_data.get("unit_cell")
@@ -154,38 +152,26 @@ def display_atom_radius(atom: dict, render_data: dict) -> float:
 
 
 def display_radius_scale(render_data: dict) -> tuple[float, float]:
-    cached = render_data.get("_display_radius_scale")
-    if cached is not None:
-        return cached
-
     atoms = render_data.get("atoms", [])
     if not atoms:
-        result = (1.0, 0.0)
-        render_data["_display_radius_scale"] = result
-        return result
+        return (1.0, 0.0)
     max_radius = max(
         element_radius_angstrom(int(item["atomic_number"]))
         for item in atoms
     )
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
-        result = (1.0, 0.0)
-        render_data["_display_radius_scale"] = result
-        return result
+        return (1.0, 0.0)
     lattice = np.asarray(unit_cell["lattice"], dtype=float)
     lengths = np.linalg.norm(lattice, axis=1)
     shortest = float(np.min(lengths)) if len(lengths) else 0.0
     if shortest <= 1e-9 or max_radius <= 1e-9:
-        result = (1.0, 0.0)
-        render_data["_display_radius_scale"] = result
-        return result
+        return (1.0, 0.0)
 
     max_display_radius = shortest * 0.12
     scale = min(1.0, max_display_radius / max_radius)
     minimum_radius = shortest * 0.012
-    result = (scale, minimum_radius)
-    render_data["_display_radius_scale"] = result
-    return result
+    return (scale, minimum_radius)
 
 
 def atom_color(

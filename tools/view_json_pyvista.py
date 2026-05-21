@@ -15,8 +15,8 @@ import pyvista as pv
 
 from crystal_viewer.viewer.atom_style import (
     ATOM_MESH_STYLE,
+    HIGHLIGHT_RADIUS_SCALE,
     atom_color,
-    atom_radius,
     color_to_rgb,
     display_atom_radius,
     display_radius_scale,
@@ -666,6 +666,8 @@ def select_animation_context(
                     representative_atom=representative_atom,
                 )
             )
+    if len(candidates) == 1:
+        return candidates[0]
 
     best_context = candidates[0]
     best_score = float("inf")
@@ -711,7 +713,7 @@ def build_animation_context(
         center,
         representative_atom,
     )
-    shared_shift = shared_periodic_shift(render_data, reference_entry, operation, axis, plane, center)
+    shared_shift = shared_periodic_shift(render_data, reference_entry, operation, atoms_by_index, axis, plane, center)
     element_shift = symmetry_element_shared_shift(render_data, operation, axis, plane, center)
     if element_shift is not None:
         shared_shift = element_shift
@@ -721,6 +723,7 @@ def build_animation_context(
         render_data,
         reference_entry,
         operation,
+        atoms_by_index,
         axis,
         plane,
         center,
@@ -828,6 +831,7 @@ def shared_periodic_shift(
     render_data: dict,
     reference_entry: dict | None,
     operation: dict,
+    atoms_by_index: dict[int, dict],
     axis: dict | None,
     plane: dict | None,
     center: dict | None,
@@ -838,7 +842,6 @@ def shared_periodic_shift(
     if unit_cell is None:
         return None
 
-    atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
     reference_atom = atoms_by_index.get(reference_entry["source_atom"])
     if reference_atom is None:
         return None
@@ -888,6 +891,7 @@ def shared_rotation_angle(
     render_data: dict,
     reference_entry: dict | None,
     operation: dict,
+    atoms_by_index: dict[int, dict],
     axis: dict | None,
     plane: dict | None,
     center: dict | None,
@@ -905,7 +909,6 @@ def shared_rotation_angle(
     if reference_entry is None or axis is None or angle_deg is None:
         return None
 
-    atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
     reference_atom = atoms_by_index.get(reference_entry["source_atom"])
     if reference_atom is None:
         return None
@@ -1111,6 +1114,8 @@ def effective_operation_center(
     center: dict | None,
     shared_shift: np.ndarray | None,
 ) -> dict | None:
+    if render_data.get("unit_cell") is None:
+        return center
     kind = str(operation["kind"])
     affine = operation_affine_matrix_translation(render_data, operation, shared_shift)
     if affine is None:
@@ -1384,10 +1389,11 @@ def improper_path(
     improper_mode: str = "auto",
     source_kind: str = "",
 ) -> dict:
-    axis = effective_rotation_axis(operation, axis, center)
     mode = preferred_improper_mode(operation, improper_mode, source_kind)
     plane = plane or improper_reflection_plane(axis)
     center = center or improper_inversion_center(axis)
+    if mode == "rotoreflection" and (operation.get("order") is None or "infinite" in str(operation.get("kind", ""))):
+        return mirror_after_hold_path(start, target, plane)
     if angle_override is None:
         angle_override = improper_rotation_angle(operation, axis, mode)
     rotated = rotation_path(start, target, operation, axis, angle_override=angle_override)
@@ -1419,6 +1425,15 @@ def improper_path(
         "plane_point": np.asarray(plane["point_cart"], dtype=float),
         "plane_normal": normalize(np.asarray(plane["normal_cart"], dtype=float)),
     }
+
+
+def mirror_after_hold_path(start: np.ndarray, target: np.ndarray, plane: dict | None) -> dict:
+    mirrored = mirror_path(start, target, plane)
+    if mirrored["type"] != "mirror":
+        return translation_path(start, target)
+    mirrored["type"] = "mirror_after_hold"
+    mirrored["hold_fraction"] = 0.3
+    return mirrored
 
 
 def preferred_improper_mode(operation: dict, requested: str, source_kind: str) -> str:
@@ -1519,6 +1534,13 @@ def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None
     if path_type == "mirror":
         mirrored = reflect_point(start, path["plane_point"], path["plane_normal"])
         return interpolate(start, mirrored, s)
+    if path_type == "mirror_after_hold":
+        hold_fraction = float(path.get("hold_fraction", 0.3))
+        if s <= hold_fraction:
+            return start.copy()
+        local_s = (s - hold_fraction) / max(1.0 - hold_fraction, 1e-9)
+        mirrored = reflect_point(start, path["plane_point"], path["plane_normal"])
+        return interpolate(start, mirrored, local_s)
     if path_type == "glide":
         mirrored = reflect_point(start, path["plane_point"], path["plane_normal"])
         if s <= 0.5:

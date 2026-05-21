@@ -13,7 +13,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-import _bootstrap  # noqa: F401
+try:
+    import _bootstrap  # noqa: F401
+except ModuleNotFoundError:
+    from tools import _bootstrap  # noqa: F401
 
 import logging
 import numpy as np
@@ -44,9 +47,19 @@ logging.getLogger("pyvista").setLevel(logging.ERROR)
 logging.getLogger("vtkmodules").setLevel(logging.ERROR)
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 UPLOAD_CIF_DIR = Path(tempfile.gettempdir()) / "symmetry_view_cif_uploads"
 UPLOAD_MOLECULE_DIR = Path(tempfile.gettempdir()) / "symmetry_view_molecule_uploads"
 DEFAULT_BROWSER_IMPORT_JSON_DIR = DEFAULT_JSON_EXPORT_DIR / "imported"
+EXAMPLE_DIRS = {
+    SOURCE_KIND_CRYSTAL: PROJECT_ROOT / "examples/structures",
+    SOURCE_KIND_MOLECULE: PROJECT_ROOT / "examples/molecules",
+}
+EXAMPLE_SUFFIXES = {
+    SOURCE_KIND_CRYSTAL: ".cif",
+    SOURCE_KIND_MOLECULE: ".xyz",
+}
+EXAMPLE_CATALOG_PATH = PROJECT_ROOT / "examples/example_catalog.json"
 DEFAULT_STARTER_PATHS = (
     Path("exports/json/halite.json"),
     Path("exports/json/f2_pd.json"),
@@ -54,6 +67,7 @@ DEFAULT_STARTER_PATHS = (
 )
 EMPTY_VIEWER_JSON_PATH = Path(tempfile.gettempdir()) / "symmetry_view_empty.json"
 DEBUG_IMPORT_TIMING = os.environ.get("CRYSTAL_VIEWER_DEBUG_IMPORT") == "1"
+_EXAMPLE_CATALOG_CACHE: dict[str, list[dict]] | None = None
 
 
 def debug_import_timing(label: str, start: float) -> None:
@@ -230,6 +244,78 @@ def atom_api_items(atoms: list[dict]) -> list[dict]:
     ]
 
 
+def example_catalog() -> dict[str, list[dict]]:
+    global _EXAMPLE_CATALOG_CACHE
+    if _EXAMPLE_CATALOG_CACHE is not None:
+        return _EXAMPLE_CATALOG_CACHE
+    if EXAMPLE_CATALOG_PATH.exists():
+        loaded = json.loads(EXAMPLE_CATALOG_PATH.read_text(encoding="utf-8"))
+        _EXAMPLE_CATALOG_CACHE = normalize_example_catalog(loaded)
+    else:
+        _EXAMPLE_CATALOG_CACHE = filesystem_example_catalog()
+    return _EXAMPLE_CATALOG_CACHE
+
+
+def normalize_example_catalog(loaded: dict) -> dict[str, list[dict]]:
+    catalog = {SOURCE_KIND_CRYSTAL: [], SOURCE_KIND_MOLECULE: []}
+    for kind in (SOURCE_KIND_CRYSTAL, SOURCE_KIND_MOLECULE):
+        for raw in loaded.get(kind, []):
+            path = str(raw.get("path") or "")
+            if not path:
+                continue
+            item = {
+                "kind": kind,
+                "name": str(raw.get("name") or Path(path).stem),
+                "path": path,
+                "formula": str(raw.get("formula") or ""),
+                "symmetry": str(raw.get("symmetry") or ""),
+            }
+            if raw.get("error"):
+                item["error"] = str(raw["error"])
+            catalog[kind].append(item)
+    return catalog
+
+
+def filesystem_example_catalog() -> dict[str, list[dict]]:
+    return {
+        SOURCE_KIND_CRYSTAL: filesystem_example_items(SOURCE_KIND_CRYSTAL),
+        SOURCE_KIND_MOLECULE: filesystem_example_items(SOURCE_KIND_MOLECULE),
+    }
+
+
+def filesystem_example_items(kind: str) -> list[dict]:
+    directory = EXAMPLE_DIRS[kind]
+    suffix = EXAMPLE_SUFFIXES[kind]
+    items: list[dict] = []
+    for path in sorted(directory.glob(f"*{suffix}")):
+        items.append({
+            "kind": kind,
+            "name": path.stem,
+            "path": str(path),
+            "formula": "",
+            "symmetry": "",
+        })
+    return items
+
+
+def resolve_example_path(kind: str, requested_path: str) -> Path:
+    kind = normalize_source_kind(kind)
+    if kind not in EXAMPLE_DIRS:
+        raise ValueError(f"unsupported example kind: {kind}")
+    base = EXAMPLE_DIRS[kind].resolve()
+    path = Path(requested_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = path.resolve()
+    if path.suffix.lower() != EXAMPLE_SUFFIXES[kind]:
+        raise ValueError(f"example must be a {EXAMPLE_SUFFIXES[kind]} file")
+    if path.parent != base:
+        raise ValueError("example path is outside the allowed examples directory")
+    if not path.exists():
+        raise FileNotFoundError(f"example not found: {requested_path}")
+    return path
+
+
 def write_uploaded_text(filename: str, content: str, *, upload_dir: Path, suffix: str, label: str) -> Path:
     if not content.strip():
         raise ValueError(f"{label} content is empty.")
@@ -288,6 +374,9 @@ def make_handler(
                     body = dict(shared_state)
                 self.send_json(body)
                 return
+            if path == "/api/examples":
+                self.send_json(example_catalog())
+                return
             self.send_error(404)
 
         def do_POST(self) -> None:
@@ -331,6 +420,10 @@ def make_handler(
                 self.handle_import_molecule(payload)
                 return
 
+            if path == "/api/open_example":
+                self.handle_open_example(payload)
+                return
+
             if path != "/api/state":
                 self.send_error(404)
                 return
@@ -369,6 +462,29 @@ def make_handler(
                         shared_state[key] = value
                 body = dict(shared_state)
             self.send_json(body)
+
+        def handle_open_example(self, payload: dict) -> None:
+            request_id = self.reserve_load_request(payload)
+            kind = normalize_source_kind(str(payload.get("kind") or ""))
+            requested_path = str(payload.get("path") or "")
+            try:
+                input_path = resolve_example_path(kind, requested_path)
+                json_path = default_json_output_path(input_path, import_json_dir)
+                json_path = export_analysis_to_json_worker(
+                    input_path,
+                    mode=kind,
+                    output_path=json_path,
+                    tolerance_cart=tolerance_cart,
+                    indent=indent,
+                )
+                new_payload = json.loads(json_path.read_text(encoding="utf-8"))
+                self.load_payload(json_path, new_payload, f"loaded example {input_path.name}", request_id=request_id)
+            except Exception as exc:
+                with state_lock:
+                    self.clear_import_if_current(request_id)
+                    shared_state["import_status"] = f"example load failed: {exc}"
+                    body = {"ok": False, "error": str(exc), "state": dict(shared_state)}
+                self.send_json(body)
 
         def reserve_load_request(self, payload: dict) -> int:
             request_id = int(payload.get("request_id") or 0)
@@ -706,6 +822,7 @@ def main() -> int:
         indent=args.indent,
         default_display_mode=display_mode,
     )
+    example_catalog()
     app = BrowserControlledViewer(
         json_path,
         display_mode=display_mode,

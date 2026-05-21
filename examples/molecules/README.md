@@ -7,6 +7,7 @@ Idealized XYZ structures for testing molecular symmetry display.
 | `water.xyz` | C2v |
 | `ammonia.xyz` | C3v |
 | `methane.xyz` | Td |
+| `hydrogen_chloride.xyz` | C*v / linear |
 | `carbon_dioxide.xyz` | D*h / linear |
 | `boron_trifluoride.xyz` | D3h |
 | `ethene.xyz` | D2h |

@@ -66,10 +66,19 @@ def analyze_molecule(
         for index, op in enumerate(operations)
     )
     axes, planes, centers = collect_molecular_elements(op_infos, center_cart)
+    extra_ops, extra_axes, extra_planes = linear_molecule_virtual_symmetry(
+        molecule,
+        analyzer,
+        center_cart,
+        start_index=len(op_infos),
+    )
+    op_infos = op_infos + extra_ops
+    axes.extend(extra_axes)
+    planes.extend(extra_planes)
 
     return MoleculeAnalysisResult(
         molecule=convert_molecule(source_file, molecule, center_cart),
-        point_group=convert_point_group(analyzer, operations),
+        point_group=convert_point_group(analyzer, op_infos),
         operations=op_infos,
         axes=tuple(axes),
         planes=tuple(planes),
@@ -203,6 +212,124 @@ def collect_molecular_elements(
                 )
 
     return axes, planes, centers
+
+
+def linear_molecule_virtual_symmetry(
+    molecule: Molecule,
+    analyzer: PointGroupAnalyzer,
+    center_cart: np.ndarray,
+    *,
+    start_index: int,
+) -> tuple[
+    tuple[MolecularSymmetryOperationInfo, ...],
+    list[MolecularAxisElement],
+    list[MolecularPlaneElement],
+]:
+    point_group = str(analyzer.get_pointgroup())
+    if "*" not in point_group:
+        return (), [], []
+
+    direction = molecule_line_direction(molecule, center_cart)
+    if direction is None:
+        return (), [], []
+    normal, basis2 = plane_basis_from_normal(direction).T
+    ops: list[MolecularSymmetryOperationInfo] = []
+    axes: list[MolecularAxisElement] = []
+    planes: list[MolecularPlaneElement] = []
+
+    c_inf_index = start_index
+    ops.append(
+        MolecularSymmetryOperationInfo(
+            index=c_inf_index,
+            rotation=np.eye(3),
+            translation=np.zeros(3),
+            kind="rotation_infinite",
+            order=None,
+            det=1,
+            trace=3.0,
+            angle_deg=None,
+            symbol="C∞",
+        )
+    )
+    axes.append(
+        MolecularAxisElement(
+            point_cart=center_cart,
+            direction_cart=direction,
+            operation_indices=(c_inf_index,),
+            kind="rotation_infinite",
+            order=None,
+        )
+    )
+
+    sigma_v_index = start_index + len(ops)
+    sigma_v_rotation = reflection_matrix(normal)
+    ops.append(
+        MolecularSymmetryOperationInfo(
+            index=sigma_v_index,
+            rotation=sigma_v_rotation,
+            translation=clean_vector(center_cart - sigma_v_rotation @ center_cart),
+            kind="mirror",
+            order=2,
+            det=-1,
+            trace=float(np.trace(sigma_v_rotation)),
+            angle_deg=None,
+            symbol="sigma_v",
+        )
+    )
+    planes.append(
+        MolecularPlaneElement(
+            point_cart=center_cart,
+            normal_cart=normal,
+            basis_cart=np.column_stack((direction, basis2)),
+            operation_indices=(sigma_v_index,),
+            kind="mirror",
+        )
+    )
+
+    if point_group.startswith("D"):
+        sigma_h_index = start_index + len(ops)
+        sigma_h_rotation = reflection_matrix(direction)
+        ops.append(
+            MolecularSymmetryOperationInfo(
+                index=sigma_h_index,
+                rotation=sigma_h_rotation,
+                translation=clean_vector(center_cart - sigma_h_rotation @ center_cart),
+                kind="mirror",
+                order=2,
+                det=-1,
+                trace=float(np.trace(sigma_h_rotation)),
+                angle_deg=None,
+                symbol="sigma_h",
+            )
+        )
+        planes.append(
+            MolecularPlaneElement(
+                point_cart=center_cart,
+                normal_cart=direction,
+                basis_cart=plane_basis_from_normal(direction),
+                operation_indices=(sigma_h_index,),
+                kind="mirror",
+            )
+        )
+
+    return tuple(ops), axes, planes
+
+
+def molecule_line_direction(molecule: Molecule, center_cart: np.ndarray) -> np.ndarray | None:
+    coords = np.asarray(molecule.cart_coords, dtype=float) - np.asarray(center_cart, dtype=float)
+    if len(coords) < 2 or np.linalg.norm(coords) < TOL:
+        return None
+    _, singular_values, vh = np.linalg.svd(coords, full_matrices=False)
+    if len(singular_values) == 0 or singular_values[0] < TOL:
+        return None
+    if len(singular_values) > 1 and singular_values[1] > max(1e-5, singular_values[0] * 1e-5):
+        return None
+    return canonical_direction(vh[0])
+
+
+def reflection_matrix(normal: np.ndarray) -> np.ndarray:
+    normal = normalize(normal)
+    return clean_matrix(np.eye(3) - 2.0 * np.outer(normal, normal))
 
 
 def molecule_center_from_analyzer(molecule: Molecule, analyzer: PointGroupAnalyzer) -> np.ndarray:

@@ -2317,3 +2317,332 @@ for candidate in atoms:
 - `warm_molecule_analysis()` はブラウザインポートのサブプロセスに効かないため削除。起動時の余計な事前処理も削除。
 - `find_matching_molecule_atom()` は操作ごとに元素別候補を事前構築し、対象元素だけを走査するよう変更。
 - `.overbar` / `.overline` は `.overline` に統一。
+
+---
+
+## Claude レビュー (2026-05-22) — 全体構造・2モード共通化・コア集中度
+
+対象: `tools/view_json_pyvista.py`, `crystal_viewer/viewer/pyvista_controller.py`, `crystal_viewer/molecule_analysis.py`, `crystal_viewer/viewer/operation_lookup.py`, `crystal_viewer/viewer/custom_operation.py`, `crystal_viewer/render_data.py`
+
+---
+
+### 構造: `view_json_pyvista.py` に責務が集中しすぎている（1710行）
+
+**場所:** `tools/view_json_pyvista.py` 全体
+
+このファイルには以下がすべて混在している:
+- CLI エントリポイント (L1–184)
+- PyVista 描画ラッパー (L187–540)
+- アニメーションコンテキスト選択アルゴリズム (L550–1210) ← PyVista 非依存
+- パス構築（rotation/screw/mirror/glide/inversion/improper）(L1215–1500) ← PyVista 非依存
+- `evaluate_path` とすべての幾何プリミティブ (L1498–1706) ← PyVista 非依存
+
+**提案する分割（変更量が少なく安全）:**
+```
+crystal_viewer/viewer/animation_path.py
+  ← build_operation_path, evaluate_path, rotation_path, screw_path,
+     mirror_path, glide_path, inversion_path, improper_path,
+     rotate_about_axis, reflect_point, signed_rotation_angle_from_matrix,
+     rotation_angle_deg, interpolate, normalize (~350行)
+
+crystal_viewer/viewer/animation_context.py
+  ← animation_paths, select_animation_context, build_animation_context,
+     animation_context_score, representative_mapping_entry,
+     animation_target, shared_periodic_shift, shared_rotation_angle,
+     shared_step_translation, effective_operation_center, effective_rotation_axis,
+     symmetry_element_shared_shift, periodic_target_candidates (~330行)
+
+tools/view_json_pyvista.py ← CLI + PyVista描画のみ (~400行)
+```
+
+---
+
+### Bug (中): `atoms_by_index` が `select_animation_context` 内で複数回再構築される
+
+**場所:** `tools/view_json_pyvista.py:561`, `L842`, `L909`
+
+`animation_paths` → `select_animation_context` の中で、`shared_periodic_shift`・`shared_rotation_angle`・`representative_mapping_entry` がそれぞれ独立して `{atom["index"]: atom for atom in render_data["atoms"]}` を再構築している。
+
+Jacobsite (56原子 × 192操作) では起動時スキャンで計 192 × 3 = 576 回の dict 構築が走る。
+
+**修正案:** `animation_paths` で1回だけ構築して下流すべてに引数として渡す。
+
+---
+
+### Bug (中): `selected_mapping` と `operation_by_index` が O(n) 線形スキャン
+
+**場所:** `crystal_viewer/viewer/operation_lookup.py:4`, `L39`
+
+`operation_summaries` の192回のループ内で毎回 `selected_mapping(atom_mappings, op_index)` が全マッピングをスキャン。
+
+**修正案:** 呼び出し前に dict 化して渡す:
+```python
+mapping_by_op = {m["operation_index"]: m for m in (atom_mappings or {}).get("mappings", [])}
+```
+
+---
+
+### Bug (小): `normalize` が3箇所で重複定義、許容値が不統一
+
+**場所:**
+- `tools/view_json_pyvista.py:1702` — `1e-12`
+- `crystal_viewer/molecule_analysis.py:325` — `TOL = 1e-7`
+- `crystal_viewer/render_data.py:366` — `1e-12`
+
+`molecule_analysis` 側が `1e-7` と5桁大きく、ゼロベクトル判定の挙動が異なる。
+共有 utility モジュール (`crystal_viewer/viewer/geometry.py` 等) に統一を推奨。
+
+---
+
+### Bug (小): `plane_basis_from_normal_cart` が2箇所で重複定義
+
+**場所:** `tools/view_json_pyvista.py:1470` と `crystal_viewer/viewer/custom_operation.py:212`
+
+ロジック同一。`custom_operation.py` は `viewer` をすでにインポートしているので `viewer.plane_basis_from_normal_cart(...)` に一本化できる。
+
+---
+
+### Bug (小): `rotation_angle_deg` が2箇所で重複定義
+
+**場所:** `tools/view_json_pyvista.py:1187` と `crystal_viewer/molecule_analysis.py:280`
+
+同一アルゴリズム。共有ユーティリティに移動後、`molecule_analysis` 側はインポートで使うだけにする。
+
+---
+
+### Bug (小): `effective_operation_center` の結晶専用スナップ処理が分子モードでも前段まで実行される
+
+**場所:** `tools/view_json_pyvista.py:1109-1148`
+
+```python
+def effective_operation_center(render_data, operation, center, shared_shift):
+    kind = str(operation["kind"])
+    affine = operation_affine_matrix_translation(render_data, operation, shared_shift)
+    if affine is None:
+        return center
+    matrix, translation = affine
+    point = None
+    if kind == "inversion":
+        point = 0.5 * translation   # ← 分子でも計算される
+    elif "rotoinversion" in kind:
+        ...                          # ← 分子でも計算される
+    # 後続の lattice snapping は unit_cell is None で自動スキップ
+```
+
+分子モードでは `unit_cell is None` により格子スナップはスキップされるが、`point` の計算（行列演算）は実行される。意図は正しいが、分子モードで早期リターンすることで意図が明確になる:
+
+```python
+if render_data.get("unit_cell") is None:
+    return center
+```
+
+---
+
+### 効率/設計: 結晶専用ロジックが `animation_paths` / `animation_target` に埋め込まれている
+
+**場所:** `tools/view_json_pyvista.py:550-620`, `L986-1031`
+
+`shared_periodic_shift`・`symmetry_element_shared_shift`・`periodic_target_candidates` は分子モードで常に `None` / 要素1の配列を返し、無意味なコストになっている。
+
+```python
+# periodic_target_candidates — 分子では必ずこのパスを通る
+if frac is None or unit_cell is None:
+    return np.asarray([entry["transformed_cart"]], dtype=float)
+```
+
+**提案:** `animation_paths` の先頭で `source_kind` を判定し、分子モードは簡略パスに分岐することで結晶専用の探索コストを排除する:
+```python
+if render_source_kind(render_data) == "molecule":
+    return _animation_paths_molecule(render_data, operation, mapping, ...)
+```
+
+---
+
+### 効率: `select_animation_context` の候補スコアリングで分子モードが無駄な全原子パス構築
+
+**場所:** `tools/view_json_pyvista.py:642-687`
+
+```python
+candidates = [build_animation_context(..., element_index=i) for i in range(max_count)]
+# ↓ 各候補について全原子のパスを構築してスコアリング
+for context in candidates:
+    score = animation_context_score(...)
+```
+
+分子モードでは各操作の要素数が1以下（axes/planes/centers それぞれ高々1個）なので `candidates` は常に長さ1。スコアリングループに入る前に早期リターンを追加することで、分子の全操作スキャンのコストを大幅に削減できる:
+
+```python
+if len(candidates) == 1:
+    return candidates[0]
+```
+
+---
+
+### 結晶・分子の共通化・分離まとめ
+
+**統一推奨（重複関数）:**
+
+| 関数 | 現在の場所 |
+|---|---|
+| `normalize` | `view_json_pyvista`, `molecule_analysis`, `render_data` |
+| `plane_basis_from_normal_cart` | `view_json_pyvista`, `custom_operation` |
+| `rotation_angle_deg` | `view_json_pyvista`, `molecule_analysis` |
+| `rotate_about_axis` / `rotate_vector` | `view_json_pyvista`, `operation_labels`（API違いだが同アルゴリズム）|
+
+→ `crystal_viewer/viewer/geometry.py` に集約推奨。
+
+**分離推奨（現在 animation_paths 内に結晶専用コードが混在）:**
+
+| 関数 | 性質 |
+|---|---|
+| `shared_periodic_shift` | 結晶専用（分子では常に None）|
+| `symmetry_element_shared_shift` | 結晶専用（分子では常に None）|
+| `periodic_target_candidates` | 結晶で27候補、分子で1候補 |
+| `operation_affine_matrix_translation` の `shared_shift` 補正 | 結晶専用 |
+
+### Codex 対応 (2026-05-22)
+
+- `selected_mapping()` は `operation_index` -> mapping の内部キャッシュを持つように修正。
+- `operation_by_index()` は operations list の id/length 単位で内部キャッシュするように修正。
+- `animation_paths()` で構築した `atoms_by_index` を `shared_periodic_shift()` / `shared_rotation_angle()` に渡し、同じ辞書の再構築を削減。
+- `select_animation_context()` は候補が1件だけならスコアリングを省略して即返すように修正。
+- `effective_operation_center()` は分子モード (`unit_cell is None`) では早期returnし、結晶専用の固定点補正を実行しないように明確化。
+- `view_json_pyvista.py` の大規模分割と geometry utility 統合は妥当だが、現在の未コミット機能差分に重ねるとリスクが高いため次の整理タスクへ回す。
+
+---
+
+## Claude レビュー (2026-05-22) — 処理ロジック精査（分岐以外）
+
+対象: `tools/view_json_pyvista.py`, `tools/view_json_gui.py`, `crystal_viewer/viewer/pyvista_controller.py`, `crystal_viewer/viewer/atom_style.py`, `tools/view_json_server.py`
+
+---
+
+### Bug (中): `effective_rotation_axis` が improper パスで2回計算される
+
+**場所:** `tools/view_json_pyvista.py:1234`, `L1393`
+
+`build_operation_path` で axis を計算・更新してから `improper_path` に渡すが、`improper_path` 内部でも同じ引数で再計算している。`effective_rotation_axis` は `rotation_axis_from_matrix`（`np.linalg.eig`）を呼ぶ場合があり無駄なコスト。
+
+```python
+# build_operation_path (L1234)
+axis = effective_rotation_axis(operation, axis, center)
+...
+return improper_path(start, target, operation, axis, ...)
+
+# improper_path 内 (L1393)
+axis = effective_rotation_axis(operation, axis, center)  # ← 同じ計算が再実行される
+```
+
+**修正案:** `improper_path` 冒頭の呼び出しを削除。渡された `axis` をそのまま使う。
+
+---
+
+### Bug (中): GUI ビューアが操作タイプの速度乗数を適用しない
+
+**場所:** `tools/view_json_gui.py:362-370`
+
+`BrowserControlledViewer` は mirror/inversion/translation/glide に `multiplier=2.0` を適用するが、`NativePyVistaViewer.on_timer` は乗数なしで `frame_position += speed` するだけ。mirror アニメーションが回転より2倍の実時間をかけて完了し、ブラウザビューアと挙動が一致しない。
+
+**修正案:**
+```python
+def on_timer(self, step: int) -> None:
+    ...
+    multiplier = viewer.operation_speed_multiplier(self.current_operation())
+    self.frame_position = min(self.frame_position + self.speed * multiplier, self.frame_count - 1)
+```
+
+---
+
+### Bug (小): `build_paths` で `selected_atoms[0]` を固定の代表原子に使う
+
+**場所:** `tools/view_json_gui.py:318`
+
+`scope="displayed"` / `"unit_cell"` のとき `selected_atoms` は全原子リスト。`representative_atom = selected_atoms[0]`（原子 0）として渡すため、`representative_mapping_entry` は移動チェックなしに原子 0 を使う。
+
+原子 0 が操作の固定点（回転軸上など）だった場合: `shared_periodic_shift` が `rint(start_frac - raw_frac)` を計算し、非ゼロになりうる。このシフトが全原子に適用されると、アニメーション先が1格子分ずれる可能性がある。
+
+**修正案:** `scope` が `"displayed"` / `"unit_cell"` のとき `representative_atom=None` を渡し、内部の自動選択に委ねる:
+```python
+representative_atom = selected_atoms[0] if self.scope == "selected" and selected_atoms else None
+```
+
+---
+
+### Bug (小): `atom_radius(atomic_number, scene_span_value)` に死んだパラメータ
+
+**場所:** `crystal_viewer/viewer/atom_style.py:145-147`
+
+```python
+def atom_radius(atomic_number: int, scene_span_value: float) -> float:
+    del scene_span_value  # 即廃棄
+    return element_radius_angstrom(atomic_number)
+```
+
+現行コードではこの関数を直接呼び出す箇所は存在せず、ビューアの `self.atom_radius` メソッドは `display_atom_radius` を経由している。実質的に未使用の関数。
+
+**修正案:** 関数を削除して `display_atom_radius` に統一する。
+
+---
+
+### Bug (小): `display_radius_scale` がロックなしで `render_data` dict を変更する
+
+**場所:** `crystal_viewer/viewer/atom_style.py:186-190`
+
+```python
+render_data["_display_radius_scale"] = result  # タイマースレッドからロックなし書き込み
+```
+
+`render_data` は HTTP スレッドが `state_lock` 下で読む辞書と同一オブジェクト。CPython GIL により実害はないが、`render_data` を読み取り専用として扱うべき設計に反する。
+
+**修正案:** スケール値をビューア側（例: `self._display_radius_scale`）に保持し、`render_data` を変更しない。
+
+---
+
+### 効率: `save_current_gif` が全フレームをメモリに保持してから書く
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py:713-729`
+
+48フレーム × スクリーンショット（解像度次第で 5〜15 MB/枚）= ピーク数百 MB。
+
+**修正案:** `imageio.get_writer` でストリーミング書き込みに変更し、最後の1フレームだけ保持:
+```python
+last_image = None
+with imageio.get_writer(output_path, fps=fps, loop=0) as writer:
+    for frame in range(frames):
+        ...
+        if image is not None:
+            writer.append_data(image)
+            last_image = image
+    if last_image is not None:
+        for _ in range(hold_frames):
+            writer.append_data(last_image)
+```
+
+---
+
+### 効率: `example_catalog` が `/api/examples` 初回呼び出しまで未初期化
+
+**場所:** `tools/view_json_server.py:246-255`
+
+複数 HTTP スレッドが同時に最初の `/api/examples` を処理するとカタログを複数回構築する（ファイルシステムスキャンの重複）。
+
+**修正案:** `main()` のサーバー起動前に1回呼んで初期化:
+```python
+# start_server の前に
+example_catalog()  # キャッシュを事前ウォームアップ
+```
+
+### Codex 対応 (2026-05-22, 処理ロジック精査)
+
+- `improper_path()` 内の `effective_rotation_axis()` 再計算を削除し、呼び出し元で補正済みの axis をそのまま使うように修正。
+- native PyVista GUI の `on_timer()` に `operation_speed_multiplier()` を適用し、ブラウザ版とアニメーション速度を揃えた。
+- native PyVista GUI の `build_paths()` では `scope="selected"` のときだけ明示代表原子を渡し、`displayed` / `unit_cell` は自動選択に委ねるように修正。
+- 未使用の `atom_radius()` 関数と stale import を削除し、表示半径は `display_atom_radius()` に統一。
+- `display_radius_scale()` は `render_data` に `_display_radius_scale` を書き込まない純粋計算に変更。計算量は小さく、ロックなし mutation を避ける方を優先。
+- `save_current_gif()` は `imageio.get_writer()` によるストリーミング書き込みへ変更し、保持する画像を最後の1フレームだけにした。
+- サーバー起動前に `example_catalog()` を呼び、初回 `/api/examples` の同時アクセスで重複初期化しないようにした。
+
+### Codex 追加精査 (2026-05-22)
+
+- example の解決を CWD ではなくプロジェクトルート基準に変更し、別ディレクトリから起動・import しても `examples/...` が正しく解決されるようにした。
+- `selected_mapping()` のキャッシュは `atom_mappings` dict に内部キーを書き込まず、mappings list の id/length ベースのモジュール内キャッシュに変更した。
