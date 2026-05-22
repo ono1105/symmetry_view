@@ -33,7 +33,7 @@ from crystal_viewer.source_kinds import (
     SOURCE_KIND_MOLECULE,
     normalize_source_kind,
 )
-from tools.view_json_pyvista import atom_color
+from crystal_viewer.viewer.atom_style import atom_color
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
     check_custom_operation,

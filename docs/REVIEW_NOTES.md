@@ -2646,3 +2646,88 @@ example_catalog()  # キャッシュを事前ウォームアップ
 
 - example の解決を CWD ではなくプロジェクトルート基準に変更し、別ディレクトリから起動・import しても `examples/...` が正しく解決されるようにした。
 - `selected_mapping()` のキャッシュは `atom_mappings` dict に内部キーを書き込まず、mappings list の id/length ベースのモジュール内キャッシュに変更した。
+
+---
+
+## Claude レビュー (2026-05-22) — view_json_pyvista.py 分離後バグ確認
+
+対象変更: `tools/view_json_pyvista.py` の大規模分割
+新規ファイル: `crystal_viewer/geometry.py`, `crystal_viewer/viewer/animation_path.py`, `crystal_viewer/viewer/animation_context.py`, `crystal_viewer/viewer/animation.py`, `crystal_viewer/viewer/scene_rendering.py`, `crystal_viewer/viewer/symmetry_elements.py`
+
+---
+
+### Bug (高) — 今回の分離で導入: `viewer.effective_rotation_axis` が消えた
+
+**場所:** `crystal_viewer/viewer/operation_labels.py:378`
+
+```python
+axis = viewer.effective_rotation_axis(operation, None, center)
+```
+
+旧 `view_json_pyvista.py` (L1092) に定義されていた `effective_rotation_axis` が、今回の分離で `crystal_viewer/viewer/animation_path.py` に移動された。しかし `view_json_pyvista.py` も `animation.py` もこの関数を再エクスポートしていない。
+
+**実測で確認:**
+```
+ATTRIBUTEERROR: module 'tools.view_json_pyvista' has no attribute 'effective_rotation_axis'
+```
+
+**影響範囲:** `operation_labels.effective_axis_from_operation()` が呼ばれる条件:
+- `display_symmetry_elements(render_data, None, op_index, None)` — `atom_mappings=None` で呼んだ場合
+- `operation_summaries(render_data, None)` — `atom_mappings` なしで呼んだ場合
+
+通常の起動（JSON に atom_mappings が含まれる場合）では隠れる。`--no-mapping` フラグや将来のコードで `atom_mappings=None` を渡すと即クラッシュ。
+
+**修正案:** `crystal_viewer/viewer/animation.py` の `animation_path` インポートに追加:
+```python
+from crystal_viewer.viewer.animation_path import (
+    build_operation_path,
+    effective_rotation_axis,   # ← 追加
+    evaluate_path,
+    ...
+)
+```
+さらに `tools/view_json_pyvista.py` の `animation` インポートにも追加:
+```python
+from crystal_viewer.viewer.animation import (
+    animation_paths,
+    build_operation_path,
+    effective_rotation_axis,   # ← 追加
+    ...
+)
+```
+
+---
+
+### Bug (中) — 分離前から存在: `viewer.operation_speed_multiplier` が未定義
+
+**場所:** `tools/view_json_gui.py:366`
+
+```python
+multiplier = viewer.operation_speed_multiplier(self.current_operation())
+```
+
+`operation_speed_multiplier` は `crystal_viewer/viewer/pyvista_controller.py:941` に定義されているが、`view_json_pyvista` モジュールには含まれていない。旧 `view_json_pyvista.py`（1710行版）にもこの関数は存在しなかったため、今回の分離前から壊れていた既存バグ。
+
+**修正案:**
+```python
+# view_json_gui.py に直接インポートを追加
+from crystal_viewer.viewer.pyvista_controller import operation_speed_multiplier
+# viewer.operation_speed_multiplier(...) → operation_speed_multiplier(...) に変更
+```
+または `view_json_pyvista.py` に `pyvista_controller` から re-export する。
+
+---
+
+### 確認済み（問題なし）
+
+- 全新規モジュールのインポートが正常に通ること ✓
+- `improper_path` 内の `effective_rotation_axis` 二重呼び出し（旧バグ）が解消されている ✓
+- `pyvista_controller.py` が `viewer.X` で使う関数はすべて `view_json_pyvista` 経由で解決できる ✓（`effective_rotation_axis` 以外）
+- `normalize` が `crystal_viewer/geometry.py` に統合されている ✓
+- 循環インポートなし ✓
+
+### Codex 対応 (2026-05-22, 分離後レビュー)
+
+- `effective_rotation_axis` を `animation.py` と `view_json_pyvista.py` で再エクスポートし、`operation_labels.py` の既存 `viewer.effective_rotation_axis(...)` 参照を復旧。
+- `operation_speed_multiplier` / `custom_operation_speed_multiplier` を `animation.py` に移し、`view_json_pyvista.py` からも参照できるようにした。
+- `pyvista_controller.py` は同じ速度倍率関数を `animation.py` から import するようにし、重複定義を削除。

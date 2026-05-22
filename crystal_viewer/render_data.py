@@ -15,6 +15,7 @@ from .analysis_models import (
     MolecularPlaneElement,
     StructureAnalysisResult,
 )
+from .geometry import normalize
 
 
 RenderMode = Literal["crystal", "molecule"]
@@ -361,11 +362,3 @@ def bounds_points(atoms: tuple[RenderAtomData, ...], unit_cell: UnitCellRenderDa
     if not parts:
         return np.empty((0, 3))
     return np.vstack(parts)
-
-
-def normalize(vector: np.ndarray) -> np.ndarray:
-    vector = np.asarray(vector, dtype=float)
-    norm = np.linalg.norm(vector)
-    if norm < 1e-12:
-        return vector
-    return vector / norm

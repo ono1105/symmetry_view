@@ -11,6 +11,7 @@ import numpy as np
 import pyvista as pv
 from PIL import Image, ImageDraw, ImageFont
 
+from crystal_viewer.geometry import normalize
 from tools import view_json_pyvista as viewer
 from tools.view_json_gui import NativePyVistaViewer
 from crystal_viewer.viewer.operation_labels import (
@@ -22,6 +23,7 @@ from crystal_viewer.viewer.operation_labels import (
     rotate_vector,
     visual_translation_direction_cart,
 )
+from crystal_viewer.viewer.animation import custom_operation_speed_multiplier, operation_speed_multiplier
 
 
 class BrowserControlledViewer(NativePyVistaViewer):
@@ -496,7 +498,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             direction = self.custom_view_direction_cart
             if np.linalg.norm(direction) < 1e-10:
                 return None
-            direction = viewer.normalize(direction)
+            direction = normalize(direction)
             center = self.custom_focus_cart if self.custom_focus_cart is not None else self.display_center()
             distance = self.camera_distance_for_view(center, direction)
             up = camera_up_vector(direction)
@@ -520,7 +522,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             direction = operation_view_direction_cart(self.render_data, operation, axes, planes, centers)
         if direction is None:
             return None
-        direction = viewer.normalize(direction)
+        direction = normalize(direction)
         center = operation_focus_point_cart(self.render_data, operation, axes, planes, centers, self.display_mode)
         distance = self.camera_distance_for_view(center, direction)
         up = camera_up_vector(direction)
@@ -557,7 +559,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             return radius, span
 
         center = np.asarray(center, dtype=float)
-        direction = viewer.normalize(np.asarray(direction, dtype=float))
+        direction = normalize(np.asarray(direction, dtype=float))
         offsets = points - center
         depths = offsets @ direction
         projected = offsets - np.outer(depths, direction)
@@ -614,12 +616,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
             return
         position = np.asarray(self.plotter.camera.GetPosition(), dtype=float)
         focal_point = np.asarray(self.plotter.camera.GetFocalPoint(), dtype=float)
-        up = viewer.normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
+        up = normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
         radius_vector = position - focal_point
         if np.linalg.norm(radius_vector) < 1e-10:
             return
-        view_direction = viewer.normalize(focal_point - position)
-        screen_right = viewer.normalize(np.cross(view_direction, up))
+        view_direction = normalize(focal_point - position)
+        screen_right = normalize(np.cross(view_direction, up))
         if direction == "right":
             axis = up
             signed_angle = angle
@@ -640,7 +642,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.camera_position = [
             tuple(focal_point + rotated_radius),
             tuple(focal_point),
-            tuple(viewer.normalize(rotated_up)),
+            tuple(normalize(rotated_up)),
         ]
         self.plotter.reset_camera_clipping_range()
 
@@ -668,7 +670,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
     def set_camera_center(self, new_center: np.ndarray) -> None:
         position = np.asarray(self.plotter.camera.GetPosition(), dtype=float)
         focal_point = np.asarray(self.plotter.camera.GetFocalPoint(), dtype=float)
-        up = viewer.normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
+        up = normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
         shift = new_center - focal_point
         self.plotter.camera_position = [
             tuple(position + shift),
@@ -685,7 +687,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             return
         position = np.asarray(self.plotter.camera.GetPosition(), dtype=float)
         focal_point = np.asarray(self.plotter.camera.GetFocalPoint(), dtype=float)
-        up = viewer.normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
+        up = normalize(np.asarray(self.plotter.camera.GetViewUp(), dtype=float))
         self.plotter.camera_position = [
             tuple(position + shift),
             tuple(focal_point + shift),
@@ -751,11 +753,11 @@ class BrowserControlledViewer(NativePyVistaViewer):
             return
 
         center, front_direction, front_up, distance = basis
-        front_direction = viewer.normalize(front_direction)
-        front_up = viewer.normalize(front_up)
-        right_direction = viewer.normalize(np.cross(front_direction, front_up))
+        front_direction = normalize(front_direction)
+        front_up = normalize(front_up)
+        right_direction = normalize(np.cross(front_direction, front_up))
         top_direction = front_up
-        top_up = viewer.normalize(-front_direction)
+        top_up = normalize(-front_direction)
         timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         original_camera_position = self.plotter.camera_position
         views = [
@@ -823,12 +825,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
 
         if op_type in ("rotation", "screw"):
             uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
-            d_cart = viewer.normalize(uvw @ lattice)
+            d_cart = normalize(uvw @ lattice)
             p_cart = np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice
             axis_dict = {"point_cart": p_cart.tolist(), "direction_cart": d_cart.tolist()}
         elif op_type in ("mirror", "glide"):
             hkl = np.asarray(op_params.get("normal", [0, 0, 1]), dtype=float)
-            n_cart = viewer.normalize(np.linalg.inv(lattice) @ hkl)
+            n_cart = normalize(np.linalg.inv(lattice) @ hkl)
             p_cart = np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice
             plane_dict = {"point_cart": p_cart.tolist(), "normal_cart": n_cart.tolist()}
         elif op_type == "inversion":
@@ -836,7 +838,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             center_dict = {"point_cart": c_cart.tolist()}
         elif op_type == "rotoinversion":
             uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
-            d_cart = viewer.normalize(uvw @ lattice)
+            d_cart = normalize(uvw @ lattice)
             c_cart = np.asarray(op_params.get("center", [0, 0, 0]), dtype=float) @ lattice
             axis_dict = {"point_cart": c_cart.tolist(), "direction_cart": d_cart.tolist()}
             center_dict = {"point_cart": c_cart.tolist()}
@@ -937,17 +939,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
 
 
 
-def operation_speed_multiplier(operation: dict) -> float:
-    kind = str(operation.get("kind", ""))
-    if kind == "mirror" or kind == "inversion" or "translation" in kind or "glide" in kind:
-        return 2.0
-    return 1.0
-
-
-def custom_operation_speed_multiplier(op_type: str) -> float:
-    if op_type in {"mirror", "inversion", "translation", "glide"}:
-        return 2.0
-    return 1.0
 
 
 def export_gif_dir(json_path: Path) -> Path:

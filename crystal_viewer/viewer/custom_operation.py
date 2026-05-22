@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from tools import view_json_pyvista as viewer
+from crystal_viewer.geometry import normalize
 
 
 def rotation_matrix_from_axis_angle(axis: np.ndarray, angle: float) -> np.ndarray:
@@ -138,7 +138,7 @@ def custom_operation_visuals(
             direction = uvw @ lattice
             if np.linalg.norm(direction) >= 1e-10:
                 point = np.asarray(params.get("point", [0, 0, 0]), dtype=float) @ lattice
-                direction = viewer.normalize(direction)
+                direction = normalize(direction)
                 axes.append(
                     {
                         "label": "custom axis",
@@ -153,7 +153,7 @@ def custom_operation_visuals(
             normal = np.linalg.inv(lattice) @ hkl
             if np.linalg.norm(normal) >= 1e-10:
                 point = np.asarray(params.get("point", [0, 0, 0]), dtype=float) @ lattice
-                normal = viewer.normalize(normal)
+                normal = normalize(normal)
                 basis1, basis2 = plane_basis_from_normal(normal)
                 planes.append(
                     {
@@ -176,7 +176,7 @@ def custom_operation_visuals(
             center = np.asarray(params.get("center", [0, 0, 0]), dtype=float) @ lattice
             centers.append({"label": "custom center", "point_cart": center.tolist()})
             if np.linalg.norm(direction) >= 1e-10:
-                direction = viewer.normalize(direction)
+                direction = normalize(direction)
                 axes.append(
                     {
                         "label": "custom axis",
@@ -210,12 +210,12 @@ def custom_operation_visuals(
 
 
 def plane_basis_from_normal(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    normal = viewer.normalize(np.asarray(normal, dtype=float))
+    normal = normalize(np.asarray(normal, dtype=float))
     trial = np.array([1.0, 0.0, 0.0])
     if abs(float(np.dot(trial, normal))) > 0.85:
         trial = np.array([0.0, 1.0, 0.0])
-    basis1 = viewer.normalize(np.cross(normal, trial))
-    basis2 = viewer.normalize(np.cross(normal, basis1))
+    basis1 = normalize(np.cross(normal, trial))
+    basis2 = normalize(np.cross(normal, basis1))
     return basis1, basis2
 
 
@@ -314,5 +314,3 @@ def custom_matrix_validity_error(W_frac: np.ndarray, lattice: np.ndarray) -> str
     if not np.allclose(metric, np.eye(3), atol=1e-5):
         return "Operation matrix must preserve distances; scaling/shear is not a symmetry operation"
     return None
-
-

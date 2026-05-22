@@ -4,7 +4,12 @@ from fractions import Fraction
 
 import numpy as np
 
-from tools import view_json_pyvista as viewer
+from crystal_viewer.geometry import normalize
+from crystal_viewer.viewer.animation import animation_paths
+from crystal_viewer.viewer.animation_path import effective_rotation_axis
+from crystal_viewer.viewer.display_atoms import display_scene_center
+from crystal_viewer.viewer.operation_lookup import selected_mapping
+from crystal_viewer.viewer.symmetry_elements import display_symmetry_elements
 
 
 def operation_summaries(
@@ -18,7 +23,7 @@ def operation_summaries(
         visual_translation = visual_translation_direction_cart(render_data, operation, atom_mappings)
         if visual_translation is not None:
             summary_operation["_display_translation_cart"] = visual_translation.tolist()
-        axes, planes, centers = viewer.display_symmetry_elements(
+        axes, planes, centers = display_symmetry_elements(
             render_data,
             atom_mappings,
             operation["index"],
@@ -69,7 +74,7 @@ def infer_screw_symbol(render_data: dict, operation: dict, axis: dict) -> str | 
         return None
 
     point = np.asarray(axis["point_cart"], dtype=float)
-    direction = viewer.normalize(np.asarray(axis["direction_cart"], dtype=float))
+    direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
     moved = np.asarray(matrix, dtype=float) @ point + np.asarray(translation, dtype=float)
     displacement = moved - point
     projected = float(np.dot(displacement, direction))
@@ -239,7 +244,7 @@ def operation_focus_point_cart(
         return np.asarray(planes[0]["point_cart"], dtype=float)
     if centers:
         return np.asarray(centers[0]["point_cart"], dtype=float)
-    return viewer.display_scene_center(render_data, display_mode)
+    return display_scene_center(render_data, display_mode)
 
 
 def custom_focus_point_cart(result: dict, render_data: dict, display_mode: str) -> np.ndarray | None:
@@ -273,10 +278,10 @@ def visual_translation_direction_cart(
 ) -> np.ndarray | None:
     if not is_pure_translation_operation(operation):
         return None
-    mapping = viewer.selected_mapping(atom_mappings, operation["index"])
+    mapping = selected_mapping(atom_mappings, operation["index"])
     if mapping is None:
         return None
-    paths = viewer.animation_paths(
+    paths = animation_paths(
         render_data,
         operation,
         mapping,
@@ -374,7 +379,7 @@ def effective_axis_from_operation(operation: dict, centers: list[dict]) -> dict 
     if not centers:
         return None
     center = centers[0]
-    axis = viewer.effective_rotation_axis(operation, None, center)
+    axis = effective_rotation_axis(operation, None, center)
     return axis
 
 
@@ -513,7 +518,7 @@ def scene_center(render_data: dict) -> np.ndarray:
 
 
 def camera_up_vector(direction: np.ndarray) -> np.ndarray:
-    direction = viewer.normalize(direction)
+    direction = normalize(direction)
     candidates = [
         np.asarray([0.0, 0.0, 1.0]),
         np.asarray([0.0, 1.0, 0.0]),
@@ -521,11 +526,11 @@ def camera_up_vector(direction: np.ndarray) -> np.ndarray:
     ]
     up = min(candidates, key=lambda candidate: abs(float(np.dot(candidate, direction))))
     up = up - np.dot(up, direction) * direction
-    return viewer.normalize(up)
+    return normalize(up)
 
 
 def rotate_vector(vector: np.ndarray, axis: np.ndarray, angle_rad: float) -> np.ndarray:
-    axis = viewer.normalize(axis)
+    axis = normalize(axis)
     vector = np.asarray(vector, dtype=float)
     return (
         vector * np.cos(angle_rad)
