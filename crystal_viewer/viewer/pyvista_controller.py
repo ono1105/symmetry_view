@@ -12,8 +12,16 @@ import pyvista as pv
 from PIL import Image, ImageDraw, ImageFont
 
 from crystal_viewer.geometry import normalize
-from tools import view_json_pyvista as viewer
 from tools.view_json_gui import NativePyVistaViewer
+from crystal_viewer.viewer.animation import custom_operation_speed_multiplier, operation_speed_multiplier
+from crystal_viewer.viewer.animation_path import build_operation_path
+from crystal_viewer.viewer.atom_style import HIGHLIGHT_RADIUS_SCALE, atom_color, color_to_rgb
+from crystal_viewer.viewer.display_atoms import (
+    display_atom_instances,
+    display_mode_margin,
+    display_scene_center,
+    display_scene_span,
+)
 from crystal_viewer.viewer.operation_labels import (
     camera_up_vector,
     custom_focus_point_cart,
@@ -23,7 +31,12 @@ from crystal_viewer.viewer.operation_labels import (
     rotate_vector,
     visual_translation_direction_cart,
 )
-from crystal_viewer.viewer.animation import custom_operation_speed_multiplier, operation_speed_multiplier
+from crystal_viewer.viewer.scene_rendering import add_unit_cell
+from crystal_viewer.viewer.symmetry_elements import (
+    add_symmetry_element_actors,
+    add_symmetry_elements,
+    display_symmetry_elements,
+)
 
 
 class BrowserControlledViewer(NativePyVistaViewer):
@@ -354,7 +367,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             cached = self.element_context_cache.get(operation_index) if self.improper_mode == "auto" else None
             if cached is not None:
                 axes, planes, centers = cached
-                actors = viewer.add_symmetry_element_actors(
+                actors = add_symmetry_element_actors(
                     self.plotter,
                     self.render_data,
                     axes,
@@ -363,7 +376,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                     display_mode=self.display_mode,
                 )
             else:
-                actors = viewer.add_symmetry_elements(
+                actors = add_symmetry_elements(
                     self.plotter,
                     self.render_data,
                     self.atom_mappings,
@@ -439,7 +452,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if self.debug_timer:
             print(f"[viewer] reload atoms {time.monotonic() - debug_start:.3f}s", flush=True)
         if self.render_data.get("unit_cell"):
-            viewer.add_unit_cell(self.plotter, self.render_data["unit_cell"])
+            add_unit_cell(self.plotter, self.render_data["unit_cell"])
         self.plotter.add_axes()
         if self.debug_timer:
             print(f"[viewer] reload axes {time.monotonic() - debug_start:.3f}s", flush=True)
@@ -453,7 +466,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             print(f"[viewer] reload done {time.monotonic() - debug_start:.3f}s", flush=True)
 
     def atom_color(self, atom: dict) -> str:
-        return viewer.atom_color(
+        return atom_color(
             atom,
             element_colors=getattr(self, "element_colors", {}),
             atom_colors=getattr(self, "atom_colors", {}),
@@ -466,7 +479,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 continue
             color = self.atom_color(item["atom"])
             try:
-                actor.GetProperty().SetColor(*viewer.color_to_rgb(color))
+                actor.GetProperty().SetColor(*color_to_rgb(color))
             except Exception:
                 pass
 
@@ -508,7 +521,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         cached = self.element_context_cache.get(operation["index"]) if self.improper_mode == "auto" else None
         axes, planes, centers = cached if cached is not None else (None, None, None)
         if axes is None or planes is None or centers is None:
-            axes, planes, centers = viewer.display_symmetry_elements(
+            axes, planes, centers = display_symmetry_elements(
                 self.render_data,
                 self.atom_mappings,
                 operation["index"],
@@ -554,7 +567,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
     def camera_view_extent(self, center: np.ndarray, direction: np.ndarray) -> tuple[float, float]:
         points = self.camera_reference_points()
         if points.size == 0:
-            span = viewer.display_scene_span(self.render_data, self.display_mode)
+            span = display_scene_span(self.render_data, self.display_mode)
             radius = max(span * 0.35, 1.0)
             return radius, span
 
@@ -566,7 +579,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         projected_radii = np.linalg.norm(projected, axis=1)
         full_radius = float(np.max(projected_radii)) if len(projected_radii) else 1.0
         robust_radius = float(np.percentile(projected_radii, 85)) if len(projected_radii) > 4 else full_radius
-        scene_span = viewer.display_scene_span(self.render_data, self.display_mode)
+        scene_span = display_scene_span(self.render_data, self.display_mode)
 
         source_kind = str(self.render_data.get("metadata", {}).get("mode", "crystal"))
         if source_kind == "molecule":
@@ -582,7 +595,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
     def camera_reference_points(self) -> np.ndarray:
         points = []
         try:
-            points.extend(item["cart"] for item in viewer.display_atom_instances(self.render_data, display_mode=self.display_mode))
+            points.extend(item["cart"] for item in display_atom_instances(self.render_data, display_mode=self.display_mode))
         except Exception:
             points.extend(np.asarray(atom["cart"], dtype=float) for atom in self.render_data.get("atoms", []))
 
@@ -592,7 +605,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             if self.display_mode == "source":
                 points.extend(np.asarray(unit_cell["vertices_cart"], dtype=float))
             else:
-                margin = viewer.display_mode_margin(self.display_mode)
+                margin = display_mode_margin(self.display_mode)
                 lower = -0.5 - margin
                 upper = 0.5 + margin
                 corners = np.asarray(
@@ -647,7 +660,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.reset_camera_clipping_range()
 
     def display_center(self) -> np.ndarray:
-        return viewer.display_scene_center(self.render_data, self.display_mode)
+        return display_scene_center(self.render_data, self.display_mode)
 
     def reset_view_center(self) -> None:
         self.set_camera_center(self.display_center())
@@ -680,8 +693,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.reset_camera_clipping_range()
 
     def recenter_camera_for_display_mode(self, old_display_mode: str, new_display_mode: str) -> None:
-        old_center = viewer.display_scene_center(self.render_data, old_display_mode)
-        new_center = viewer.display_scene_center(self.render_data, new_display_mode)
+        old_center = display_scene_center(self.render_data, old_display_mode)
+        new_center = display_scene_center(self.render_data, new_display_mode)
         shift = new_center - old_center
         if np.linalg.norm(shift) < 1e-10:
             return
@@ -870,7 +883,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 continue
             start = np.asarray(atom["cart"], dtype=float)
             target = W_cart @ start + t_cart
-            path = viewer.build_operation_path(
+            path = build_operation_path(
                 start, target, fake_op,
                 axis=axis_dict, plane=plane_dict, center=center_dict,
                 improper_mode=self.improper_mode,
@@ -892,7 +905,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         centers = elements.get("centers") or []
         if axes or planes or centers:
             self.custom_check_actors.extend(
-                viewer.add_symmetry_element_actors(
+                add_symmetry_element_actors(
                     self.plotter,
                     self.render_data,
                     axes,
@@ -914,7 +927,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             if atom["index"] not in unmapped_set:
                 continue
             center = np.asarray(atom["cart"], dtype=float) + np.asarray(item["display_shift_cart"], dtype=float)
-            radius = self.atom_radius(atom["atomic_number"]) * viewer.HIGHLIGHT_RADIUS_SCALE
+            radius = self.atom_radius(atom["atomic_number"]) * HIGHLIGHT_RADIUS_SCALE
             sphere = pv.Sphere(radius=radius, center=center, theta_resolution=24, phi_resolution=14)
             actor = self.plotter.add_mesh(
                 sphere,
