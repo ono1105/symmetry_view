@@ -68,6 +68,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_selected_atoms: tuple[int, ...] | None = None
         self.last_element_colors: dict[str, str] | None = None
         self.last_atom_colors: dict[str, str] | None = None
+        self.last_element_hidden: dict[str, bool] | None = None
+        self.last_atom_hidden: dict[str, bool] | None = None
         self.last_display_mode: str | None = self.display_mode
         self.last_projection_mode: str | None = None
         self.last_improper_mode: str | None = None
@@ -112,6 +114,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
             selected_atoms = tuple(int(index) for index in self.shared_state.get("selected_atoms", []))
             element_colors = dict(self.shared_state.get("element_colors", {}))
             atom_colors = dict(self.shared_state.get("atom_colors", {}))
+            element_hidden = dict(self.shared_state.get("element_hidden", {}))
+            atom_hidden = dict(self.shared_state.get("atom_hidden", {}))
             speed = float(self.shared_state.get("speed", 1.0))
             projection_mode = str(self.shared_state.get("projection_mode", "perspective"))
             improper_mode = str(self.shared_state.get("improper_mode", "auto"))
@@ -177,6 +181,21 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.last_element_colors = dict(element_colors)
             self.last_atom_colors = dict(atom_colors)
             should_render = True
+
+        if element_hidden != self.last_element_hidden or atom_hidden != self.last_atom_hidden:
+            self.element_hidden = element_hidden
+            self.atom_hidden = atom_hidden
+            self.clear_glyph_atom_cache()
+            current_display_mode = self.display_mode
+            self.display_mode = ""
+            self.rebuild_display_atoms(current_display_mode)
+            self.build_paths()
+            self.update_start_markers()
+            self.last_element_hidden = dict(element_hidden)
+            self.last_atom_hidden = dict(atom_hidden)
+            reset = True
+            should_render = True
+            should_update_status = True
 
         if active_mode != self.last_active_mode:
             if active_mode == "custom":
@@ -466,6 +485,14 @@ class BrowserControlledViewer(NativePyVistaViewer):
             element_colors=getattr(self, "element_colors", {}),
             atom_colors=getattr(self, "atom_colors", {}),
         )
+
+    def display_atom_visible(self, display_item: dict) -> bool:
+        atom = display_item["atom"]
+        if getattr(self, "element_hidden", {}).get(str(atom.get("element", ""))):
+            return False
+        if getattr(self, "atom_hidden", {}).get(str(atom.get("index", ""))):
+            return False
+        return True
 
     def apply_atom_colors(self) -> None:
         if self.use_glyph_atom_rendering():

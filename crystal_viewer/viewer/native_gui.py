@@ -256,6 +256,8 @@ class NativePyVistaViewer:
         else:
             visible_items = []
             for display_item in display_atom_instances(self.render_data, display_mode=self.display_mode):
+                if not self.display_atom_visible(display_item):
+                    continue
                 item = self.ensure_display_atom(display_item)
                 actor = item.get("actor")
                 if actor is not None:
@@ -316,11 +318,30 @@ class NativePyVistaViewer:
                     pass
         self.atom_glyph_groups = []
 
+    def clear_glyph_atom_cache(self) -> None:
+        seen = set()
+        for groups in self.atom_glyph_cache.values():
+            for group in groups:
+                actor = group.get("actor")
+                if actor is None or id(actor) in seen:
+                    continue
+                seen.add(id(actor))
+                try:
+                    self.plotter.remove_actor(actor)
+                except Exception:
+                    pass
+        self.atom_glyph_cache = {}
+        self.atom_glyph_groups = []
+
     def ensure_glyph_display_atoms(self, display_mode: str) -> list[dict]:
         groups = self.atom_glyph_cache.get(display_mode)
         if groups is None:
             groups = []
-            for batch in element_instance_batches(self.render_data, display_mode=display_mode):
+            for batch in element_instance_batches(
+                self.render_data,
+                display_mode=display_mode,
+                item_filter=self.display_atom_visible,
+            ):
                 glyph = build_element_glyph_mesh(batch, self.render_data)
                 color = self.atom_color({"element": batch.element, "atomic_number": batch.atomic_number})
                 actor = self.plotter.add_mesh(glyph.mesh, color=color, **ATOM_MESH_STYLE)
@@ -364,6 +385,9 @@ class NativePyVistaViewer:
                     pass
             visible_items.extend(group["items"])
         return visible_items
+
+    def display_atom_visible(self, display_item: dict) -> bool:
+        return True
 
     def sphere_mesh(self, atomic_number: int, radius: float) -> pv.PolyData:
         key = (int(atomic_number), round(float(radius), 6))

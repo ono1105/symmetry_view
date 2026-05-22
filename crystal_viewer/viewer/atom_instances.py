@@ -28,9 +28,16 @@ def display_instance_key(display_item: dict) -> DisplayInstanceKey:
     return int(atom["index"]), shift_key
 
 
-def element_instance_batches(render_data: dict, *, display_mode: str) -> tuple[ElementInstanceBatch, ...]:
+def element_instance_batches(
+    render_data: dict,
+    *,
+    display_mode: str,
+    item_filter=None,
+) -> tuple[ElementInstanceBatch, ...]:
     grouped: dict[str, list[dict]] = {}
     for item in display_atom_instances(render_data, display_mode=display_mode):
+        if item_filter is not None and not item_filter(item):
+            continue
         atom = item["atom"]
         element = str(atom.get("element") or atom.get("label") or atom.get("index"))
         grouped.setdefault(element, []).append(item)

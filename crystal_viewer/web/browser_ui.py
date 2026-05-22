@@ -297,6 +297,12 @@ HTML = """<!doctype html>
       background: transparent;
       flex: 0 0 auto;
     }
+    .atom-row input[type="checkbox"] {
+      flex: 0 0 auto;
+    }
+    .atom-row .visibility-toggle {
+      margin-left: 2px;
+    }
     .element-color-list {
       display: flex;
       flex-wrap: wrap;
@@ -316,6 +322,10 @@ HTML = """<!doctype html>
       padding: 0;
       border: 0;
       background: transparent;
+    }
+    .element-color-item input[type="checkbox"] {
+      width: auto;
+      margin: 0;
     }
     .check-row {
       display: flex;
@@ -710,7 +720,7 @@ HTML = """<!doctype html>
       </section>
       <section class="panel">
         <h2 class="section-title">Atoms</h2>
-        <label>Element colors</label>
+        <label>Elements</label>
         <div class="element-color-list" id="element-colors"></div>
         <label>Element filter</label>
         <div class="direction-filter-list" id="atom-element-filter"></div>
@@ -816,6 +826,12 @@ function atomEffectiveColor(atom) {
   return normalizeColor(
     atomColors[String(atom.index)] || elementColors[atom.element] || atom.default_color,
   );
+}
+
+function atomVisible(atom) {
+  const atomHidden = state.atom_hidden || {};
+  const elementHidden = state.element_hidden || {};
+  return !elementHidden[atom.element] && !atomHidden[String(atom.index)];
 }
 
 function renderOperations() {
@@ -1182,11 +1198,22 @@ function renderElementColorControls() {
   const root = document.getElementById("element-colors");
   const elements = [...new Set(atoms.map(atom => atom.element))].sort(compareText);
   const elementColors = state.element_colors || {};
+  const elementHidden = state.element_hidden || {};
   root.innerHTML = "";
   for (const element of elements) {
     const sample = atoms.find(atom => atom.element === element);
     const label = document.createElement("div");
     label.className = "element-color-item";
+    const visible = document.createElement("input");
+    visible.type = "checkbox";
+    visible.checked = !elementHidden[element];
+    visible.title = `Show ${element}`;
+    visible.addEventListener("change", () => {
+      const next = Object.assign({}, state.element_hidden || {});
+      if (visible.checked) delete next[element];
+      else next[element] = true;
+      postState({element_hidden: next, playing: false, reset: true});
+    });
     const input = document.createElement("input");
     input.type = "color";
     input.value = normalizeColor(elementColors[element] || (sample && sample.default_color));
@@ -1197,6 +1224,7 @@ function renderElementColorControls() {
     });
     const span = document.createElement("span");
     span.textContent = element;
+    label.appendChild(visible);
     label.appendChild(input);
     label.appendChild(span);
     root.appendChild(label);
@@ -1215,6 +1243,7 @@ function renderAtoms() {
     if (customUnmappedAtoms.has(atom.index)) label.classList.add("unmapped");
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
+    checkbox.className = "animation-toggle";
     checkbox.value = atom.index;
     checkbox.checked = selected.has(atom.index);
     checkbox.addEventListener("change", onAtomSelectionChange);
@@ -1227,6 +1256,17 @@ function renderAtoms() {
       next[String(atom.index)] = colorInput.value;
       postState({atom_colors: next});
     });
+    const visibleInput = document.createElement("input");
+    visibleInput.type = "checkbox";
+    visibleInput.className = "visibility-toggle";
+    visibleInput.checked = atomVisible(atom);
+    visibleInput.title = `Show atom ${atom.index}`;
+    visibleInput.addEventListener("change", () => {
+      const next = Object.assign({}, state.atom_hidden || {});
+      if (visibleInput.checked) delete next[String(atom.index)];
+      else next[String(atom.index)] = true;
+      postState({atom_hidden: next, playing: false, reset: true});
+    });
     const span = document.createElement("span");
     span.appendChild(renderHtml(text));
     if (customUnmappedAtoms.has(atom.index)) {
@@ -1237,6 +1277,7 @@ function renderAtoms() {
     }
     label.appendChild(checkbox);
     label.appendChild(colorInput);
+    label.appendChild(visibleInput);
     label.appendChild(span);
     root.appendChild(label);
   }
@@ -1298,7 +1339,7 @@ function syncGifSavingControls() {
 }
 
 function selectedAtomIndices() {
-  return Array.from(document.querySelectorAll("#atoms input[type=checkbox]:checked"))
+  return Array.from(document.querySelectorAll("#atoms input.animation-toggle:checked"))
     .map(input => Number(input.value));
 }
 
