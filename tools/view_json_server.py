@@ -39,7 +39,7 @@ from crystal_viewer.viewer.custom_operation import (
     check_custom_operation,
     custom_operation_visuals,
 )
-from crystal_viewer.viewer.browser_ui import HTML
+from crystal_viewer.web.browser_ui import HTML
 from crystal_viewer.viewer.operation_labels import atom_frac_label, operation_summaries
 from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 
