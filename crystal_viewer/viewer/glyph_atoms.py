@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import pyvista as pv
 
 from crystal_viewer.viewer.atom_instances import ElementInstanceBatch
@@ -17,6 +18,14 @@ class ElementGlyphPreview:
     glyph_cell_count: int
     point_cloud: pv.PolyData
     glyph_mesh: pv.PolyData
+
+
+@dataclass
+class ElementGlyphMesh:
+    element: str
+    atomic_number: int
+    template_points: np.ndarray
+    mesh: pv.PolyData
 
 
 def build_element_glyph_preview(
@@ -48,3 +57,62 @@ def build_element_glyph_preview(
         point_cloud=point_cloud,
         glyph_mesh=glyph_mesh,
     )
+
+
+def build_element_glyph_mesh(
+    batch: ElementInstanceBatch,
+    render_data: dict,
+    *,
+    theta_resolution: int = 16,
+    phi_resolution: int = 10,
+) -> ElementGlyphMesh:
+    atom = {
+        "atomic_number": batch.atomic_number,
+        "element": batch.element,
+    }
+    radius = display_atom_radius(atom, render_data)
+    sphere = pv.Sphere(
+        radius=radius,
+        center=(0.0, 0.0, 0.0),
+        theta_resolution=theta_resolution,
+        phi_resolution=phi_resolution,
+    )
+    template_points = np.asarray(sphere.points, dtype=float).copy()
+    points = batched_points(template_points, batch.positions)
+    faces = offset_faces(np.asarray(sphere.faces, dtype=np.int64), len(template_points), len(batch.positions))
+    return ElementGlyphMesh(
+        element=batch.element,
+        atomic_number=batch.atomic_number,
+        template_points=template_points,
+        mesh=pv.PolyData(points, faces),
+    )
+
+
+def update_element_glyph_mesh(mesh: ElementGlyphMesh, positions: np.ndarray) -> None:
+    mesh.mesh.points = batched_points(mesh.template_points, np.asarray(positions, dtype=float))
+    mesh.mesh.Modified()
+
+
+def batched_points(template_points: np.ndarray, positions: np.ndarray) -> np.ndarray:
+    return (np.asarray(positions, dtype=float)[:, None, :] + template_points[None, :, :]).reshape(-1, 3)
+
+
+def offset_faces(faces: np.ndarray, point_count: int, instance_count: int) -> np.ndarray:
+    if instance_count <= 0:
+        return np.asarray([], dtype=np.int64)
+    faces = np.asarray(faces, dtype=np.int64)
+    chunks = []
+    cursor = 0
+    face_chunks = []
+    while cursor < len(faces):
+        size = int(faces[cursor])
+        chunk = faces[cursor: cursor + size + 1].copy()
+        face_chunks.append(chunk)
+        cursor += size + 1
+    for instance_index in range(instance_count):
+        offset = instance_index * point_count
+        for chunk in face_chunks:
+            shifted = chunk.copy()
+            shifted[1:] += offset
+            chunks.append(shifted)
+    return np.concatenate(chunks) if chunks else np.asarray([], dtype=np.int64)

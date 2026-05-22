@@ -26,6 +26,7 @@ def update_animated_atoms(animated_atoms: list[dict], paths: dict[int, dict], s:
         center = np.asarray(atom["cart"], dtype=float) + display_shift
         if path is not None and path_applies_to_display_item(path, item):
             center = evaluate_path(path, s, start_override=np.asarray(atom["cart"], dtype=float) + display_shift)
+        item["current_cart"] = center
         actor = item.get("actor")
         if actor is not None:
             actor.SetPosition(*center)

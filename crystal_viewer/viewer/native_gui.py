@@ -32,11 +32,12 @@ from crystal_viewer.viewer.animation import (
     path_applies_to_display_item,
     update_animated_atoms,
 )
-from crystal_viewer.viewer.atom_instances import display_instance_key
+from crystal_viewer.viewer.atom_instances import display_instance_key, element_instance_batches
 from crystal_viewer.viewer.atom_style import (
     ATOM_MESH_STYLE,
     HIGHLIGHT_RADIUS_SCALE,
     atom_color,
+    color_to_rgb,
     display_atom_radius,
 )
 from crystal_viewer.viewer.cli_helpers import (
@@ -44,6 +45,7 @@ from crystal_viewer.viewer.cli_helpers import (
     print_operations,
 )
 from crystal_viewer.viewer.display_atoms import display_atom_instances
+from crystal_viewer.viewer.glyph_atoms import build_element_glyph_mesh, update_element_glyph_mesh
 from crystal_viewer.viewer.operation_lookup import selected_mapping
 from crystal_viewer.viewer.scene_rendering import add_unit_cell
 from crystal_viewer.viewer.symmetry_elements import add_symmetry_elements
@@ -74,6 +76,8 @@ class NativePyVistaViewer:
         self.start_marker_actors: list = []
         self.animated_atoms: list[dict] = []
         self.atom_actor_cache: dict[tuple[int, tuple[int, int, int]], dict] = {}
+        self.atom_glyph_cache: dict[str, list[dict]] = {}
+        self.atom_glyph_groups: list[dict] = []
         self.sphere_mesh_cache: dict[tuple[int, float], pv.PolyData] = {}
         self.paths: dict[int, dict] = {}
         self.playing = False
@@ -200,6 +204,8 @@ class NativePyVistaViewer:
         for item in self.animated_atoms:
             if item.get("marker_actor") is not None:
                 continue
+            if self.use_glyph_atom_rendering() and not item.get("is_primary_image", True):
+                continue
             atom = item["atom"]
             center = np.asarray(atom["cart"], dtype=float) + item["display_shift_cart"]
             radius = self.atom_radius(atom["atomic_number"]) * HIGHLIGHT_RADIUS_SCALE
@@ -234,6 +240,8 @@ class NativePyVistaViewer:
         if display_mode == self.display_mode and self.animated_atoms:
             return
         self.display_mode = display_mode
+        self.hide_start_markers()
+        self.hide_glyph_atom_groups()
         for cached in self.atom_actor_cache.values():
             for actor_name in ("actor", "marker_actor"):
                 actor = cached.get(actor_name)
@@ -243,16 +251,19 @@ class NativePyVistaViewer:
                     except Exception:
                         pass
 
-        visible_items = []
-        for display_item in display_atom_instances(self.render_data, display_mode=self.display_mode):
-            item = self.ensure_display_atom(display_item)
-            actor = item.get("actor")
-            if actor is not None:
-                try:
-                    actor.SetVisibility(True)
-                except Exception:
-                    pass
-            visible_items.append(item)
+        if self.use_glyph_atom_rendering():
+            visible_items = self.ensure_glyph_display_atoms(self.display_mode)
+        else:
+            visible_items = []
+            for display_item in display_atom_instances(self.render_data, display_mode=self.display_mode):
+                item = self.ensure_display_atom(display_item)
+                actor = item.get("actor")
+                if actor is not None:
+                    try:
+                        actor.SetVisibility(True)
+                    except Exception:
+                        pass
+                visible_items.append(item)
 
         self.animated_atoms = visible_items
         self.create_start_markers()
@@ -291,6 +302,64 @@ class NativePyVistaViewer:
         }
         self.atom_actor_cache[key] = cached
         return cached
+
+    def use_glyph_atom_rendering(self) -> bool:
+        return False
+
+    def hide_glyph_atom_groups(self) -> None:
+        for group in self.atom_glyph_groups:
+            actor = group.get("actor")
+            if actor is not None:
+                try:
+                    actor.SetVisibility(False)
+                except Exception:
+                    pass
+        self.atom_glyph_groups = []
+
+    def ensure_glyph_display_atoms(self, display_mode: str) -> list[dict]:
+        groups = self.atom_glyph_cache.get(display_mode)
+        if groups is None:
+            groups = []
+            for batch in element_instance_batches(self.render_data, display_mode=display_mode):
+                glyph = build_element_glyph_mesh(batch, self.render_data)
+                color = self.atom_color({"element": batch.element, "atomic_number": batch.atomic_number})
+                actor = self.plotter.add_mesh(glyph.mesh, color=color, **ATOM_MESH_STYLE)
+                items = []
+                for position, display_item in enumerate(batch.items):
+                    item = {
+                        "atom": display_item["atom"],
+                        "display_shift_frac": np.asarray(display_item["display_shift_frac"], dtype=float),
+                        "display_shift_cart": np.asarray(display_item["display_shift_cart"], dtype=float),
+                        "is_primary_image": bool(display_item.get("is_primary_image", True)),
+                        "current_cart": np.asarray(display_item["cart"], dtype=float),
+                        "actor": None,
+                        "marker_actor": None,
+                        "glyph_element": batch.element,
+                        "glyph_position": position,
+                    }
+                    items.append(item)
+                groups.append(
+                    {
+                        "element": batch.element,
+                        "glyph": glyph,
+                        "actor": actor,
+                        "items": items,
+                    }
+                )
+            self.atom_glyph_cache[display_mode] = groups
+        self.atom_glyph_groups = groups
+        visible_items = []
+        for group in groups:
+            actor = group.get("actor")
+            if actor is not None:
+                try:
+                    color = self.atom_color({"element": group["element"], "atomic_number": 0})
+                    actor.GetProperty().SetColor(*color_to_rgb(color))
+                    actor.SetVisibility(True)
+                except Exception:
+                    pass
+            visible_items.extend(group["items"])
+        return visible_items
 
     def sphere_mesh(self, atomic_number: int, radius: float) -> pv.PolyData:
         key = (int(atomic_number), round(float(radius), 6))
@@ -387,6 +456,16 @@ class NativePyVistaViewer:
 
     def update_atoms(self, s: float) -> None:
         update_animated_atoms(self.animated_atoms, self.paths, s)
+        self.update_glyph_atom_groups()
+
+    def update_glyph_atom_groups(self) -> None:
+        for group in self.atom_glyph_groups:
+            items = group["items"]
+            positions = np.asarray(
+                [item.get("current_cart", np.asarray(item["atom"]["cart"], dtype=float) + item["display_shift_cart"]) for item in items],
+                dtype=float,
+            )
+            update_element_glyph_mesh(group["glyph"], positions)
 
     def update_status(self) -> None:
         operation = self.current_operation()

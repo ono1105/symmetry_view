@@ -168,7 +168,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if element_colors != self.last_element_colors or atom_colors != self.last_atom_colors:
             self.element_colors = element_colors
             self.atom_colors = atom_colors
-            self.apply_atom_colors()
+            if self.use_glyph_atom_rendering() != bool(self.atom_glyph_groups):
+                current_display_mode = self.display_mode
+                self.display_mode = ""
+                self.rebuild_display_atoms(current_display_mode)
+            else:
+                self.apply_atom_colors()
             self.last_element_colors = dict(element_colors)
             self.last_atom_colors = dict(atom_colors)
             should_render = True
@@ -439,6 +444,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.start_marker_actors = []
         self.animated_atoms = []
         self.atom_actor_cache = {}
+        self.atom_glyph_cache = {}
+        self.atom_glyph_groups = []
         self.sphere_mesh_cache = {}
         self.paths = {}
         self.status_actor = None
@@ -473,6 +480,17 @@ class BrowserControlledViewer(NativePyVistaViewer):
         )
 
     def apply_atom_colors(self) -> None:
+        if self.use_glyph_atom_rendering():
+            for group in self.atom_glyph_groups:
+                actor = group.get("actor")
+                if actor is None:
+                    continue
+                color = self.atom_color({"element": group.get("element", ""), "atomic_number": 0})
+                try:
+                    actor.GetProperty().SetColor(*color_to_rgb(color))
+                except Exception:
+                    pass
+            return
         for item in self.animated_atoms:
             actor = item.get("actor")
             if actor is None:
@@ -482,6 +500,9 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 actor.GetProperty().SetColor(*color_to_rgb(color))
             except Exception:
                 pass
+
+    def use_glyph_atom_rendering(self) -> bool:
+        return not bool(getattr(self, "atom_colors", {}))
 
     def set_projection_mode(self, projection_mode: str) -> None:
         if projection_mode == "orthographic":
