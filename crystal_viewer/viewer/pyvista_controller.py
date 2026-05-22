@@ -12,7 +12,7 @@ import pyvista as pv
 from PIL import Image, ImageDraw, ImageFont
 
 from crystal_viewer.geometry import normalize
-from tools.view_json_gui import NativePyVistaViewer
+from crystal_viewer.viewer.native_gui import NativePyVistaViewer
 from crystal_viewer.viewer.animation import custom_operation_speed_multiplier, operation_speed_multiplier
 from crystal_viewer.viewer.animation_path import build_operation_path
 from crystal_viewer.viewer.atom_style import HIGHLIGHT_RADIUS_SCALE, atom_color, color_to_rgb
