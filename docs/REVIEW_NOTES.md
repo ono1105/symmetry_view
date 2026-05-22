@@ -2731,3 +2731,247 @@ from crystal_viewer.viewer.pyvista_controller import operation_speed_multiplier
 - `effective_rotation_axis` を `animation.py` と `view_json_pyvista.py` で再エクスポートし、`operation_labels.py` の既存 `viewer.effective_rotation_axis(...)` 参照を復旧。
 - `operation_speed_multiplier` / `custom_operation_speed_multiplier` を `animation.py` に移し、`view_json_pyvista.py` からも参照できるようにした。
 - `pyvista_controller.py` は同じ速度倍率関数を `animation.py` から import するようにし、重複定義を削除。
+
+---
+
+## Claude レビュー (2026-05-22) — 直近2コミット確認
+
+対象コミット:
+- `76cc1af` Decouple native GUI from PyVista CLI facade
+- `6011e24` Move PyVista CLI helpers into viewer package
+
+---
+
+### 修正確認: 前回レポートした2バグが解消されていた ✓
+
+**`viewer.effective_rotation_axis` 欠損 (高):**
+`animation.py` の `animation_path` インポートに `effective_rotation_axis` が追加済み。
+`operation_summaries(render_data, None)` でもクラッシュしないことを実測確認:
+```
+jacobsite: with_mappings=192  without_mappings=192  OK
+```
+
+**`viewer.operation_speed_multiplier` 欠損 (中):**
+`operation_speed_multiplier` / `custom_operation_speed_multiplier` が `animation.py` に移動・定義され、`view_json_gui.py` は `crystal_viewer.viewer.animation` から直接インポートするよう修正済み。
+
+---
+
+### 変更概要（バグなし）
+
+**`tools/view_json_gui.py`:**
+- `from tools import view_json_pyvista as viewer` を削除し、`crystal_viewer.*` から直接インポートに全面移行。
+- `representative_atom = selected_atoms[0] if self.scope == "selected" and selected_atoms else None` に修正 — 前回レビューで指摘した「scope=displayed/unit_cell のとき atom[0] を代表にしていた」バグが解消されている。
+
+**`crystal_viewer/viewer/cli_helpers.py` (新規):**
+- `parse_selected_atoms`, `print_operations`, `print_elements`, `print_mapping`, `add_title` をここに集約。
+- PyVista (`pyvista`) に依存するのは `add_title` のみ (`pv.Plotter` を引数で受け取るだけで import 宣言はある)。
+
+**`crystal_viewer/viewer/cli_animation.py` (新規):**
+- `run_animation`, `effective_animation_fps` を移動。
+- `frames = max(frame_count, 2)` → `frame / (frames - 1)` でゼロ除算なし ✓
+
+**`tools/view_json_pyvista.py`:**
+- 旧来の全 re-export を削除し、178行の純粋な CLI エントリポイントに縮小。
+- `numpy`、`animation_paths`、`atom_color` 等の重量ライブラリ・関数をインポートしなくなった。
+
+---
+
+### 残留確認事項（新バグなし）
+
+- `from tools import view_json_pyvista as viewer` を使うファイルがプロジェクト内に0件であることを確認済み ✓
+- 全モジュールの import チェーン（循環なし）✓
+- 機能テスト（jacobsite rotoinversion / water / アニメーションパス構築）すべて OK ✓
+
+---
+
+## Claude レビュー (2026-05-22) — Jacobsite 読み込み遅延の原因調査
+
+**症状:** ブラウザで "Open Example → Jacobsite" を選択すると他の構造より明らかに読み込みが遅い。
+
+---
+
+### 原因1（主因・修正可能）: 7MB JSON を2回パースしている
+
+**場所:** `tools/view_json_server.py`  
+- `cached_export_json_path()` (L695): キャッシュ有効チェックのために `jacobsite.json`（7MB）を全読み込み＋パース
+- `handle_open_example()` (L480): 直後に同じファイルをもう一度読み込み＋パース
+
+```python
+# cached_export_json_path の中
+payload = json.loads(output_path.read_text(encoding="utf-8"))  # 7MB パース
+...
+return output_path  # payload を捨てる ← ここが問題
+
+# handle_open_example の呼び出し側
+new_payload = json.loads(json_path.read_text(encoding="utf-8"))  # 同じ 7MB を再パース
+```
+
+**実測値:**
+```
+1st parse (cache check): 46ms
+2nd parse (load):        43ms  ← 丸ごと無駄
+合計の無駄:              89ms
+```
+
+**修正案:** `cached_export_json_path` がパース済みペイロードも返すように変更し、呼び出し側で再パースしない。
+
+```python
+def cached_export_json_path(
+    input_path, output_path, *, mode
+) -> tuple[Path, dict] | None:
+    ...
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    ...
+    return output_path, payload  # payload も返すことで二重パースを排除
+```
+
+---
+
+### 原因2（副因・構造的）: jacobsite.json が 7MB と突出して大きい
+
+```
+agcl.json      22KB  (4 ops)    → 瞬時
+f2_pd.json    126KB  (12 ops)   → 瞬時
+halite.json   1.1MB  (192 ops)  → やや体感あり
+jacobsite.json 7.0MB (192 ops)  → 明確に遅い
+```
+
+56原子 × 192操作 × `atom_mappings` エントリ（`transformed_cart` / `transformed_frac` / `wrapped_frac` / `animation_frac` の 4 種 × 各 3 float）によりファイルが肥大化している。同じ 192 操作の halite（8 原子）の 6 倍のサイズ。
+
+---
+
+### 原因3（既に改善済み）: `operation_summaries` の計算コスト
+
+```
+operation_summaries (192 ops): 59ms  ← 旧バージョンの 700ms から大幅改善
+```
+
+`display_symmetry_elements`（`select_animation_context` を呼ぶ重い処理）→ `selected_elements`（単純なフィルタ）への切り替えにより解消済み。現状では問題ではない。
+
+---
+
+### 構造別・フル読み込み時間の実測比較
+
+```
+構造           サイズ    二重パース    summaries    合計
+─────────────────────────────────────────────────────
+agcl (4 ops)    22KB       <1ms          <1ms      ~2ms
+f2_pd (12 ops) 126KB        4ms           5ms      ~9ms
+halite (192op) 1.1MB       20ms          59ms     ~80ms
+jacobsite      7.0MB       89ms          59ms    ~150ms
+```
+
+Jacobsite が他と比べて遅い直接原因は JSON サイズによる二重パースコスト。`operation_summaries` は 192 ops でも 59ms と共通のため、ファイルサイズだけが差を生む。
+
+---
+
+### 推奨対応優先順位
+
+1. **二重パース解消（即効性あり）:** `cached_export_json_path` が `(path, payload)` を返すよう変更し、`handle_open_example` での再読み込みを廃止。約 43ms 削減。
+2. **参考・将来対応:** `atom_mappings` エントリから `animation_frac` / `wrapped_frac` など再計算可能なフィールドをエクスポート時に省略してファイルサイズを削減（ただし viewer 側でのオンザフライ計算が必要になるためトレードオフあり）。
+
+### Codex 対応状況（2026-05-22）
+
+- `1e893c3` で example 構造の読み込み時に既存 JSON キャッシュを再利用するよう変更済み。
+- `47626a1` で `operation_summaries` を軽量な `selected_elements` ベースに変更済み。
+- `a2a7945` で `cached_export_json_path()` がパース済み payload を返し、`handle_open_example()` 側の二重 JSON パースを解消済み。
+
+残る将来対応は JSON 自体の軽量化。`atom_mappings` の一部フィールド省略は viewer 側の再計算設計が必要なため、現時点では未着手。
+
+---
+
+## Claude 設計メモ (2026-05-22) — 表示範囲（Range）拡張時の描画重さ改善案
+
+**症状:** ブラウザの Display Range を source → ±1/4 → ±1 と広げると PyVista 画面の更新が重い。  
+VESTA は同操作が瞬時に完了する。
+
+---
+
+### なぜ VESTA が速いか
+
+VESTA は **GPU インスタンシング** を使用。元素種ごとに球メッシュ1つをGPUにアップロードし、全原子位置の変換行列をまとめて渡して1回のドローコールで描画する。
+
+---
+
+### 現在のビューアが遅い理由
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py` `ensure_display_atom()`
+
+```python
+actor = self.plotter.add_mesh(mesh, color=color, ...)
+actor.SetPosition(*center)
+```
+
+原子インスタンス1つにつき1回 `plotter.add_mesh()` を呼ぶ個別 actor 方式。
+
+```
+Jacobsite ±1 表示: 56 原子 × 最大 27 周期イメージ = ~1512 actor
+= 1512 回の plotter.add_mesh()  (初回作成時)
+= 1512 ドローコール / フレーム  (描画時)
+```
+
+`atom_actor_cache` によりモード間での actor 再利用は実装済みだが、**初回作成コスト**と**フレームごとのドローコール数**が多いことが根本原因。
+
+---
+
+### アニメーションを維持しつつ高速化できるか → できる
+
+**アプローチ: glyph メッシュ ＋ VTK 点座標インプレース更新**
+
+PyVista の `glyph()` (内部: VTK `vtkGlyph3D`) を使うと、元素種ごとに1つの actor で全インスタンスを描画できる。
+
+```python
+# 初期化: 元素ごとに1 glyph actor
+cloud = pv.PolyData(positions_array)  # 全原子座標 shape=(N, 3)
+glyphs = cloud.glyph(geom=sphere_template, scale=False)
+actor = plotter.add_mesh(glyphs, color=element_color)
+
+# アニメーション毎フレーム
+cloud.points[animated_indices] = new_positions  # numpy 配列インプレース更新
+cloud.Modified()                                 # VTK に変更通知
+plotter.render()
+```
+
+```
+Jacobsite ±1 表示: 元素種 3 (Mn/Fe/O) → 3 actor = 3 ドローコール / フレーム
+```
+
+アニメーションの精度・コストは現行 (`actor.SetPosition()` × N) と同等。
+
+---
+
+### 互換性上の注意点
+
+| 機能 | 現行 | glyph 移行後 |
+|---|---|---|
+| 原子ごとの色変更 | `actor.GetProperty().SetColor()` | glyph の `point_data` にカラー配列 (`vtkUnsignedCharArray`) を持たせて更新 |
+| unit_cell_only フラグ | `path["unit_cell_only"]` で判定 | primary image のインデックスのみ更新 |
+| unmapped atom ワイヤーフレーム | 個別 actor（現行どおり） | 変更不要（少数なので個別 actor で問題なし） |
+
+---
+
+### 変更が必要なコンポーネント
+
+| 変更箇所 | 変更内容 |
+|---|---|
+| `rebuild_display_atoms` | 個別 actor 生成 → 元素ごと glyph 作成（`atom_actor_cache` 廃止） |
+| `update_atoms` | `actor.SetPosition()` × N → `cloud.points[indices] = new_pos` + `Modified()` |
+| `apply_atom_colors` | `actor.GetProperty().SetColor()` → `point_data` カラー配列更新 |
+| `NativePyVistaViewer` 側 | 同様の変更（`BrowserControlledViewer` と共通化） |
+
+---
+
+### 実装上の推奨事項
+
+- `atom_actor_cache` と `sphere_mesh_cache` を廃止し、`element_glyph_actors: dict[str, tuple[pv.PolyData, vtkActor]]`（元素 → (cloud, actor)）に置き換える。
+- `cloud.points` は `display_atom_instances()` の出力から毎回構築し直すのではなく、表示モードごとに numpy 配列をキャッシュしておくと display mode 切り替えが配列スワップだけで済む。
+- 実装前に Jacobsite でのアニメーション正確性（残差 < 2e-14 Å）を確認するテストを準備することを推奨。
+- `NativePyVistaViewer` と `BrowserControlledViewer` の両方に影響するため、変更は一度に行うか、`rebuild_display_atoms` / `update_atoms` の実装を base class 側で一本化してから行うと安全。
+
+### Codex 対応状況（2026-05-22）
+
+- `44ccf30` で Display Range の中心処理を統一。`source` / `expanded_*` の特殊扱いを減らし、全モードで原点中心の表示座標に揃えた。
+- `673d89b` で `crystal_viewer/viewer/atom_instances.py` を追加し、`display_atom_instances()` の結果を元素ごとのバッチにまとめる `element_instance_batches()` を実装済み。
+- Halite / Jacobsite の `source`, `expanded_quarter`, `expanded_half`, `expanded_1_0` で、個別インスタンス数とバッチ内 item 数が一致することを確認済み。
+
+未対応: PyVista 側の glyph actor 置き換え。これは原子色変更・ハイライト・アニメーション更新に影響するため、次は本体描画へ直接入らず、range ごとの原子数と元素バッチ数を確認できる検査ツールを追加してから段階的に進める。
