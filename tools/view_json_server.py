@@ -471,7 +471,7 @@ def make_handler(
             try:
                 input_path = resolve_example_path(kind, requested_path)
                 json_path = default_json_output_path(input_path, DEFAULT_JSON_EXPORT_DIR)
-                json_path = export_analysis_to_json_worker_cached(
+                json_path, new_payload = export_analysis_to_json_worker_cached(
                     input_path,
                     mode=kind,
                     output_path=json_path,
@@ -479,8 +479,11 @@ def make_handler(
                     indent=indent,
                 )
                 debug_import_timing("example export/cache", started_at)
-                new_payload = json.loads(json_path.read_text(encoding="utf-8"))
-                debug_import_timing("example read-json", started_at)
+                if new_payload is None:
+                    new_payload = json.loads(json_path.read_text(encoding="utf-8"))
+                    debug_import_timing("example read-json", started_at)
+                else:
+                    debug_import_timing("example cached-json", started_at)
                 self.load_payload(json_path, new_payload, f"loaded example {input_path.name}", request_id=request_id)
                 debug_import_timing("example response", started_at)
             except Exception as exc:
@@ -686,7 +689,7 @@ def cached_export_json_path(
     output_path: Path,
     *,
     mode: str,
-) -> Path | None:
+) -> tuple[Path, dict] | None:
     if not output_path.exists():
         return None
     try:
@@ -705,7 +708,7 @@ def cached_export_json_path(
         return None
     if not cached_source_matches(metadata.get("source_file"), input_path):
         return None
-    return output_path
+    return output_path, payload
 
 
 def cached_source_matches(cached_source: object, input_path: Path) -> bool:
@@ -727,17 +730,18 @@ def export_analysis_to_json_worker_cached(
     output_path: Path,
     tolerance_cart: float,
     indent: int,
-) -> Path:
+) -> tuple[Path, dict | None]:
     cached = cached_export_json_path(input_path, output_path, mode=mode)
     if cached is not None:
         return cached
-    return export_analysis_to_json_worker(
+    exported_path = export_analysis_to_json_worker(
         input_path,
         mode=mode,
         output_path=output_path,
         tolerance_cart=tolerance_cart,
         indent=indent,
     )
+    return exported_path, None
 
 
 def operation_exists(operations: list[dict], operation_index: int) -> bool:
@@ -770,8 +774,9 @@ def resolve_viewer_json_path(
         if json_output is None:
             cached = cached_export_json_path(input_path, output_path, mode=SOURCE_KIND_CRYSTAL)
             if cached is not None:
-                print(f"Using cached JSON: {cached}", flush=True)
-                return cached
+                cached_path, _ = cached
+                print(f"Using cached JSON: {cached_path}", flush=True)
+                return cached_path
         print(f"Analyzing CIF: {input_path}", flush=True)
         output_path = export_analysis_to_json(
             input_path,
@@ -792,8 +797,9 @@ def resolve_viewer_json_path(
         if json_output is None:
             cached = cached_export_json_path(input_path, output_path, mode=SOURCE_KIND_MOLECULE)
             if cached is not None:
-                print(f"Using cached JSON: {cached}", flush=True)
-                return cached
+                cached_path, _ = cached
+                print(f"Using cached JSON: {cached_path}", flush=True)
+                return cached_path
         print(f"Analyzing molecule: {input_path}", flush=True)
         output_path = export_analysis_to_json(
             input_path,
