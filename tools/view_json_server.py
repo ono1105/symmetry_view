@@ -794,7 +794,6 @@ def main() -> int:
         scope=shared_state["scope"],
         shared_state=shared_state,
         state_lock=state_lock,
-        element_context_cache=session.element_context_cache,
         viewer_session=session,
     )
     server = start_server(args.host, args.port, handler)

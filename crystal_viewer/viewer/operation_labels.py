@@ -15,9 +15,8 @@ from crystal_viewer.viewer.symmetry_elements import visual_improper_elements
 def operation_summaries(
     render_data: dict,
     atom_mappings: dict | None,
-) -> tuple[list[dict], dict[int, tuple[list[dict], list[dict], list[dict]]]]:
+) -> list[dict]:
     summaries = []
-    element_context_cache = {}
     for operation in render_data["operations"]:
         summary_operation = dict(operation)
         visual_translation = visual_translation_direction_cart(render_data, operation, atom_mappings)
@@ -27,7 +26,6 @@ def operation_summaries(
             render_data,
             summary_operation,
         )
-        element_context_cache[operation["index"]] = (axes, planes, centers)
         summaries.append(
             {
                 "index": operation["index"],
@@ -48,7 +46,7 @@ def operation_summaries(
                 "translation_cart": operation.get("translation_cart"),
             }
         )
-    return summaries, element_context_cache
+    return summaries
 
 
 def operation_summary_elements(
@@ -107,10 +105,19 @@ def infer_screw_symbol(render_data: dict, operation: dict, axis: dict) -> str | 
         return None
 
     fraction = (projected / period) % 1.0
-    screw = int(round(fraction * int(order))) % int(order)
+    order_int = int(order)
+    if order_int == 2 and not np.isclose(fraction, 0.0, atol=1e-6):
+        screw = 1
+    else:
+        raw_screw = fraction * order_int
+        screw = int(np.floor(raw_screw + 0.5 + 1e-8))
+        if screw == 0 and not np.isclose(fraction, 0.0, atol=1e-6):
+            screw = 1
+        elif screw >= order_int:
+            screw = order_int - 1
     if screw == 0:
         return None
-    return f"{order}_{screw}"
+    return f"{order_int}_{screw}"
 
 
 def operation_element_summary(

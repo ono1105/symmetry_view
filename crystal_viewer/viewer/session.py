@@ -16,7 +16,7 @@ class ViewerSession:
         self.render_data = payload["render_data"]
         self.atoms = self.render_data["atoms"]
         self.operations = self.render_data["operations"]
-        self.operation_summary_items, self.element_context_cache = operation_summaries(
+        self.operation_summary_items = operation_summaries(
             self.render_data,
             payload.get("atom_mappings"),
         )
@@ -28,7 +28,6 @@ class ViewerSession:
         self.atoms = other.atoms
         self.operations = other.operations
         self.operation_summary_items = other.operation_summary_items
-        self.element_context_cache = other.element_context_cache
 
     @property
     def source_kind(self) -> str:

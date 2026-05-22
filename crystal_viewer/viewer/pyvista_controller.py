@@ -46,14 +46,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
         *args,
         shared_state: dict,
         state_lock: threading.Lock,
-        element_context_cache: dict[int, tuple[list[dict], list[dict], list[dict]]] | None = None,
         viewer_session=None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.shared_state = shared_state
         self.state_lock = state_lock
-        self.element_context_cache = element_context_cache or {}
         self.viewer_session = viewer_session
         self.timer_interval_ms = 100
         # Disable VTK depth peeling to prevent transparency-related warning loops
@@ -425,7 +423,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.render_data = self.viewer_session.render_data
         self.atom_mappings = self.payload.get("atom_mappings")
         self.operations = self.render_data["operations"]
-        self.element_context_cache = self.viewer_session.element_context_cache
         self.operation_position = 0
         self.scope = scope
         self.selected_atoms = selected_atoms
