@@ -45,7 +45,7 @@ from crystal_viewer.viewer.cli_helpers import (
     print_operations,
 )
 from crystal_viewer.viewer.display_atoms import display_atom_instances
-from crystal_viewer.viewer.glyph_atoms import build_element_glyph_mesh, update_element_glyph_mesh
+from crystal_viewer.viewer.glyph_atoms import build_element_glyph_mesh, update_element_glyph_instance
 from crystal_viewer.viewer.operation_lookup import selected_mapping
 from crystal_viewer.viewer.scene_rendering import add_unit_cell
 from crystal_viewer.viewer.symmetry_elements import add_symmetry_elements
@@ -332,6 +332,7 @@ class NativePyVistaViewer:
                         "display_shift_cart": np.asarray(display_item["display_shift_cart"], dtype=float),
                         "is_primary_image": bool(display_item.get("is_primary_image", True)),
                         "current_cart": np.asarray(display_item["cart"], dtype=float),
+                        "position_dirty": False,
                         "actor": None,
                         "marker_actor": None,
                         "glyph_element": batch.element,
@@ -352,6 +353,7 @@ class NativePyVistaViewer:
         for group in groups:
             for item in group["items"]:
                 item["current_cart"] = np.asarray(item["atom"]["cart"], dtype=float) + item["display_shift_cart"]
+                item["position_dirty"] = True
             actor = group.get("actor")
             if actor is not None:
                 try:
@@ -462,12 +464,15 @@ class NativePyVistaViewer:
 
     def update_glyph_atom_groups(self) -> None:
         for group in self.atom_glyph_groups:
-            items = group["items"]
-            positions = np.asarray(
-                [item.get("current_cart", np.asarray(item["atom"]["cart"], dtype=float) + item["display_shift_cart"]) for item in items],
-                dtype=float,
-            )
-            update_element_glyph_mesh(group["glyph"], positions)
+            changed = False
+            for item in group["items"]:
+                if not item.get("position_dirty"):
+                    continue
+                update_element_glyph_instance(group["glyph"], item["glyph_position"], item["current_cart"])
+                item["position_dirty"] = False
+                changed = True
+            if changed:
+                group["glyph"].mesh.Modified()
 
     def update_status(self) -> None:
         operation = self.current_operation()

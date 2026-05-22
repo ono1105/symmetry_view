@@ -93,6 +93,13 @@ def update_element_glyph_mesh(mesh: ElementGlyphMesh, positions: np.ndarray) -> 
     mesh.mesh.Modified()
 
 
+def update_element_glyph_instance(mesh: ElementGlyphMesh, instance_index: int, position: np.ndarray) -> None:
+    point_count = len(mesh.template_points)
+    start = int(instance_index) * point_count
+    stop = start + point_count
+    mesh.mesh.points[start:stop] = mesh.template_points + np.asarray(position, dtype=float)
+
+
 def batched_points(template_points: np.ndarray, positions: np.ndarray) -> np.ndarray:
     return (np.asarray(positions, dtype=float)[:, None, :] + template_points[None, :, :]).reshape(-1, 3)
 
