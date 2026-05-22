@@ -369,27 +369,15 @@ class BrowserControlledViewer(NativePyVistaViewer):
     def show_element_actors(self, operation_index: int) -> None:
         cache_key = (operation_index, self.display_mode, self.improper_mode)
         if cache_key not in self.element_actor_cache:
-            cached = self.element_context_cache.get(operation_index) if self.improper_mode == "auto" else None
-            if cached is not None:
-                axes, planes, centers = cached
-                actors = add_symmetry_element_actors(
-                    self.plotter,
-                    self.render_data,
-                    axes,
-                    planes,
-                    centers,
-                    display_mode=self.display_mode,
-                )
-            else:
-                actors = add_symmetry_elements(
-                    self.plotter,
-                    self.render_data,
-                    self.atom_mappings,
-                    operation_index=operation_index,
-                    element_index=None,
-                    display_mode=self.display_mode,
-                    improper_mode=self.improper_mode,
-                )
+            actors = add_symmetry_elements(
+                self.plotter,
+                self.render_data,
+                self.atom_mappings,
+                operation_index=operation_index,
+                element_index=None,
+                display_mode=self.display_mode,
+                improper_mode=self.improper_mode,
+            )
             self.element_actor_cache[cache_key] = actors
         self.element_actors = self.element_actor_cache[cache_key]
         for actor in self.element_actors:
@@ -539,16 +527,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
             return center, direction, up, distance
 
         operation = self.current_operation()
-        cached = self.element_context_cache.get(operation["index"]) if self.improper_mode == "auto" else None
-        axes, planes, centers = cached if cached is not None else (None, None, None)
-        if axes is None or planes is None or centers is None:
-            axes, planes, centers = display_symmetry_elements(
-                self.render_data,
-                self.atom_mappings,
-                operation["index"],
-                element_index=None,
-                improper_mode=self.improper_mode,
-            )
+        axes, planes, centers = display_symmetry_elements(
+            self.render_data,
+            self.atom_mappings,
+            operation["index"],
+            element_index=None,
+            improper_mode=self.improper_mode,
+        )
         direction = None
         if is_pure_translation_operation(operation):
             direction = visual_translation_direction_cart(self.render_data, operation, self.atom_mappings)

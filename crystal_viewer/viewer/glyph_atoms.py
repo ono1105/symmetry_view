@@ -101,18 +101,13 @@ def offset_faces(faces: np.ndarray, point_count: int, instance_count: int) -> np
     if instance_count <= 0:
         return np.asarray([], dtype=np.int64)
     faces = np.asarray(faces, dtype=np.int64)
-    chunks = []
+    is_vertex_index = np.ones(len(faces), dtype=np.int64)
     cursor = 0
-    face_chunks = []
     while cursor < len(faces):
+        is_vertex_index[cursor] = 0
         size = int(faces[cursor])
-        chunk = faces[cursor: cursor + size + 1].copy()
-        face_chunks.append(chunk)
         cursor += size + 1
-    for instance_index in range(instance_count):
-        offset = instance_index * point_count
-        for chunk in face_chunks:
-            shifted = chunk.copy()
-            shifted[1:] += offset
-            chunks.append(shifted)
-    return np.concatenate(chunks) if chunks else np.asarray([], dtype=np.int64)
+    tiled = np.tile(faces, instance_count)
+    offsets = np.repeat(np.arange(instance_count, dtype=np.int64) * point_count, len(faces))
+    masks = np.tile(is_vertex_index, instance_count)
+    return tiled + offsets * masks

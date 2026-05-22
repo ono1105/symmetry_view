@@ -58,7 +58,7 @@ def display_fractional_shifts(frac: np.ndarray, *, display_mode: str = "expanded
     upper = 0.5 + margin
     for shift in periodic_shifts(max(int(np.ceil(margin + 1.0)), 1)):
         image_frac = frac + shift
-        if np.all(image_frac >= lower - 1e-9) and np.all(image_frac <= upper + 1e-9):
+        if np.all(image_frac >= lower - 1e-9) and np.all(image_frac < upper - 1e-9):
             shifts.append(shift)
     return shifts
 

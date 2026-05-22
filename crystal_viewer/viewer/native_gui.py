@@ -350,6 +350,8 @@ class NativePyVistaViewer:
         self.atom_glyph_groups = groups
         visible_items = []
         for group in groups:
+            for item in group["items"]:
+                item["current_cart"] = np.asarray(item["atom"]["cart"], dtype=float) + item["display_shift_cart"]
             actor = group.get("actor")
             if actor is not None:
                 try:

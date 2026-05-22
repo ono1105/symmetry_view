@@ -2975,3 +2975,95 @@ Jacobsite ±1 表示: 元素種 3 (Mn/Fe/O) → 3 actor = 3 ドローコール /
 - Halite / Jacobsite の `source`, `expanded_quarter`, `expanded_half`, `expanded_1_0` で、個別インスタンス数とバッチ内 item 数が一致することを確認済み。
 
 未対応: PyVista 側の glyph actor 置き換え。これは原子色変更・ハイライト・アニメーション更新に影響するため、次は本体描画へ直接入らず、range ごとの原子数と元素バッチ数を確認できる検査ツールを追加してから段階的に進める。
+
+---
+
+## Claude レビュー (2026-05-22) — glyph 実装途中バグ確認
+
+対象コミット: `855a098`, `29fbd26`（glyph 原子描画の実装）
+
+---
+
+### Bug (高): `display_fractional_shifts` が境界原子を複数回含める
+
+**場所:** `crystal_viewer/viewer/display_atoms.py:61`
+
+```python
+# 現行（バグあり）
+if np.all(image_frac >= lower - 1e-9) and np.all(image_frac <= upper + 1e-9):
+```
+
+`source` モードでは `lower=-0.5, upper=0.5`。frac 成分がちょうど **0.5** の原子は `shift=0` と `shift=-1` の両方で条件を満たし、同じ原子が複数回追加される。
+
+**実測（Jacobsite source モード）:**
+```
+Mn 原子 3 個（frac=[0, 0.5, 0.5] 等）が各 4 回表示
+合計: 8 Mn → 17, 56 atoms → 65 atoms
+```
+
+`is_primary_centered_image()` はすでに正しく半開区間 `[lower, upper)` を使っているのに `display_fractional_shifts` だけ不整合。
+
+**修正案:**
+```python
+# 変更後（半開区間 [lower, upper)）
+if np.all(image_frac >= lower - 1e-9) and np.all(image_frac < upper - 1e-9):
+```
+
+---
+
+### Bug (高): `offset_faces` が Python ループで遅く glyph 高速化の効果が出ない
+
+**場所:** `crystal_viewer/viewer/glyph_atoms.py:107-118`
+
+**実測（Jacobsite expanded_1_0）:**
+```
+offset_faces (864 O インスタンス): 250ms
+build_element_glyph_mesh 全元素合計: 518ms
+```
+
+個別 actor 方式より初回構築が遅い。glyph 方式の目的が達成できていない。
+
+**修正案（numpy ベクトル化）:**
+```python
+def offset_faces(faces: np.ndarray, point_count: int, instance_count: int) -> np.ndarray:
+    if instance_count <= 0:
+        return np.asarray([], dtype=np.int64)
+    faces = np.asarray(faces, dtype=np.int64)
+    is_vertex = np.ones(len(faces), dtype=bool)
+    cursor = 0
+    while cursor < len(faces):
+        is_vertex[cursor] = False
+        cursor += int(faces[cursor]) + 1
+    tiled = np.tile(faces, instance_count)
+    offsets = np.repeat(np.arange(instance_count, dtype=np.int64) * point_count, len(faces))
+    tiled += offsets * np.tile(is_vertex.astype(np.int64), instance_count)
+    return tiled
+```
+
+---
+
+### Bug (中): `atom_glyph_cache` が色変更時にクリアされない
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py:171-178`
+
+`atom_colors` 変更時に `rebuild_display_atoms` が呼ばれても `atom_glyph_cache` はクリアされない。glyph モードに戻ったときキャッシュから古い `current_cart` を持つグループが復元されて原子位置がずれうる。
+
+**修正案:** `rebuild_display_atoms` の先頭に `self.atom_glyph_cache = {}` を追加するか、キャッシュ復元時に `current_cart` を基準座標でリセットする。
+
+---
+
+### 確認済み（問題なし）
+
+- `update_animated_atoms` が `item["current_cart"] = center` を更新する ✓（`animation.py:29`）
+- `update_glyph_atom_groups` が `current_cart` を参照してポジション更新する ✓
+- `offset_faces` の論理的正確性（小規模テスト通過）✓
+- `atom_color(element=X, atomic_number=0)` が element lookup で正常動作 ✓
+- `operation_summaries` は変更後も正常動作（192 ops）✓
+- 全モジュールインポート OK ✓
+
+### Codex 対応状況（2026-05-22）
+
+- `display_fractional_shifts()` を半開区間 `[lower, upper)` に変更し、境界原子の重複表示を解消。Jacobsite `source` は 65 instances → 56 instances、Halite `source` は 8 instances のまま。
+- `offset_faces()` を NumPy ベクトル化。Jacobsite `expanded_1_0` の glyph mesh 構築は実測で約 58.8 ms。
+- glyph cache 復元時に各 item の `current_cart` を基準座標へリセットするよう変更。
+- ブラウザの対称要素描画と view-along 用の軸選択では、operation summary 用の複数要素キャッシュを使わず、`atom_mappings` に基づく `display_symmetry_elements()` を使うよう修正。これにより回転軸が複数本表示される問題を修正。
