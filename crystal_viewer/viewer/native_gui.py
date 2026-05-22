@@ -32,6 +32,7 @@ from crystal_viewer.viewer.animation import (
     path_applies_to_display_item,
     update_animated_atoms,
 )
+from crystal_viewer.viewer.atom_instances import display_instance_key
 from crystal_viewer.viewer.atom_style import (
     ATOM_MESH_STYLE,
     HIGHLIGHT_RADIUS_SCALE,
@@ -261,8 +262,7 @@ class NativePyVistaViewer:
     def ensure_display_atom(self, display_item: dict) -> dict:
         atom = display_item["atom"]
         shift_frac = display_item.get("display_shift_frac", np.zeros(3))
-        shift_key = tuple(int(round(float(value))) for value in shift_frac)
-        key = (int(atom["index"]), shift_key)
+        key = display_instance_key(display_item)
         cached = self.atom_actor_cache.get(key)
         center = np.asarray(display_item["cart"], dtype=float)
         if cached is not None:

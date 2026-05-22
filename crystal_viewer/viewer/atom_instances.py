@@ -18,6 +18,16 @@ class ElementInstanceBatch:
     items: tuple[dict, ...]
 
 
+DisplayInstanceKey = tuple[int, tuple[int, int, int]]
+
+
+def display_instance_key(display_item: dict) -> DisplayInstanceKey:
+    atom = display_item["atom"]
+    shift_frac = np.asarray(display_item.get("display_shift_frac", np.zeros(3)), dtype=float)
+    shift_key = tuple(int(round(float(value))) for value in shift_frac)
+    return int(atom["index"]), shift_key
+
+
 def element_instance_batches(render_data: dict, *, display_mode: str) -> tuple[ElementInstanceBatch, ...]:
     grouped: dict[str, list[dict]] = {}
     for item in display_atom_instances(render_data, display_mode=display_mode):
@@ -47,3 +57,16 @@ def element_instance_batches(render_data: dict, *, display_mode: str) -> tuple[E
             )
         )
     return tuple(batches)
+
+
+def element_instance_index(
+    batches: tuple[ElementInstanceBatch, ...],
+) -> dict[DisplayInstanceKey, tuple[str, int]]:
+    index: dict[DisplayInstanceKey, tuple[str, int]] = {}
+    for batch in batches:
+        for position, item in enumerate(batch.items):
+            key = display_instance_key(item)
+            if key in index:
+                raise ValueError(f"Duplicate display atom instance key: {key}")
+            index[key] = (batch.element, position)
+    return index

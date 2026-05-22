@@ -9,7 +9,7 @@ try:
 except ModuleNotFoundError:
     from tools import _bootstrap  # noqa: F401
 
-from crystal_viewer.viewer.atom_instances import element_instance_batches
+from crystal_viewer.viewer.atom_instances import element_instance_batches, element_instance_index
 
 
 DEFAULT_DISPLAY_MODES = ("source", "expanded_quarter", "expanded_half", "expanded_1_0")
@@ -17,11 +17,13 @@ DEFAULT_DISPLAY_MODES = ("source", "expanded_quarter", "expanded_half", "expande
 
 def inspect_display_mode(render_data: dict, display_mode: str) -> None:
     batches = element_instance_batches(render_data, display_mode=display_mode)
+    instance_index = element_instance_index(batches)
     total = sum(len(batch.items) for batch in batches)
     primary = sum(int(batch.primary_mask.sum()) for batch in batches)
 
     print(f"=== {display_mode} ===")
     print(f"instances: {total}")
+    print(f"unique keys: {len(instance_index)}")
     print(f"primary images: {primary}")
     print(f"element batches: {len(batches)}")
     for batch in batches:
