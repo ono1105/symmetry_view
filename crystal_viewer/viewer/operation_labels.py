@@ -8,8 +8,8 @@ from crystal_viewer.geometry import normalize
 from crystal_viewer.viewer.animation import animation_paths
 from crystal_viewer.viewer.animation_path import effective_rotation_axis
 from crystal_viewer.viewer.display_atoms import display_scene_center
-from crystal_viewer.viewer.operation_lookup import selected_mapping
-from crystal_viewer.viewer.symmetry_elements import display_symmetry_elements
+from crystal_viewer.viewer.operation_lookup import selected_elements, selected_mapping
+from crystal_viewer.viewer.symmetry_elements import visual_improper_elements
 
 
 def operation_summaries(
@@ -23,11 +23,9 @@ def operation_summaries(
         visual_translation = visual_translation_direction_cart(render_data, operation, atom_mappings)
         if visual_translation is not None:
             summary_operation["_display_translation_cart"] = visual_translation.tolist()
-        axes, planes, centers = display_symmetry_elements(
+        axes, planes, centers = operation_summary_elements(
             render_data,
-            atom_mappings,
-            operation["index"],
-            element_index=None,
+            summary_operation,
         )
         element_context_cache[operation["index"]] = (axes, planes, centers)
         summaries.append(
@@ -51,6 +49,26 @@ def operation_summaries(
             }
         )
     return summaries, element_context_cache
+
+
+def operation_summary_elements(
+    render_data: dict,
+    operation: dict,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    operation_index = operation["index"]
+    axes, planes, centers = (
+        selected_elements(render_data["axes"], operation_index, element_index=None),
+        selected_elements(render_data["planes"], operation_index, element_index=None),
+        selected_elements(render_data["centers"], operation_index, element_index=None),
+    )
+    return visual_improper_elements(
+        render_data,
+        operation,
+        axes,
+        planes,
+        centers,
+        improper_mode="auto",
+    )
 
 
 def display_operation_symbol(render_data: dict, operation: dict, axes: list[dict]) -> str:

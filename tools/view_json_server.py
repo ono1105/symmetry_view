@@ -464,6 +464,7 @@ def make_handler(
             self.send_json(body)
 
         def handle_open_example(self, payload: dict) -> None:
+            started_at = time.monotonic()
             request_id = self.reserve_load_request(payload)
             kind = normalize_source_kind(str(payload.get("kind") or ""))
             requested_path = str(payload.get("path") or "")
@@ -477,8 +478,11 @@ def make_handler(
                     tolerance_cart=tolerance_cart,
                     indent=indent,
                 )
+                debug_import_timing("example export/cache", started_at)
                 new_payload = json.loads(json_path.read_text(encoding="utf-8"))
+                debug_import_timing("example read-json", started_at)
                 self.load_payload(json_path, new_payload, f"loaded example {input_path.name}", request_id=request_id)
+                debug_import_timing("example response", started_at)
             except Exception as exc:
                 with state_lock:
                     self.clear_import_if_current(request_id)
@@ -504,11 +508,13 @@ def make_handler(
                 shared_state["import_in_progress"] = False
 
         def handle_import_cif(self, payload: dict) -> None:
+            started_at = time.monotonic()
             request_id = self.reserve_load_request(payload)
             filename = str(payload.get("filename") or "uploaded_structure.cif")
             content = str(payload.get("content") or "")
             try:
                 cif_path = write_uploaded_cif(filename, content)
+                debug_import_timing("cif write", started_at)
                 json_path = default_json_output_path(cif_path, import_json_dir)
                 json_path = export_analysis_to_json_worker(
                     cif_path,
@@ -517,8 +523,11 @@ def make_handler(
                     tolerance_cart=tolerance_cart,
                     indent=indent,
                 )
+                debug_import_timing("cif export", started_at)
                 new_payload = json.loads(json_path.read_text(encoding="utf-8"))
+                debug_import_timing("cif read-json", started_at)
                 self.load_payload(json_path, new_payload, f"loaded {filename} -> {json_path}", request_id=request_id)
+                debug_import_timing("cif response", started_at)
             except Exception as exc:
                 with state_lock:
                     self.clear_import_if_current(request_id)
@@ -562,7 +571,9 @@ def make_handler(
             *,
             request_id: int = 0,
         ) -> None:
+            started_at = time.monotonic()
             new_session = ViewerSession(json_path, new_payload)
+            debug_import_timing("session summaries", started_at)
             with state_lock:
                 if not self.load_request_is_current(request_id):
                     body = {"ok": False, "stale": True, "state": dict(shared_state)}
