@@ -10,47 +10,20 @@ try:
 except ModuleNotFoundError:
     from tools import _bootstrap  # noqa: F401
 
-import numpy as np
 import pyvista as pv
 
-from crystal_viewer.viewer.atom_style import (
-    ATOM_MESH_STYLE,
-    HIGHLIGHT_RADIUS_SCALE,
-    atom_color,
-    color_to_rgb,
-    display_atom_radius,
-)
 from crystal_viewer.viewer.animation import (
     animation_paths,
-    build_operation_path,
-    custom_operation_speed_multiplier,
-    effective_rotation_axis,
-    evaluate_path,
-    improper_inversion_center,
-    improper_reflection_plane,
-    normalize,
-    operation_speed_multiplier,
-    path_applies_to_display_item,
-    preferred_improper_mode,
-    render_source_kind,
-    select_animation_context,
     update_animated_atoms,
 )
-from crystal_viewer.viewer.display_atoms import (
-    display_atom_instances,
-    display_fractional_shifts,
-    display_mode_margin,
-    display_scene_center,
-    display_scene_span,
-    is_primary_centered_image,
-    scene_span,
-    source_boundary_fractional_shifts,
+from crystal_viewer.viewer.cli_helpers import (
+    parse_selected_atoms,
+    print_operations,
 )
 from crystal_viewer.viewer.operation_lookup import (
     filter_by_operation,
     has_element_index,
     operation_by_index,
-    selected_elements,
     selected_mapping,
 )
 from crystal_viewer.viewer.scene_rendering import (
@@ -60,10 +33,7 @@ from crystal_viewer.viewer.scene_rendering import (
     add_unit_cell,
 )
 from crystal_viewer.viewer.symmetry_elements import (
-    add_symmetry_element_actors,
     add_symmetry_elements,
-    display_symmetry_elements,
-    visual_improper_elements,
 )
 
 def main() -> int:
@@ -279,18 +249,6 @@ def effective_animation_fps(fps: float, speed: float) -> float:
     return max(float(fps), 1.0) * max(float(speed), 0.05)
 
 
-def parse_selected_atoms(values: list[str] | None) -> tuple[int, ...]:
-    if not values:
-        return ()
-    selected = []
-    for value in values:
-        for item in str(value).split(","):
-            item = item.strip()
-            if item:
-                selected.append(int(item))
-    return tuple(dict.fromkeys(selected))
-
-
 def add_title(
     plotter: pv.Plotter,
     render_data: dict,
@@ -305,28 +263,6 @@ def add_title(
         text = f"{text}  |  {suffix}"
     text = f"{text}\n{json_path}"
     plotter.add_text(text, position="upper_left", font_size=10, color="#eef2f7")
-
-
-def print_operations(render_data: dict, atom_mappings: dict | None) -> None:
-    mapping_by_index = {}
-    if atom_mappings is not None:
-        mapping_by_index = {
-            mapping["operation_index"]: mapping
-            for mapping in atom_mappings.get("mappings", [])
-        }
-
-    print("=== Operations ===")
-    for operation in render_data["operations"]:
-        mapping = mapping_by_index.get(operation["index"])
-        if mapping is None:
-            status = "mapping=missing"
-        else:
-            status = f"mapping={'ok' if mapping['complete'] else 'incomplete'} max_dist={mapping['max_distance']:.3e}"
-        print(
-            f"{operation['index']:3d}: {operation['label']} "
-            f"kind={operation['kind']} order={operation['order']} "
-            f"angle={operation.get('angle_deg')} {status}"
-        )
 
 
 def print_elements(render_data: dict, operation_index: int | None) -> None:

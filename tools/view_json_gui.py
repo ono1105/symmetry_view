@@ -31,7 +31,26 @@ if os.environ.get("CRYSTAL_VIEWER_VTK_WARNINGS") != "1":
     except Exception:
         pass
 
-from tools import view_json_pyvista as viewer
+from crystal_viewer.viewer.animation import (
+    animation_paths,
+    operation_speed_multiplier,
+    path_applies_to_display_item,
+    update_animated_atoms,
+)
+from crystal_viewer.viewer.atom_style import (
+    ATOM_MESH_STYLE,
+    HIGHLIGHT_RADIUS_SCALE,
+    atom_color,
+    display_atom_radius,
+)
+from crystal_viewer.viewer.cli_helpers import (
+    parse_selected_atoms,
+    print_operations,
+)
+from crystal_viewer.viewer.display_atoms import display_atom_instances
+from crystal_viewer.viewer.operation_lookup import selected_mapping
+from crystal_viewer.viewer.scene_rendering import add_unit_cell
+from crystal_viewer.viewer.symmetry_elements import add_symmetry_elements
 
 
 class NativePyVistaViewer:
@@ -74,7 +93,7 @@ class NativePyVistaViewer:
     def show(self) -> None:
         self.rebuild_display_atoms(self.display_mode)
         if self.render_data.get("unit_cell"):
-            viewer.add_unit_cell(self.plotter, self.render_data["unit_cell"])
+            add_unit_cell(self.plotter, self.render_data["unit_cell"])
         self.plotter.add_axes()
         self.plotter.reset_camera()
 
@@ -159,7 +178,7 @@ class NativePyVistaViewer:
 
     def show_element_actors(self, operation_index: int) -> None:
         if operation_index not in self.element_actor_cache:
-            self.element_actor_cache[operation_index] = viewer.add_symmetry_elements(
+            self.element_actor_cache[operation_index] = add_symmetry_elements(
                 self.plotter,
                 self.render_data,
                 self.atom_mappings,
@@ -187,7 +206,7 @@ class NativePyVistaViewer:
                 continue
             atom = item["atom"]
             center = np.asarray(atom["cart"], dtype=float) + item["display_shift_cart"]
-            radius = self.atom_radius(atom["atomic_number"]) * viewer.HIGHLIGHT_RADIUS_SCALE
+            radius = self.atom_radius(atom["atomic_number"]) * HIGHLIGHT_RADIUS_SCALE
             marker = self.sphere_mesh(atom["atomic_number"], radius)
             actor = self.plotter.add_mesh(
                 marker,
@@ -209,7 +228,7 @@ class NativePyVistaViewer:
                 continue
             self.start_marker_actors.append(actor)
             path = self.paths.get(item["atom"]["index"])
-            visible = path is not None and viewer.path_applies_to_display_item(path, item)
+            visible = path is not None and path_applies_to_display_item(path, item)
             try:
                 actor.SetVisibility(visible)
             except Exception:
@@ -229,7 +248,7 @@ class NativePyVistaViewer:
                         pass
 
         visible_items = []
-        for display_item in viewer.display_atom_instances(self.render_data, display_mode=self.display_mode):
+        for display_item in display_atom_instances(self.render_data, display_mode=self.display_mode):
             item = self.ensure_display_atom(display_item)
             actor = item.get("actor")
             if actor is not None:
@@ -263,7 +282,7 @@ class NativePyVistaViewer:
         radius = self.atom_radius(atom["atomic_number"])
         color = self.atom_color(atom)
         mesh = self.sphere_mesh(atom["atomic_number"], radius)
-        actor = self.plotter.add_mesh(mesh, color=color, **viewer.ATOM_MESH_STYLE)
+        actor = self.plotter.add_mesh(mesh, color=color, **ATOM_MESH_STYLE)
         actor.SetPosition(*center)
         cached = {
             "atom": atom,
@@ -292,17 +311,17 @@ class NativePyVistaViewer:
         return mesh
 
     def atom_radius(self, atomic_number: int) -> float:
-        return viewer.display_atom_radius(
+        return display_atom_radius(
             {"atomic_number": atomic_number},
             self.render_data,
         )
 
     def atom_color(self, atom: dict) -> str:
-        return viewer.atom_color(atom)
+        return atom_color(atom)
 
     def build_paths(self) -> None:
         operation = self.current_operation()
-        mapping = viewer.selected_mapping(self.atom_mappings, operation["index"])
+        mapping = selected_mapping(self.atom_mappings, operation["index"])
         if mapping is None:
             self.paths = {}
             return
@@ -316,7 +335,7 @@ class NativePyVistaViewer:
             animation_scope = "selected"
             selected_atoms = tuple(atom["index"] for atom in self.render_data["atoms"])
         representative_atom = selected_atoms[0] if self.scope == "selected" and selected_atoms else None
-        self.paths = viewer.animation_paths(
+        self.paths = animation_paths(
             self.render_data,
             operation,
             mapping,
@@ -363,7 +382,7 @@ class NativePyVistaViewer:
         del step
         if not self.playing or not self.paths:
             return
-        multiplier = viewer.operation_speed_multiplier(self.current_operation())
+        multiplier = operation_speed_multiplier(self.current_operation())
         self.frame_position = min(self.frame_position + self.speed * multiplier, self.frame_count - 1)
         self.update_atoms(self.frame_position / max(self.frame_count - 1, 1))
         if self.frame_position >= self.frame_count - 1:
@@ -372,7 +391,7 @@ class NativePyVistaViewer:
         self.plotter.render()
 
     def update_atoms(self, s: float) -> None:
-        viewer.update_animated_atoms(self.animated_atoms, self.paths, s)
+        update_animated_atoms(self.animated_atoms, self.paths, s)
 
     def update_status(self) -> None:
         operation = self.current_operation()
@@ -426,13 +445,13 @@ def main() -> int:
     payload = json.loads(args.json_path.read_text(encoding="utf-8"))
     render_data = payload["render_data"]
     if args.list_operations:
-        viewer.print_operations(render_data, payload.get("atom_mappings"))
+        print_operations(render_data, payload.get("atom_mappings"))
         return 0
     if args.list_atoms:
         print_atoms(render_data)
         return 0
 
-    selected_atoms = viewer.parse_selected_atoms(args.selected_atoms)
+    selected_atoms = parse_selected_atoms(args.selected_atoms)
     scope = args.scope
     if scope == "selected" and not selected_atoms:
         scope = "representative"
