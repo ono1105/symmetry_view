@@ -15,11 +15,19 @@ from crystal_viewer.viewer.atom_instances import element_instance_batches, eleme
 DEFAULT_DISPLAY_MODES = ("source", "expanded_quarter", "expanded_half", "expanded_1_0")
 
 
-def inspect_display_mode(render_data: dict, display_mode: str) -> None:
+def inspect_display_mode(render_data: dict, display_mode: str, *, glyph_preview: bool = False) -> None:
     batches = element_instance_batches(render_data, display_mode=display_mode)
     instance_index = element_instance_index(batches)
     total = sum(len(batch.items) for batch in batches)
     primary = sum(int(batch.primary_mask.sum()) for batch in batches)
+    glyph_previews = []
+    if glyph_preview:
+        from crystal_viewer.viewer.glyph_atoms import build_element_glyph_preview
+
+        glyph_previews = [
+            build_element_glyph_preview(batch, render_data)
+            for batch in batches
+        ]
 
     print(f"=== {display_mode} ===")
     print(f"instances: {total}")
@@ -31,6 +39,13 @@ def inspect_display_mode(render_data: dict, display_mode: str) -> None:
             f"  {batch.element}: instances={len(batch.items)}, "
             f"primary={int(batch.primary_mask.sum())}, atomic_number={batch.atomic_number}"
         )
+    if glyph_preview:
+        print("glyph preview:")
+        for preview in glyph_previews:
+            print(
+                f"  {preview.element}: points={preview.point_count}, "
+                f"mesh_points={preview.glyph_point_count}, mesh_cells={preview.glyph_cell_count}"
+            )
 
 
 def main() -> int:
@@ -42,6 +57,11 @@ def main() -> int:
         "--display-mode",
         action="append",
         help="Display mode to inspect. May be passed multiple times.",
+    )
+    parser.add_argument(
+        "--glyph-preview",
+        action="store_true",
+        help="Build static PyVista glyph meshes and print their sizes.",
     )
     args = parser.parse_args()
 
@@ -59,7 +79,7 @@ def main() -> int:
     for index, mode in enumerate(modes):
         if index:
             print()
-        inspect_display_mode(render_data, mode)
+        inspect_display_mode(render_data, mode, glyph_preview=args.glyph_preview)
 
     return 0
 

@@ -26,6 +26,7 @@ from crystal_viewer.viewer.scene_rendering import (
     add_animated_atoms,
     add_atoms,
     add_displacements,
+    add_glyph_atoms,
     add_unit_cell,
 )
 from crystal_viewer.viewer.symmetry_elements import (
@@ -81,6 +82,8 @@ def main() -> int:
     )
     parser.add_argument("--list-elements", action="store_true", help="Print symmetry elements for --operation and exit.")
     parser.add_argument("--no-atoms", action="store_true")
+    parser.add_argument("--glyph-atoms", action="store_true", help="Use static element glyph meshes for atoms.")
+    parser.add_argument("--display-mode", default="expanded", help="Atom display range mode.")
     parser.add_argument("--no-cell", action="store_true")
     parser.add_argument("--no-elements", action="store_true")
     parser.add_argument("--screenshot", type=Path, default=None, help="Write a screenshot and exit.")
@@ -104,6 +107,8 @@ def main() -> int:
 
     if args.animate and args.operation is None:
         parser.error("--animate requires --operation")
+    if args.animate and args.glyph_atoms:
+        parser.error("--glyph-atoms is currently only supported for static views")
     animation_scope = args.animation_scope
     representative_atom = args.representative_atom
     selected_atoms = parse_selected_atoms(args.selected_atoms)
@@ -127,9 +132,11 @@ def main() -> int:
 
     animated_atoms = None
     if args.animate and not args.no_atoms:
-        animated_atoms = add_animated_atoms(plotter, render_data)
+        animated_atoms = add_animated_atoms(plotter, render_data, display_mode=args.display_mode)
+    elif args.glyph_atoms and not args.no_atoms:
+        add_glyph_atoms(plotter, render_data, display_mode=args.display_mode)
     elif not args.no_atoms:
-        add_atoms(plotter, render_data)
+        add_atoms(plotter, render_data, display_mode=args.display_mode)
     if not args.no_cell and render_data.get("unit_cell"):
         add_unit_cell(plotter, render_data["unit_cell"])
     if not args.no_elements:

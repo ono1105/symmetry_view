@@ -4,7 +4,9 @@ import numpy as np
 import pyvista as pv
 
 from crystal_viewer.viewer.atom_style import ATOM_MESH_STYLE, atom_color, display_atom_radius
+from crystal_viewer.viewer.atom_instances import element_instance_batches
 from crystal_viewer.viewer.display_atoms import display_atom_instances, scene_span
+from crystal_viewer.viewer.glyph_atoms import build_element_glyph_preview
 from crystal_viewer.viewer.operation_lookup import selected_mapping
 
 
@@ -21,6 +23,13 @@ def add_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "ex
             phi_resolution=16,
         )
         plotter.add_mesh(sphere, color=color, **ATOM_MESH_STYLE)
+
+
+def add_glyph_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "expanded") -> None:
+    for batch in element_instance_batches(render_data, display_mode=display_mode):
+        preview = build_element_glyph_preview(batch, render_data)
+        color = atom_color({"element": batch.element, "atomic_number": batch.atomic_number})
+        plotter.add_mesh(preview.glyph_mesh, color=color, **ATOM_MESH_STYLE)
 
 
 def add_animated_atoms(
