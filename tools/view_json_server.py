@@ -40,8 +40,13 @@ from crystal_viewer.viewer.custom_operation import (
     custom_operation_visuals,
 )
 from crystal_viewer.web.browser_ui import HTML
-from crystal_viewer.viewer.operation_labels import atom_frac_label, operation_summaries
+from crystal_viewer.viewer.operation_labels import atom_frac_label
 from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
+from crystal_viewer.viewer.render_state import (
+    apply_render_state_update,
+    initial_render_state,
+)
+from crystal_viewer.viewer.session import ViewerSession
 
 logging.getLogger("pyvista").setLevel(logging.ERROR)
 logging.getLogger("vtkmodules").setLevel(logging.ERROR)
@@ -73,101 +78,6 @@ _EXAMPLE_CATALOG_CACHE: dict[str, list[dict]] | None = None
 def debug_import_timing(label: str, start: float) -> None:
     if DEBUG_IMPORT_TIMING:
         print(f"[import] {label} {time.monotonic() - start:.3f}s", flush=True)
-
-
-class ViewerSession:
-    def __init__(self, json_path: Path, payload: dict) -> None:
-        self.load(json_path, payload)
-
-    def load(self, json_path: Path, payload: dict) -> None:
-        self.json_path = json_path
-        self.payload = payload
-        self.render_data = payload["render_data"]
-        self.atoms = self.render_data["atoms"]
-        self.operations = self.render_data["operations"]
-        self.operation_summary_items, self.element_context_cache = operation_summaries(
-            self.render_data,
-            payload.get("atom_mappings"),
-        )
-
-    def replace_from(self, other: "ViewerSession") -> None:
-        self.json_path = other.json_path
-        self.payload = other.payload
-        self.render_data = other.render_data
-        self.atoms = other.atoms
-        self.operations = other.operations
-        self.operation_summary_items = other.operation_summary_items
-        self.element_context_cache = other.element_context_cache
-
-    @property
-    def source_kind(self) -> str:
-        return normalize_source_kind(
-            self.payload.get(
-                "source_kind",
-                self.render_data.get("metadata", {}).get("mode", SOURCE_KIND_CRYSTAL),
-            )
-        )
-
-
-def initial_state_for_payload(
-    payload: dict,
-    *,
-    initial_operation: int | None,
-    display_mode: str,
-    preserved: dict | None = None,
-) -> dict:
-    preserved = preserved or {}
-    render_data = payload["render_data"]
-    operations = render_data["operations"]
-    first_operation = operations[0]["index"] if operations else 0
-    selected_operation = (
-        initial_operation
-        if initial_operation is not None and operation_exists(operations, initial_operation)
-        else first_operation
-    )
-    selected_atoms = [atom["index"] for atom in render_data["atoms"]]
-    return {
-        "operation_index": selected_operation,
-        "playing": False,
-        "reset": True,
-        "source_kind": normalize_source_kind(
-            payload.get(
-                "source_kind",
-                render_data.get("metadata", {}).get("mode", SOURCE_KIND_CRYSTAL),
-            )
-        ),
-        "structure_loaded": bool(payload.get("structure_loaded", True)),
-        "metadata": render_data.get("metadata", {}),
-        "scope": "displayed",
-        "selected_atoms": selected_atoms,
-        "element_colors": {},
-        "atom_colors": {},
-        "element_hidden": {},
-        "atom_hidden": {},
-        "speed": float(preserved.get("speed", 1.0)),
-        "projection_mode": preserved.get("projection_mode", "perspective"),
-        "improper_mode": preserved.get("improper_mode", "auto"),
-        "display_mode": preserved.get("display_mode", display_mode),
-        "active_mode": "standard",
-        "gif_status": "",
-        "gif_request_id": None,
-        "gif_3view_request_id": None,
-        "view_request_id": None,
-        "reset_view_request_id": None,
-        "view_center_request_id": None,
-        "view_center_frac": None,
-        "camera_request_id": None,
-        "camera_direction": "",
-        "camera_angle": 90.0,
-        "custom_op_check_id": None,
-        "custom_op_result": None,
-        "custom_op_animate": None,
-        "reload_request_id": preserved.get("reload_request_id"),
-        "import_status": preserved.get("import_status", ""),
-        "import_in_progress": False,
-        "json_path": str(preserved.get("json_path", "")),
-        "summaries_ready": True,
-    }
 
 
 def empty_viewer_payload() -> dict:
@@ -430,40 +340,8 @@ def make_handler(
                 self.send_error(404)
                 return
 
-            allowed = {
-                "operation_index",
-                "playing",
-                "reset",
-                "selected_atoms",
-                "element_colors",
-                "atom_colors",
-                "element_hidden",
-                "atom_hidden",
-                "speed",
-                "projection_mode",
-                "improper_mode",
-                "display_mode",
-                "active_mode",
-                "scope",
-                "view_request_id",
-                "reset_view_request_id",
-                "view_center_request_id",
-                "view_center_frac",
-                "camera_request_id",
-                "camera_direction",
-                "camera_angle",
-                "gif_request_id",
-                "gif_3view_request_id",
-                "custom_op_check_id",
-                "clear_custom_check",
-                "custom_op_animate",
-                "reload_request_id",
-                "import_status",
-            }
             with state_lock:
-                for key, value in payload.items():
-                    if key in allowed:
-                        shared_state[key] = value
+                apply_render_state_update(shared_state, payload)
                 body = dict(shared_state)
             self.send_json(body)
 
@@ -594,7 +472,7 @@ def make_handler(
                     "reload_request_id": shared_state.get("reload_request_id"),
                 }
                 session.replace_from(new_session)
-                next_state = initial_state_for_payload(
+                next_state = initial_render_state(
                     new_payload,
                     initial_operation=None,
                     display_mode=default_display_mode,
@@ -748,10 +626,6 @@ def export_analysis_to_json_worker_cached(
     return exported_path, None
 
 
-def operation_exists(operations: list[dict], operation_index: int) -> bool:
-    return any(operation["index"] == operation_index for operation in operations)
-
-
 def resolve_viewer_json_path(
     input_path: Path,
     *,
@@ -893,7 +767,7 @@ def main() -> int:
     session = ViewerSession(json_path, payload)
 
     state_lock = threading.Lock()
-    shared_state = initial_state_for_payload(
+    shared_state = initial_render_state(
         payload,
         initial_operation=args.operation,
         display_mode=display_mode,

@@ -31,6 +31,7 @@ from crystal_viewer.viewer.operation_labels import (
     rotate_vector,
     visual_translation_direction_cart,
 )
+from crystal_viewer.viewer.render_state import pop_render_state_snapshot
 from crystal_viewer.viewer.scene_rendering import add_unit_cell
 from crystal_viewer.viewer.symmetry_elements import (
     add_symmetry_element_actors,
@@ -108,62 +109,46 @@ class BrowserControlledViewer(NativePyVistaViewer):
         with self.state_lock:
             if self.shared_state.get("import_in_progress"):
                 return
-            operation_index = int(self.shared_state["operation_index"])
-            requested_playing = bool(self.shared_state["playing"])
-            scope = str(self.shared_state.get("scope", "representative"))
-            selected_atoms = tuple(int(index) for index in self.shared_state.get("selected_atoms", []))
-            element_colors = dict(self.shared_state.get("element_colors", {}))
-            atom_colors = dict(self.shared_state.get("atom_colors", {}))
-            element_hidden = dict(self.shared_state.get("element_hidden", {}))
-            atom_hidden = dict(self.shared_state.get("atom_hidden", {}))
-            speed = float(self.shared_state.get("speed", 1.0))
-            projection_mode = str(self.shared_state.get("projection_mode", "perspective"))
-            improper_mode = str(self.shared_state.get("improper_mode", "auto"))
-            display_mode = str(self.shared_state.get("display_mode", self.display_mode))
-            active_mode = str(self.shared_state.get("active_mode", "standard"))
-            view_request_id = self.shared_state.get("view_request_id")
-            reset_view_request_id = self.shared_state.get("reset_view_request_id")
-            view_center_request_id = self.shared_state.get("view_center_request_id")
-            view_center_frac = self.shared_state.get("view_center_frac")
-            camera_request_id = self.shared_state.get("camera_request_id")
-            camera_direction = str(self.shared_state.get("camera_direction", ""))
-            camera_angle = float(self.shared_state.get("camera_angle", 90.0))
-            gif_request_id = self.shared_state.get("gif_request_id")
-            gif_3view_request_id = self.shared_state.get("gif_3view_request_id")
-            reload_request_id = self.shared_state.get("reload_request_id")
-            custom_op_check_id = self.shared_state.get("custom_op_check_id")
-            clear_custom_check = bool(self.shared_state.pop("clear_custom_check", False))
-            custom_op_result = self.shared_state.get("custom_op_result")
-            custom_op_animate = self.shared_state.get("custom_op_animate")
-            reset = bool(self.shared_state.pop("reset", False))
+            snapshot = pop_render_state_snapshot(self.shared_state)
 
-        self.speed = max(speed, 0.1)
+        reset = snapshot.reset
+        self.speed = max(snapshot.speed, 0.1)
+        operation_index = snapshot.operation_index
+        requested_playing = snapshot.playing
+        scope = snapshot.scope
+        selected_atoms = snapshot.selected_atoms
+        element_colors = snapshot.element_colors
+        atom_colors = snapshot.atom_colors
+        element_hidden = snapshot.element_hidden
+        atom_hidden = snapshot.atom_hidden
+        display_mode = snapshot.display_mode
+        active_mode = snapshot.active_mode
 
-        if reload_request_id is not None and reload_request_id != self.last_reload_request_id:
+        if snapshot.reload_request_id is not None and snapshot.reload_request_id != self.last_reload_request_id:
             self.reload_from_session(
-                display_mode=display_mode,
-                operation_index=operation_index,
-                scope=scope,
-                selected_atoms=selected_atoms,
+                display_mode=snapshot.display_mode,
+                operation_index=snapshot.operation_index,
+                scope=snapshot.scope,
+                selected_atoms=snapshot.selected_atoms,
             )
-            self.last_reload_request_id = reload_request_id
-            self.last_operation_index = operation_index
-            self.last_scope = scope
-            self.last_selected_atoms = selected_atoms
-            self.last_display_mode = display_mode
-            self.last_active_mode = active_mode
+            self.last_reload_request_id = snapshot.reload_request_id
+            self.last_operation_index = snapshot.operation_index
+            self.last_scope = snapshot.scope
+            self.last_selected_atoms = snapshot.selected_atoms
+            self.last_display_mode = snapshot.display_mode
+            self.last_active_mode = snapshot.active_mode
             self.last_custom_op_check_id = None
             should_render = True
 
-        projection_mode = "orthographic" if projection_mode == "orthographic" else "perspective"
+        projection_mode = "orthographic" if snapshot.projection_mode == "orthographic" else "perspective"
         if projection_mode != self.last_projection_mode:
             self.set_projection_mode(projection_mode)
             self.last_projection_mode = projection_mode
             should_render = True
 
-        if improper_mode != self.last_improper_mode:
-            self.improper_mode = improper_mode
-            self.last_improper_mode = improper_mode
+        if snapshot.improper_mode != self.last_improper_mode:
+            self.improper_mode = snapshot.improper_mode
+            self.last_improper_mode = snapshot.improper_mode
             self.clear_element_actor_cache()
             self.build_paths()
             reset = True
@@ -253,45 +238,45 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.update_atoms(0.0)
             should_render = True
 
-        if view_request_id is not None and view_request_id != self.last_view_request_id:
+        if snapshot.view_request_id is not None and snapshot.view_request_id != self.last_view_request_id:
             self.view_along_current_operation()
-            self.last_view_request_id = view_request_id
+            self.last_view_request_id = snapshot.view_request_id
             should_render = True
 
-        if reset_view_request_id is not None and reset_view_request_id != self.last_reset_view_request_id:
+        if snapshot.reset_view_request_id is not None and snapshot.reset_view_request_id != self.last_reset_view_request_id:
             self.reset_view_center()
-            self.last_reset_view_request_id = reset_view_request_id
+            self.last_reset_view_request_id = snapshot.reset_view_request_id
             should_render = True
 
-        if view_center_request_id is not None and view_center_request_id != self.last_view_center_request_id:
+        if snapshot.view_center_request_id is not None and snapshot.view_center_request_id != self.last_view_center_request_id:
             try:
-                self.set_manual_view_center(view_center_frac)
+                self.set_manual_view_center(snapshot.view_center_frac)
             except Exception as exc:
                 self.set_gif_status(f"view center failed: {exc}")
                 should_update_status = True
-            self.last_view_center_request_id = view_center_request_id
+            self.last_view_center_request_id = snapshot.view_center_request_id
             should_render = True
 
-        if camera_request_id is not None and camera_request_id != self.last_camera_request_id:
-            self.rotate_current_camera(camera_direction, camera_angle)
-            self.last_camera_request_id = camera_request_id
+        if snapshot.camera_request_id is not None and snapshot.camera_request_id != self.last_camera_request_id:
+            self.rotate_current_camera(snapshot.camera_direction, snapshot.camera_angle)
+            self.last_camera_request_id = snapshot.camera_request_id
             should_render = True
 
-        if gif_request_id is not None and gif_request_id != self.last_gif_request_id:
+        if snapshot.gif_request_id is not None and snapshot.gif_request_id != self.last_gif_request_id:
             self.playing = False
             self.save_current_gif()
-            self.last_gif_request_id = gif_request_id
+            self.last_gif_request_id = snapshot.gif_request_id
             should_update_status = True
             should_render = True
 
-        if gif_3view_request_id is not None and gif_3view_request_id != self.last_gif_3view_request_id:
+        if snapshot.gif_3view_request_id is not None and snapshot.gif_3view_request_id != self.last_gif_3view_request_id:
             self.playing = False
             self.save_three_view_gifs()
-            self.last_gif_3view_request_id = gif_3view_request_id
+            self.last_gif_3view_request_id = snapshot.gif_3view_request_id
             should_update_status = True
             should_render = True
 
-        if clear_custom_check:
+        if snapshot.clear_custom_check:
             self.clear_custom_check_actors()
             self.using_custom_paths = False
             self.build_paths()
@@ -300,10 +285,10 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 self.shared_state["custom_op_animate"] = None
             reset = True
             should_render = True
-        elif custom_op_check_id is not None and custom_op_check_id != self.last_custom_op_check_id:
-            self.last_custom_op_check_id = custom_op_check_id  # update first to prevent exception loops
+        elif snapshot.custom_op_check_id is not None and snapshot.custom_op_check_id != self.last_custom_op_check_id:
+            self.last_custom_op_check_id = snapshot.custom_op_check_id  # update first to prevent exception loops
             try:
-                self.apply_custom_check(custom_op_result)
+                self.apply_custom_check(snapshot.custom_op_result)
             except Exception as exc:
                 self.clear_custom_check_actors()
                 self.set_gif_status(f"check highlight failed: {exc}")
@@ -315,15 +300,15 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 reset = True
             should_render = True
 
-        if custom_op_animate is not None:
-            animate_id = custom_op_animate.get("animate_id")
+        if snapshot.custom_op_animate is not None:
+            animate_id = snapshot.custom_op_animate.get("animate_id")
             if animate_id != self.last_custom_op_animate_id:
-                atom_indices = custom_op_animate.get("atom_indices", [])
-                W_frac = np.asarray(custom_op_animate.get("W_frac"), dtype=float)
-                t_frac = np.asarray(custom_op_animate.get("t_frac"), dtype=float)
-                op_type = str(custom_op_animate.get("op_type", "matrix"))
-                op_params = custom_op_animate.get("op_params") or {}
-                unit_cell_only = bool(custom_op_animate.get("unit_cell_only", False))
+                atom_indices = snapshot.custom_op_animate.get("atom_indices", [])
+                W_frac = np.asarray(snapshot.custom_op_animate.get("W_frac"), dtype=float)
+                t_frac = np.asarray(snapshot.custom_op_animate.get("t_frac"), dtype=float)
+                op_type = str(snapshot.custom_op_animate.get("op_type", "matrix"))
+                op_params = snapshot.custom_op_animate.get("op_params") or {}
+                unit_cell_only = bool(snapshot.custom_op_animate.get("unit_cell_only", False))
                 self.paths = self.build_custom_animation_paths(
                     atom_indices,
                     W_frac,
