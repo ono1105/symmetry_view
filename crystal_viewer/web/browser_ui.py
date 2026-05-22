@@ -688,9 +688,9 @@ HTML = """<!doctype html>
           </div>
           <label id="view-center-label">View center [x y z] — fractional</label>
           <div class="view-center-row">
-            <input type="number" id="view-center-x" value="0.5" step="any" placeholder="x">
-            <input type="number" id="view-center-y" value="0.5" step="any" placeholder="y">
-            <input type="number" id="view-center-z" value="0.5" step="any" placeholder="z">
+            <input type="number" id="view-center-x" value="0" step="any" placeholder="x">
+            <input type="number" id="view-center-y" value="0" step="any" placeholder="y">
+            <input type="number" id="view-center-z" value="0" step="any" placeholder="z">
           </div>
           <div class="button-row flush">
             <button id="apply-view-center" class="secondary">Apply center</button>

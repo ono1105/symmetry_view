@@ -602,22 +602,19 @@ class BrowserControlledViewer(NativePyVistaViewer):
         unit_cell = self.render_data.get("unit_cell")
         if unit_cell is not None:
             lattice = np.asarray(unit_cell["lattice"], dtype=float)
-            if self.display_mode == "source":
-                points.extend(np.asarray(unit_cell["vertices_cart"], dtype=float))
-            else:
-                margin = display_mode_margin(self.display_mode)
-                lower = -0.5 - margin
-                upper = 0.5 + margin
-                corners = np.asarray(
-                    [
-                        [x, y, z]
-                        for x in (lower, upper)
-                        for y in (lower, upper)
-                        for z in (lower, upper)
-                    ],
-                    dtype=float,
-                )
-                points.extend(corners @ lattice)
+            margin = display_mode_margin(self.display_mode)
+            lower = -0.5 - margin
+            upper = 0.5 + margin
+            corners = np.asarray(
+                [
+                    [x, y, z]
+                    for x in (lower, upper)
+                    for y in (lower, upper)
+                    for z in (lower, upper)
+                ],
+                dtype=float,
+            )
+            points.extend(corners @ lattice)
 
         if not points:
             return np.empty((0, 3), dtype=float)

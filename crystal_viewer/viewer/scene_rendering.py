@@ -65,6 +65,8 @@ def add_animated_atoms(
 
 def add_unit_cell(plotter: pv.Plotter, unit_cell: dict) -> None:
     vertices = np.asarray(unit_cell["vertices_cart"], dtype=float)
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    vertices = vertices - (np.asarray([0.5, 0.5, 0.5], dtype=float) @ lattice)
     edge_colors = {
         (0, 1): "#ff0000",
         (2, 4): "#ff0000",
@@ -116,4 +118,3 @@ def add_displacements(
         plotter.add_mesh(tube, color="#f4d03f", opacity=0.8)
         marker = pv.Sphere(radius=endpoint_radius, center=end, theta_resolution=16, phi_resolution=10)
         plotter.add_mesh(marker, color="#f7dc6f", opacity=0.85, smooth_shading=True)
-

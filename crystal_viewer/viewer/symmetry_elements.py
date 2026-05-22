@@ -11,7 +11,7 @@ from crystal_viewer.viewer.animation import (
     render_source_kind,
     select_animation_context,
 )
-from crystal_viewer.viewer.display_atoms import display_scene_span
+from crystal_viewer.viewer.display_atoms import display_point_cart, display_scene_span
 from crystal_viewer.viewer.operation_lookup import (
     operation_by_index,
     selected_elements,
@@ -54,13 +54,13 @@ def add_symmetry_element_actors(
     plane_scale = max(span * 0.45, 0.8)
 
     for axis in axes:
-        point = np.asarray(axis["point_cart"], dtype=float)
+        point = display_point_cart(render_data, axis["point_cart"], display_mode)
         direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
         line = pv.Line(point - axis_length * direction, point + axis_length * direction)
         actors.append(plotter.add_mesh(line, color="#58d68d", line_width=6))
 
     for plane in planes:
-        point = np.asarray(plane["point_cart"], dtype=float)
+        point = display_point_cart(render_data, plane["point_cart"], display_mode)
         basis1 = normalize(np.asarray(plane["basis1_cart"], dtype=float)) * plane_scale
         basis2 = normalize(np.asarray(plane["basis2_cart"], dtype=float)) * plane_scale
         points = np.array(
@@ -84,7 +84,7 @@ def add_symmetry_element_actors(
         )
 
     for center in centers:
-        point = np.asarray(center["point_cart"], dtype=float)
+        point = display_point_cart(render_data, center["point_cart"], display_mode)
         cube = pv.Cube(
             center=point,
             x_length=max(span * 0.055, 0.12),
@@ -167,4 +167,3 @@ def visual_improper_elements(
         if center is not None:
             centers = [center]
     return axes, planes, centers
-

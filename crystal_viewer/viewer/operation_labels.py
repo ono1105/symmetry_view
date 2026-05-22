@@ -7,7 +7,7 @@ import numpy as np
 from crystal_viewer.geometry import normalize
 from crystal_viewer.viewer.animation import animation_paths
 from crystal_viewer.viewer.animation_path import effective_rotation_axis
-from crystal_viewer.viewer.display_atoms import display_scene_center
+from crystal_viewer.viewer.display_atoms import display_point_cart, display_scene_center
 from crystal_viewer.viewer.operation_lookup import selected_elements, selected_mapping
 from crystal_viewer.viewer.symmetry_elements import visual_improper_elements
 
@@ -257,11 +257,11 @@ def operation_focus_point_cart(
 ) -> np.ndarray:
     effective_axis = axes[0] if axes else effective_axis_from_operation(operation, centers)
     if effective_axis is not None:
-        return np.asarray(effective_axis["point_cart"], dtype=float)
+        return display_point_cart(render_data, effective_axis["point_cart"], display_mode)
     if planes:
-        return np.asarray(planes[0]["point_cart"], dtype=float)
+        return display_point_cart(render_data, planes[0]["point_cart"], display_mode)
     if centers:
-        return np.asarray(centers[0]["point_cart"], dtype=float)
+        return display_point_cart(render_data, centers[0]["point_cart"], display_mode)
     return display_scene_center(render_data, display_mode)
 
 
@@ -270,23 +270,8 @@ def custom_focus_point_cart(result: dict, render_data: dict, display_mode: str) 
     for key in ("axes", "planes", "centers"):
         items = elements.get(key) or []
         if items:
-            return np.asarray(items[0]["point_cart"], dtype=float)
+            return display_point_cart(render_data, items[0]["point_cart"], display_mode)
     return None
-
-
-def display_point_cart(render_data: dict, point_cart: list[float] | np.ndarray, display_mode: str) -> np.ndarray:
-    point = np.asarray(point_cart, dtype=float)
-    unit_cell = render_data.get("unit_cell")
-    if unit_cell is None:
-        return point
-    lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    frac = point @ np.linalg.inv(lattice)
-    if display_mode == "source":
-        wrapped = frac - np.floor(frac + 1e-9)
-    else:
-        wrapped = frac - np.round(frac)
-        wrapped = np.where(wrapped >= 0.5 - 1e-9, wrapped - 1.0, wrapped)
-    return wrapped @ lattice
 
 
 def visual_translation_direction_cart(
@@ -529,9 +514,6 @@ def scene_center(render_data: dict) -> np.ndarray:
         points = np.asarray([atom["cart"] for atom in atoms], dtype=float)
         return np.mean(points, axis=0)
     unit_cell = render_data.get("unit_cell")
-    if unit_cell is not None:
-        lattice = np.asarray(unit_cell["lattice"], dtype=float)
-        return np.asarray([0.5, 0.5, 0.5]) @ lattice
     return np.zeros(3)
 
 
