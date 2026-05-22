@@ -300,8 +300,22 @@ HTML = """<!doctype html>
     .atom-row input[type="checkbox"] {
       flex: 0 0 auto;
     }
-    .atom-row .visibility-toggle {
-      margin-left: 2px;
+    .visibility-toggle {
+      min-width: 58px;
+      height: 26px;
+      padding: 0 8px;
+      border: 1px solid #3a4350;
+      border-radius: 5px;
+      background: #24303a;
+      color: #edf2f7;
+      font-size: 12px;
+      line-height: 1;
+      flex: 0 0 auto;
+    }
+    .visibility-toggle.hidden {
+      background: #111827;
+      color: #64748b;
+      border-color: #29313c;
     }
     .element-color-list {
       display: flex;
@@ -322,10 +336,6 @@ HTML = """<!doctype html>
       padding: 0;
       border: 0;
       background: transparent;
-    }
-    .element-color-item input[type="checkbox"] {
-      width: auto;
-      margin: 0;
     }
     .check-row {
       display: flex;
@@ -834,6 +844,17 @@ function atomVisible(atom) {
   return !elementHidden[atom.element] && !atomHidden[String(atom.index)];
 }
 
+function visibilityButton(visible, title, onToggle) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `visibility-toggle${visible ? "" : " hidden"}`;
+  button.textContent = visible ? "Shown" : "Hidden";
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.addEventListener("click", onToggle);
+  return button;
+}
+
 function renderOperations() {
   const root = document.getElementById("operations");
   root.innerHTML = "";
@@ -1204,14 +1225,11 @@ function renderElementColorControls() {
     const sample = atoms.find(atom => atom.element === element);
     const label = document.createElement("div");
     label.className = "element-color-item";
-    const visible = document.createElement("input");
-    visible.type = "checkbox";
-    visible.checked = !elementHidden[element];
-    visible.title = `Show ${element}`;
-    visible.addEventListener("change", () => {
+    const visible = !elementHidden[element];
+    const visibleButton = visibilityButton(visible, `${visible ? "Hide" : "Show"} ${element}`, () => {
       const next = Object.assign({}, state.element_hidden || {});
-      if (visible.checked) delete next[element];
-      else next[element] = true;
+      if (visible) next[element] = true;
+      else delete next[element];
       postState({element_hidden: next, playing: false, reset: true});
     });
     const input = document.createElement("input");
@@ -1224,7 +1242,7 @@ function renderElementColorControls() {
     });
     const span = document.createElement("span");
     span.textContent = element;
-    label.appendChild(visible);
+    label.appendChild(visibleButton);
     label.appendChild(input);
     label.appendChild(span);
     root.appendChild(label);
@@ -1256,15 +1274,11 @@ function renderAtoms() {
       next[String(atom.index)] = colorInput.value;
       postState({atom_colors: next});
     });
-    const visibleInput = document.createElement("input");
-    visibleInput.type = "checkbox";
-    visibleInput.className = "visibility-toggle";
-    visibleInput.checked = atomVisible(atom);
-    visibleInput.title = `Show atom ${atom.index}`;
-    visibleInput.addEventListener("change", () => {
+    const visible = atomVisible(atom);
+    const visibleButton = visibilityButton(visible, `${visible ? "Hide" : "Show"} atom ${atom.index}`, () => {
       const next = Object.assign({}, state.atom_hidden || {});
-      if (visibleInput.checked) delete next[String(atom.index)];
-      else next[String(atom.index)] = true;
+      if (visible) next[String(atom.index)] = true;
+      else delete next[String(atom.index)];
       postState({atom_hidden: next, playing: false, reset: true});
     });
     const span = document.createElement("span");
@@ -1277,7 +1291,7 @@ function renderAtoms() {
     }
     label.appendChild(checkbox);
     label.appendChild(colorInput);
-    label.appendChild(visibleInput);
+    label.appendChild(visibleButton);
     label.appendChild(span);
     root.appendChild(label);
   }
