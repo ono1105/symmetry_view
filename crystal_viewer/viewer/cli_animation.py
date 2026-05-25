@@ -30,6 +30,7 @@ def run_animation(
     animation_scope: str,
     representative_atom: int | None,
     selected_atoms: tuple[int, ...],
+    display_mode: str = "source",
 ) -> None:
     if animated_atoms is None:
         print("Animation skipped because atoms are hidden.")
@@ -58,6 +59,7 @@ def run_animation(
         animation_scope=animation_scope,
         representative_atom=representative_atom,
         selected_atoms=selected_atoms,
+        display_mode=display_mode,
     )
     if not paths:
         print("Animation skipped because no atom path could be built. Check --representative-atom.")

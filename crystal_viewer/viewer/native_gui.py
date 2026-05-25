@@ -436,6 +436,7 @@ class NativePyVistaViewer:
             representative_atom=representative_atom,
             selected_atoms=selected_atoms,
             improper_mode=getattr(self, "improper_mode", "auto"),
+            display_mode=self.display_mode,
         )
         if unit_cell_only:
             for path in self.paths.values():

@@ -3,12 +3,14 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
 import numpy as np
 import spglib
-from pymatgen.core import Element, Structure
+from pymatgen.core import Element, Lattice, Structure
+from pymatgen.core.operations import SymmOp
 from pymatgen.io.cif import CifParser
 
 from .analysis_models import (
@@ -26,9 +28,59 @@ from .analysis_models import (
 
 DEFAULT_LEGACY_CORE = Path("/home/ken/work/kouzoukaiseki/symmetry_core.py")
 
+RHOMBOHEDRAL_SETTING_OPS: dict[int, tuple[str, ...]] = {
+    146: ("x,y,z", "z,x,y", "y,z,x"),
+    148: ("x,y,z", "z,x,y", "y,z,x", "-x,-y,-z", "-z,-x,-y", "-y,-z,-x"),
+    155: ("x,y,z", "z,x,y", "y,z,x", "-y,-x,-z", "-x,-z,-y", "-z,-y,-x"),
+    160: ("x,y,z", "z,x,y", "y,z,x", "y,x,z", "z,y,x", "x,z,y"),
+    161: (
+        "x,y,z",
+        "z,x,y",
+        "y,z,x",
+        "y+1/2,x+1/2,z+1/2",
+        "z+1/2,y+1/2,x+1/2",
+        "x+1/2,z+1/2,y+1/2",
+    ),
+    166: (
+        "x,y,z",
+        "z,x,y",
+        "y,z,x",
+        "-y,-x,-z",
+        "-x,-z,-y",
+        "-z,-y,-x",
+        "y,x,z",
+        "x,z,y",
+        "z,y,x",
+        "-y,-z,-x",
+        "-z,-x,-y",
+        "-x,-y,-z",
+    ),
+    167: (
+        "x,y,z",
+        "z,x,y",
+        "y,z,x",
+        "y+1/2,x+1/2,z+1/2",
+        "z+1/2,y+1/2,x+1/2",
+        "x+1/2,z+1/2,y+1/2",
+        "-x,-y,-z",
+        "-z,-x,-y",
+        "-y,-z,-x",
+        "-y+1/2,-x+1/2,-z+1/2",
+        "-z+1/2,-y+1/2,-x+1/2",
+        "-x+1/2,-z+1/2,-y+1/2",
+    ),
+}
+
 
 class AnalysisError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class CifStructureLoad:
+    structure: Structure
+    asymmetric_atoms: tuple[AsymmetricUnitSite, ...] | None
+    warnings: tuple[str, ...] = ()
 
 
 def analyze_cif(
@@ -44,7 +96,8 @@ def analyze_cif(
     if not cif_path.exists():
         raise AnalysisError(f"CIF file not found: {cif_path}")
 
-    structure = Structure.from_file(str(cif_path))
+    loaded = load_structure_from_cif(cif_path)
+    structure = loaded.structure
     cell = structure_to_spglib_cell(structure)
     dataset = spglib.get_symmetry_dataset(
         cell,
@@ -68,7 +121,11 @@ def analyze_cif(
         for index, (W, t) in enumerate(zip(rotations, translations))
     )
 
-    asymmetric_atoms = read_asymmetric_unit_sites(cif_path, np.asarray(structure.lattice.matrix, dtype=float))
+    asymmetric_atoms = (
+        loaded.asymmetric_atoms
+        if loaded.asymmetric_atoms is not None
+        else read_asymmetric_unit_sites(cif_path, np.asarray(structure.lattice.matrix, dtype=float))
+    )
 
     return StructureAnalysisResult(
         structure=convert_structure(
@@ -86,7 +143,243 @@ def analyze_cif(
         geometry_groups=geometry_groups,
         raw_merged=merged,
         raw_per_operation=per_operation,
+        warnings=loaded.warnings,
     )
+
+
+def load_structure_from_cif(cif_path: Path) -> CifStructureLoad:
+    try:
+        return CifStructureLoad(
+            structure=Structure.from_file(str(cif_path)),
+            asymmetric_atoms=None,
+        )
+    except Exception as exc:
+        text = cif_path.read_text(encoding="utf-8", errors="replace")
+        if not has_empty_symmetry_equiv_loop(text):
+            raise
+        cell = parse_cif_cell_parameters(text)
+        if not is_rhombohedral_primitive_cell(cell):
+            raise
+        space_group_number = parse_cif_space_group_number(text)
+        if space_group_number not in RHOMBOHEDRAL_SETTING_OPS:
+            raise AnalysisError(
+                "CIF has an empty symmetry operation loop in a rhombohedral primitive cell, "
+                f"but space-group number {space_group_number or 'unknown'} is not supported for fallback repair."
+            ) from exc
+        structure, asymmetric_atoms = structure_from_declared_rhombohedral_symmetry(cif_path, text, cell, space_group_number)
+        warning = (
+            "CIF contains an empty _symmetry_equiv_pos_as_xyz loop. "
+            "Because the lattice is a rhombohedral primitive cell, the loader used the CIF-declared "
+            f"space-group number {space_group_number} only to expand atom_site positions with R-setting operations. "
+            "The final reported symmetry is still determined from the expanded atomic positions by spglib."
+        )
+        return CifStructureLoad(
+            structure=structure,
+            asymmetric_atoms=asymmetric_atoms,
+            warnings=(warning, f"Original CIF parser error: {type(exc).__name__}: {exc}"),
+        )
+
+
+def has_empty_symmetry_equiv_loop(text: str) -> bool:
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() != "loop_":
+            continue
+        next_index = next_nonempty_line(lines, index + 1)
+        if next_index is None or lines[next_index].strip() not in {
+            "_symmetry_equiv_pos_as_xyz",
+            "_symmetry_equiv_pos_as_xyz_",
+            "_space_group_symop_operation_xyz",
+            "_space_group_symop_operation_xyz_",
+        }:
+            continue
+        data_index = next_nonempty_line(lines, next_index + 1)
+        if data_index is None:
+            return True
+        token = lines[data_index].strip()
+        if token == "loop_" or token.startswith("_"):
+            return True
+    return False
+
+
+def next_nonempty_line(lines: list[str], start: int) -> int | None:
+    for index in range(start, len(lines)):
+        stripped = lines[index].strip()
+        if stripped and not stripped.startswith("#"):
+            return index
+    return None
+
+
+def structure_from_declared_rhombohedral_symmetry(
+    cif_path: Path,
+    text: str,
+    cell: dict[str, float],
+    space_group_number: int,
+) -> tuple[Structure, tuple[AsymmetricUnitSite, ...]]:
+    labels, symbols, frac_coords = parse_atom_site_loop(text)
+    if not labels:
+        raise AnalysisError(f"CIF atom_site loop not found or empty: {cif_path}")
+    lattice = np.asarray(
+        Lattice.from_parameters(
+            cell["a"],
+            cell["b"],
+            cell["c"],
+            cell["alpha"],
+            cell["beta"],
+            cell["gamma"],
+        ).matrix,
+        dtype=float,
+    )
+    elements = [normalize_element_symbol(symbol, label) for label, symbol in zip(labels, symbols)]
+    asymmetric_atoms = tuple(
+        AsymmetricUnitSite(
+            index=index,
+            label=str(label),
+            element=element,
+            atomic_number=int(Element(element).Z),
+            frac=np.asarray(frac, dtype=float),
+            cart=np.asarray(frac, dtype=float) @ lattice,
+        )
+        for index, (label, element, frac) in enumerate(zip(labels, elements, frac_coords))
+    )
+
+    operations = tuple(SymmOp.from_xyz_str(text) for text in RHOMBOHEDRAL_SETTING_OPS[space_group_number])
+    expanded_elements: list[str] = []
+    expanded_frac: list[np.ndarray] = []
+    for element, frac in zip(elements, frac_coords):
+        for operation in operations:
+            candidate = wrap_fractional(operation.operate(frac))
+            if not has_matching_periodic_site(expanded_elements, expanded_frac, element, candidate):
+                expanded_elements.append(element)
+                expanded_frac.append(candidate)
+
+    structure = Structure(
+        lattice,
+        expanded_elements,
+        np.asarray(expanded_frac, dtype=float),
+        coords_are_cartesian=False,
+        to_unit_cell=False,
+    )
+    return structure, asymmetric_atoms
+
+
+def wrap_fractional(frac: np.ndarray) -> np.ndarray:
+    wrapped = np.asarray(frac, dtype=float) - np.floor(np.asarray(frac, dtype=float))
+    wrapped[np.isclose(wrapped, 1.0, atol=1e-8)] = 0.0
+    return wrapped
+
+
+def has_matching_periodic_site(
+    elements: list[str],
+    positions: list[np.ndarray],
+    element: str,
+    frac: np.ndarray,
+    *,
+    tolerance: float = 1e-6,
+) -> bool:
+    for existing_element, existing_frac in zip(elements, positions):
+        if existing_element != element:
+            continue
+        delta = np.asarray(existing_frac, dtype=float) - np.asarray(frac, dtype=float)
+        delta -= np.round(delta)
+        if np.linalg.norm(delta) <= tolerance:
+            return True
+    return False
+
+
+def is_rhombohedral_primitive_cell(cell: dict[str, float]) -> bool:
+    lengths = np.asarray([cell["a"], cell["b"], cell["c"]], dtype=float)
+    angles = np.asarray([cell["alpha"], cell["beta"], cell["gamma"]], dtype=float)
+    length_scale = max(float(np.max(np.abs(lengths))), 1.0)
+    return bool(
+        np.max(np.abs(lengths - lengths[0])) <= length_scale * 1e-4
+        and np.max(np.abs(angles - angles[0])) <= 1e-3
+        and not np.isclose(angles[0], 90.0, atol=1e-4)
+        and not np.isclose(angles[0], 120.0, atol=1e-4)
+    )
+
+
+def parse_cif_space_group_number(text: str) -> int | None:
+    for key in ("_space_group_IT_number", "_symmetry_Int_Tables_number"):
+        match = re.search(rf"^\s*{re.escape(key)}\s+([0-9]+)", text, flags=re.MULTILINE)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def parse_cif_cell_parameters(text: str) -> dict[str, float]:
+    keys = {
+        "_cell_length_a": "a",
+        "_cell_length_b": "b",
+        "_cell_length_c": "c",
+        "_cell_angle_alpha": "alpha",
+        "_cell_angle_beta": "beta",
+        "_cell_angle_gamma": "gamma",
+    }
+    values: dict[str, float] = {}
+    for line in text.splitlines():
+        parts = line.strip().split(maxsplit=1)
+        if len(parts) != 2 or parts[0] not in keys:
+            continue
+        values[keys[parts[0]]] = parse_cif_float(parts[1].strip().strip("'\""))
+    missing = [value for value in keys.values() if value not in values]
+    if missing:
+        raise AnalysisError(f"CIF cell parameters are incomplete: missing {', '.join(missing)}")
+    return values
+
+
+def parse_atom_site_loop(text: str) -> tuple[list[str], list[str], np.ndarray]:
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != "loop_":
+            index += 1
+            continue
+        index += 1
+        columns = []
+        while index < len(lines):
+            stripped = lines[index].strip()
+            if not stripped or stripped.startswith("#"):
+                index += 1
+                continue
+            if not stripped.startswith("_"):
+                break
+            columns.append(stripped.split()[0])
+            index += 1
+        required = {
+            "_atom_site_fract_x",
+            "_atom_site_fract_y",
+            "_atom_site_fract_z",
+        }
+        if not required.issubset(columns):
+            continue
+        labels: list[str] = []
+        symbols: list[str] = []
+        coords: list[list[float]] = []
+        while index < len(lines):
+            stripped = lines[index].strip()
+            if not stripped or stripped.startswith("#"):
+                index += 1
+                continue
+            if stripped == "loop_" or stripped.startswith("_"):
+                break
+            parts = stripped.split()
+            if len(parts) >= len(columns):
+                row = dict(zip(columns, parts))
+                label = row.get("_atom_site_label", f"site{len(labels)}")
+                symbol = row.get("_atom_site_type_symbol", label)
+                labels.append(label)
+                symbols.append(symbol)
+                coords.append(
+                    [
+                        parse_cif_float(row["_atom_site_fract_x"]),
+                        parse_cif_float(row["_atom_site_fract_y"]),
+                        parse_cif_float(row["_atom_site_fract_z"]),
+                    ]
+                )
+            index += 1
+        return labels, symbols, np.asarray(coords, dtype=float)
+    return [], [], np.empty((0, 3), dtype=float)
 
 
 def load_legacy_core(path: str | Path) -> ModuleType:

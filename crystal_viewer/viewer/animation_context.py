@@ -14,7 +14,7 @@ from crystal_viewer.viewer.animation_path import (
     signed_angle_to_target,
     signed_rotation_angle_from_matrix,
 )
-from crystal_viewer.viewer.display_atoms import periodic_shifts
+from crystal_viewer.viewer.display_atoms import display_point_cart, periodic_shifts
 from crystal_viewer.viewer.operation_lookup import filter_by_operation, selected_elements
 
 
@@ -28,6 +28,7 @@ def animation_paths(
     representative_atom: int | None = None,
     selected_atoms: tuple[int, ...] = (),
     improper_mode: str = "auto",
+    display_mode: str = "source",
 ) -> dict[int, dict]:
     atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
     axis, plane, center, reference_entry, shared_shift, shared_angle = select_animation_context(
@@ -41,6 +42,15 @@ def animation_paths(
 
     if reference_entry is None:
         return {}
+
+    operation, axis, plane, center = display_equivalent_operation_context(
+        render_data,
+        operation,
+        axis,
+        plane,
+        center,
+        display_mode,
+    )
 
     translation_override = shared_step_translation(
         render_data,
@@ -89,6 +99,79 @@ def animation_paths(
             source_kind=str(render_data.get("metadata", {}).get("mode", "")),
         )
     return paths
+
+
+def display_equivalent_operation_context(
+    render_data: dict,
+    operation: dict,
+    axis: dict | None,
+    plane: dict | None,
+    center: dict | None,
+    display_mode: str,
+) -> tuple[dict, dict | None, dict | None, dict | None]:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return operation, axis, plane, center
+
+    anchor = operation_anchor_point(operation, axis, plane, center)
+    if anchor is None:
+        return operation, axis, plane, center
+
+    anchor = np.asarray(anchor, dtype=float)
+    displayed_anchor = display_point_cart(render_data, anchor, display_mode)
+    shift = displayed_anchor - anchor
+    if np.linalg.norm(shift) < 1e-10:
+        return operation, axis, plane, center
+
+    return (
+        shifted_operation(operation, shift),
+        shifted_point_element(axis, shift),
+        shifted_point_element(plane, shift),
+        shifted_point_element(center, shift),
+    )
+
+
+def operation_anchor_point(
+    operation: dict,
+    axis: dict | None,
+    plane: dict | None,
+    center: dict | None,
+) -> np.ndarray | None:
+    kind = str(operation.get("kind", ""))
+    if (
+        kind.startswith(("rotation", "screw"))
+        or "rotoinversion" in kind
+        or "rotoreflection" in kind
+        or "improper" in kind
+    ) and axis is not None:
+        return np.asarray(axis["point_cart"], dtype=float)
+    if ("glide" in kind or kind == "mirror") and plane is not None:
+        return np.asarray(plane["point_cart"], dtype=float)
+    if (kind == "inversion" or "rotoinversion" in kind) and center is not None:
+        return np.asarray(center["point_cart"], dtype=float)
+    return None
+
+
+def shifted_operation(operation: dict, shift: np.ndarray) -> dict:
+    matrix = operation.get("matrix_cart")
+    translation = operation.get("translation_cart")
+    if matrix is None or translation is None:
+        return operation
+    matrix = np.asarray(matrix, dtype=float)
+    shift = np.asarray(shift, dtype=float)
+    shifted = dict(operation)
+    shifted["translation_cart"] = (
+        np.asarray(translation, dtype=float) + shift - matrix @ shift
+    ).tolist()
+    return shifted
+
+
+def shifted_point_element(element: dict | None, shift: np.ndarray) -> dict | None:
+    if element is None or element.get("point_cart") is None:
+        return element
+    shifted = dict(element)
+    shifted["point_cart"] = (np.asarray(element["point_cart"], dtype=float) + shift).tolist()
+    return shifted
 
 def select_animation_context(
     render_data: dict,

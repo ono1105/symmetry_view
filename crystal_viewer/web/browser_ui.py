@@ -145,6 +145,31 @@ HTML = """<!doctype html>
       cursor: wait;
       opacity: 0.48;
     }
+    .error-panel {
+      border-color: #f87171;
+      background: #2a1518;
+    }
+    .error-title {
+      margin: 0 0 8px;
+      color: #fecaca;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .error-message {
+      color: #fee2e2;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .error-detail {
+      margin-top: 10px;
+      color: #cbd5e1;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      max-height: 180px;
+      overflow: auto;
+    }
     .saving-gif button:not(#save-gif):not(#save-gif-3view),
     .saving-gif input,
     .saving-gif select {
@@ -467,6 +492,11 @@ HTML = """<!doctype html>
     <h2 class="section-title">Open Structure</h2>
     <p class="hint">Open a CIF for crystal symmetry or an XYZ for molecular point-group symmetry.</p>
   </section>
+  <section class="panel error-panel" id="load-error-panel" hidden>
+    <div class="error-title" id="load-error-title"></div>
+    <div class="error-message" id="load-error-message"></div>
+    <div class="error-detail" id="load-error-detail"></div>
+  </section>
   <section class="panel" id="structure-info-panel" hidden>
     <h2 class="section-title">Structure Info</h2>
     <div class="structure-summary" id="structure-info"></div>
@@ -767,9 +797,21 @@ const STRUCTURE_KIND_UI = __STRUCTURE_KIND_CONFIG__;
 
 async function api(path, options) {
   const response = await fetch(path, options);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   if (response.status === 204) return null;
-  return await response.json();
+  const text = await response.text();
+  let body = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch (_error) {
+      body = null;
+    }
+  }
+  if (!response.ok) {
+    const message = body && body.error ? body.error : (text || `${response.status} ${response.statusText}`);
+    throw new Error(message);
+  }
+  return body;
 }
 
 function optionText(operation) {
@@ -1080,6 +1122,7 @@ function renderExampleOptions() {
 function beginImport(message) {
   importInProgress = true;
   const requestId = ++importRequestId;
+  hideLoadError();
   syncImportControls();
   document.getElementById("status").textContent = message;
   return requestId;
@@ -1093,6 +1136,60 @@ function finishImport(requestId) {
 
 function isCurrentImport(requestId) {
   return requestId === importRequestId;
+}
+
+function hideLoadError() {
+  const panel = document.getElementById("load-error-panel");
+  if (panel) panel.hidden = true;
+}
+
+function showLoadError(title, rawError, context = {}) {
+  const panel = document.getElementById("load-error-panel");
+  if (!panel) return;
+  const errorText = String(rawError || "Unknown error");
+  const reason = predictedLoadFailureReason(errorText, context);
+  document.getElementById("load-error-title").textContent = title;
+  document.getElementById("load-error-message").textContent = reason;
+  document.getElementById("load-error-detail").textContent = compactErrorDetail(errorText);
+  panel.hidden = false;
+  document.getElementById("status").textContent = `${title}: ${reason}`;
+}
+
+function predictedLoadFailureReason(errorText, context = {}) {
+  const lower = String(errorText || "").toLowerCase();
+  const name = context.name ? ` (${context.name})` : "";
+  if (lower.includes("empty") && (lower.includes("cif") || lower.includes("file"))) {
+    return `The selected file appears to be empty${name}.`;
+  }
+  if (lower.includes("analysis timed out")) {
+    return `Analysis did not finish within the timeout${name}. The file may be too large, malformed, or triggering a slow symmetry analysis path.`;
+  }
+  if (lower.includes("invalid json")) {
+    return `The browser request was malformed before the file could be analyzed${name}. Try reopening the file.`;
+  }
+  if (lower.includes("zerodivisionerror") && lower.includes("pymatgen") && lower.includes("cif")) {
+    return `The CIF parser failed before symmetry analysis${name}. A likely cause is malformed CIF loop syntax, such as a loop header with no data rows.`;
+  }
+  if (lower.includes("cif") && (lower.includes("parser") || lower.includes("parse") || lower.includes("from_file"))) {
+    return `The file could not be parsed as a valid CIF${name}. Check CIF loop sections, quoted multiline fields, cell parameters, and atom-site columns.`;
+  }
+  if (lower.includes("no such file") || lower.includes("not found")) {
+    return `The selected file could not be found${name}.`;
+  }
+  if (lower.includes("unsupported input file type")) {
+    return `The selected file type is not supported${name}. Use CIF for crystals or XYZ for molecules.`;
+  }
+  return `The structure could not be loaded${name}. See details below for the parser or analysis error.`;
+}
+
+function compactErrorDetail(errorText) {
+  const lines = String(errorText || "").split("\\n").map(line => line.trimEnd()).filter(Boolean);
+  if (lines.length <= 14) return lines.join("\\n");
+  return [
+    ...lines.slice(0, 8),
+    "...",
+    ...lines.slice(-5),
+  ].join("\\n");
 }
 
 function syncOperationSelection() {
@@ -1484,7 +1581,7 @@ async function importCifFile() {
       body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    applyLoadedStructure(result, "CIF import failed", "");
+    applyLoadedStructure(result, "CIF import failed", "", {name: file.name, kind: "CIF"});
   } finally {
     finishImport(requestId);
   }
@@ -1510,7 +1607,7 @@ async function importMoleculeFile() {
       body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    applyLoadedStructure(result, "Molecule import failed", "");
+    applyLoadedStructure(result, "Molecule import failed", "", {name: file.name, kind: "XYZ"});
   } finally {
     finishImport(requestId);
   }
@@ -1535,13 +1632,13 @@ async function openSelectedExample() {
       body: JSON.stringify({kind: selectedStructureKind, path, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    applyLoadedStructure(result, "Example load failed", path);
+    applyLoadedStructure(result, "Example load failed", path, {name: path, kind: selectedStructureKind});
   } finally {
     finishImport(requestId);
   }
 }
 
-function applyLoadedStructure(result, fallbackError, examplePath = "") {
+function applyLoadedStructure(result, fallbackError, examplePath = "", context = {}) {
   if (result.stale) {
     state = result.state || state;
     renderStatus();
@@ -1550,8 +1647,10 @@ function applyLoadedStructure(result, fallbackError, examplePath = "") {
   if (!result.ok) {
     state = result.state || state;
     renderStatus();
-    throw new Error(result.error || fallbackError);
+    showLoadError(fallbackError, result.error || fallbackError, context);
+    return;
   }
+  hideLoadError();
   operations = result.operations || [];
   atoms = result.atoms || [];
   state = result.state || {};
@@ -1654,7 +1753,8 @@ document.getElementById("import-cif").addEventListener("click", () => {
 });
 document.getElementById("cif-file").addEventListener("change", () => {
   importCifFile().catch(error => {
-    document.getElementById("status").textContent = `Import error: ${error}`;
+    const file = document.getElementById("cif-file").files && document.getElementById("cif-file").files[0];
+    showLoadError("CIF import failed", error, {name: file && file.name, kind: "CIF"});
   });
 });
 document.getElementById("import-molecule").addEventListener("click", () => {
@@ -1664,12 +1764,14 @@ document.getElementById("import-molecule").addEventListener("click", () => {
 });
 document.getElementById("molecule-file").addEventListener("change", () => {
   importMoleculeFile().catch(error => {
-    document.getElementById("status").textContent = `Import error: ${error}`;
+    const file = document.getElementById("molecule-file").files && document.getElementById("molecule-file").files[0];
+    showLoadError("Molecule import failed", error, {name: file && file.name, kind: "XYZ"});
   });
 });
 document.getElementById("open-example").addEventListener("click", () => {
   openSelectedExample().catch(error => {
-    document.getElementById("status").textContent = `Example load error: ${error}`;
+    const select = document.getElementById("example-select");
+    showLoadError("Example load failed", error, {name: select && select.value, kind: selectedStructureKind});
   });
 });
 for (const button of document.querySelectorAll(".mode-button")) {

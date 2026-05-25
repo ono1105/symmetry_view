@@ -96,6 +96,7 @@ class StructureAnalysisResult:
     geometry_groups: dict
     raw_merged: dict
     raw_per_operation: list
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

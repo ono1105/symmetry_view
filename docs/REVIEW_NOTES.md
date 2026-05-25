@@ -3067,3 +3067,105 @@ def offset_faces(faces: np.ndarray, point_count: int, instance_count: int) -> np
 - `offset_faces()` を NumPy ベクトル化。Jacobsite `expanded_1_0` の glyph mesh 構築は実測で約 58.8 ms。
 - glyph cache 復元時に各 item の `current_cart` を基準座標へリセットするよう変更。
 - ブラウザの対称要素描画と view-along 用の軸選択では、operation summary 用の複数要素キャッシュを使わず、`atom_mappings` に基づく `display_symmetry_elements()` を使うよう修正。これにより回転軸が複数本表示される問題を修正。
+
+---
+
+## 菱面体晶 CIF 読み込みエラーと修正方針 (2026-05-26)
+
+### 問題
+
+`examples/test/` の 3 ファイル（BaTiO3.cif, Calcite.cif, Ice II.cif）を開くと以下でクラッシュする。
+
+```
+File "pymatgen/io/cif.py", line 230, in from_str
+    if len(items) % n != 0:
+ZeroDivisionError: integer modulo by zero
+```
+
+**根本原因:** ReciPro の CIF 出力バグ。`_symmetry_equiv_pos_as_xyz` のループヘッダーだけ書かれてデータ行がない空ループになっている。
+
+```cif
+loop_
+_symmetry_equiv_pos_as_xyz   ← ヘッダーのみ（データなし）
+loop_                        ← 次のループが始まる
+_atom_site_label
+...
+```
+
+pymatgen の CifBlock パーサーは「ループ列数（n）でアイテム数を割ってチェックする」実装になっており、データが 0 件だと n=0 になりゼロ除算クラッシュする。
+
+---
+
+### 「やってはいけない実装」
+
+空ループを検出したら `_symmetry_Int_Tables_number` の空間群番号を読んで操作を注入する、という方法（今回 Claude が最初に提案した方法）は **正しくない**。
+
+理由:
+- このプロジェクトでは spglib が原子位置から対称性を決定する権威。CIF に書かれた空間群番号は信頼できない前提で設計されている。
+- 「空間群がR系だから R 設定の操作を使う」というロジックは CIF の空間群記述が間違っていた場合に間違った原子配置を生成してしまい、spglib に誤データを渡すことになる。
+- こういった例外処理が入っているとユーザーが気づかないまま間違った構造で解析が進む。
+
+---
+
+### 正しい修正方針
+
+#### 問題の核心
+
+単純に空ループを削除して pymatgen に任せると、pymatgen は空間群番号だけ見て六方晶（H）設定の操作で展開してしまい、原子数が3倍になる（BaTiO3: 5原子 → 39原子）。
+
+3つの CIF はいずれも菱面体プリミティブセル（a=b=c、α=β=γ≠90°）であり、H 設定ではなく R 設定の操作が必要。ただし、この判断は **格子定数から** できる。空間群の記述とは独立した情報なので、空間群ラベルが間違っていても格子は正しい。
+
+#### やること
+
+**`crystal_viewer/structure_analysis.py:47`** の `Structure.from_file()` の手前でテキスト前処理を入れる。
+
+```python
+# analyze_cif() の冒頭（Structure.from_file() の前）
+cif_text = Path(cif_path).read_text()
+cif_text, warning = fix_empty_symmetry_ops(cif_text)
+if warning:
+    # 呼び出し元に warning を渡す（下記参照）
+structure = Structure.from_str(cif_text, fmt='cif')
+```
+
+`fix_empty_symmetry_ops(text)` の仕様:
+
+1. `loop_\n_symmetry_equiv_pos_as_xyz\n` の直後に別の `loop_` または `_atom_site_` が来ているか検出（空ループの判定）。
+2. 空ループでなければ `(text, None)` を返す（ノーマルパス、何もしない）。
+3. 空ループの場合、格子定数を正規表現で取得して以下を判定：
+   - `a=b=c` かつ `α=β=γ`（90° でも 120° でもない）→ 菱面体プリミティブセル → **R 設定**
+   - それ以外 → 六方晶・立方晶など → 空ループを削除して pymatgen に任せる（H 設定）
+4. 菱面体の場合は `_symmetry_Int_Tables_number` から空間群番号を取得し、R 設定の操作を注入する。
+
+R 設定の操作表（このプロジェクトが扱う菱面体空間群の実際の操作）:
+
+| SG No. | 名称 | 操作 |
+|--------|------|------|
+| 146 | R3 | x,y,z / z,x,y / y,z,x |
+| 148 | R-3 | 上記 + -x,-y,-z / -z,-x,-y / -y,-z,-x |
+| 155 | R32 | x,y,z / z,x,y / y,z,x / -y,-x,-z / -x,-z,-y / -z,-y,-x |
+| 160 | R3m | x,y,z / z,x,y / y,z,x / y,x,z / z,y,x / x,z,y |
+| 161 | R3c | x,y,z / z,x,y / y,z,x / y+1/2,x+1/2,z+1/2 / z+1/2,y+1/2,x+1/2 / x+1/2,z+1/2,y+1/2 |
+| 166 | R-3m | 上記 R32 + 上記 R3m の inversion 付き（12操作） |
+| 167 | R-3c | 同様（12操作） |
+
+5. 注入した場合は警告文字列を返す。例:
+   `"CIF に対称操作の記載がありません。格子定数から菱面体設定と判断し、空間群 No.160 の操作を補完しました。spglib の解析結果を必ず確認してください。"`
+
+#### warning の表示
+
+`analyze_cif()` の戻り値 `StructureAnalysisResult` に `warnings: tuple[str, ...]` フィールドを追加し、呼び出し元（ブラウザ UI の open example / open file フロー）でトースト通知やログとして表示する。
+
+CIF の空間群記述が間違っている可能性は常にあるため、「補完した」という事実をユーザーが確認できることが重要。
+
+---
+
+### 動作確認済み（修正後の期待結果）
+
+| ファイル | 修正後の原子数 | spglib 検出空間群 |
+|---|---|---|
+| BaTiO3.cif | 5 | 160 (R3m) |
+| Calcite.cif | 10 | 167 (R-3c)※ |
+| Ice II.cif | 36 | 148 (R-3) |
+
+※ Calcite の CIF 記載は R3c (161) だが、spglib は実際の原子配置から R-3c (167) を検出する。これは「CIF の空間群が間違っていた」ケースで、spglib を権威とする設計の正しさを示す例。

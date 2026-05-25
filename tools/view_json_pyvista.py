@@ -169,6 +169,7 @@ def main() -> int:
             animation_scope=animation_scope,
             representative_atom=representative_atom,
             selected_atoms=selected_atoms,
+            display_mode=args.display_mode,
         )
     elif args.screenshot is not None:
         args.screenshot.parent.mkdir(parents=True, exist_ok=True)

@@ -11,9 +11,10 @@ import numpy as np
 import pyvista as pv
 from PIL import Image, ImageDraw, ImageFont
 
-from crystal_viewer.geometry import normalize
+from crystal_viewer.geometry import normalize, signed_rotation_angle_from_matrix
 from crystal_viewer.viewer.native_gui import NativePyVistaViewer
 from crystal_viewer.viewer.animation import custom_operation_speed_multiplier, operation_speed_multiplier
+from crystal_viewer.viewer.animation_context import display_equivalent_operation_context
 from crystal_viewer.viewer.animation_path import build_operation_path
 from crystal_viewer.viewer.atom_style import HIGHLIGHT_RADIUS_SCALE, atom_color, color_to_rgb
 from crystal_viewer.viewer.display_atoms import (
@@ -886,6 +887,22 @@ class BrowserControlledViewer(NativePyVistaViewer):
             "matrix_cart": W_cart.tolist(),
             "translation_cart": t_cart.tolist(),
         }
+        fake_op, axis_dict, plane_dict, center_dict = display_equivalent_operation_context(
+            self.render_data,
+            fake_op,
+            axis_dict,
+            plane_dict,
+            center_dict,
+            self.display_mode,
+        )
+        path_matrix = np.asarray(fake_op["matrix_cart"], dtype=float)
+        path_translation = np.asarray(fake_op["translation_cart"], dtype=float)
+        angle_override = None
+        if op_type in ("rotation", "screw") and axis_dict is not None:
+            angle_override = signed_rotation_angle_from_matrix(
+                path_matrix,
+                np.asarray(axis_dict["direction_cart"], dtype=float),
+            )
 
         idx_set = set(int(i) for i in atom_indices)
         paths = {}
@@ -894,10 +911,11 @@ class BrowserControlledViewer(NativePyVistaViewer):
             if atom["index"] not in idx_set:
                 continue
             start = np.asarray(atom["cart"], dtype=float)
-            target = W_cart @ start + t_cart
+            target = path_matrix @ start + path_translation
             path = build_operation_path(
                 start, target, fake_op,
                 axis=axis_dict, plane=plane_dict, center=center_dict,
+                angle_override=angle_override,
                 improper_mode=self.improper_mode,
                 source_kind=str(self.render_data.get("metadata", {}).get("mode", "")),
             )
@@ -967,8 +985,9 @@ class BrowserControlledViewer(NativePyVistaViewer):
 
 
 def export_gif_dir(json_path: Path) -> Path:
-    if json_path.parent.name == "json" and json_path.parent.parent.name == "exports":
-        return json_path.parent.parent / "gifs"
+    for parent in json_path.parents:
+        if parent.name == "json" and parent.parent.name == "exports":
+            return parent.parent / "gifs"
     if json_path.parent.name == "exports":
         return json_path.parent / "gifs"
     return json_path.parent / "gifs"

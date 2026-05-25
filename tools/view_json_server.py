@@ -56,6 +56,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 UPLOAD_CIF_DIR = Path(tempfile.gettempdir()) / "symmetry_view_cif_uploads"
 UPLOAD_MOLECULE_DIR = Path(tempfile.gettempdir()) / "symmetry_view_molecule_uploads"
 DEFAULT_BROWSER_IMPORT_JSON_DIR = DEFAULT_JSON_EXPORT_DIR / "imported"
+DEFAULT_ANALYSIS_TIMEOUT_SEC = 120.0
 EXAMPLE_DIRS = {
     SOURCE_KIND_CRYSTAL: PROJECT_ROOT / "examples/structures",
     SOURCE_KIND_MOLECULE: PROJECT_ROOT / "examples/molecules",
@@ -257,6 +258,7 @@ def make_handler(
     import_json_dir: Path,
     tolerance_cart: float,
     indent: int,
+    analysis_timeout_sec: float,
     default_display_mode: str,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
@@ -294,7 +296,11 @@ def make_handler(
         def do_POST(self) -> None:
             path = urlparse(self.path).path
             length = int(self.headers.get("Content-Length", "0"))
-            payload = json.loads(self.rfile.read(length) or b"{}")
+            try:
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError as exc:
+                self.send_json_error(f"invalid JSON request body: {exc}", status=400)
+                return
 
             if path == "/api/check_operation":
                 with state_lock:
@@ -359,6 +365,7 @@ def make_handler(
                     output_path=json_path,
                     tolerance_cart=tolerance_cart,
                     indent=indent,
+                    timeout_sec=analysis_timeout_sec,
                 )
                 debug_import_timing("example export/cache", started_at)
                 if new_payload is None:
@@ -398,6 +405,8 @@ def make_handler(
             filename = str(payload.get("filename") or "uploaded_structure.cif")
             content = str(payload.get("content") or "")
             try:
+                if not content.strip():
+                    raise ValueError(f"empty CIF file: {filename}")
                 cif_path = write_uploaded_cif(filename, content)
                 debug_import_timing("cif write", started_at)
                 json_path = default_json_output_path(cif_path, import_json_dir)
@@ -407,6 +416,7 @@ def make_handler(
                     output_path=json_path,
                     tolerance_cart=tolerance_cart,
                     indent=indent,
+                    timeout_sec=analysis_timeout_sec,
                 )
                 debug_import_timing("cif export", started_at)
                 new_payload = json.loads(json_path.read_text(encoding="utf-8"))
@@ -426,6 +436,8 @@ def make_handler(
             filename = str(payload.get("filename") or "uploaded_molecule.xyz")
             content = str(payload.get("content") or "")
             try:
+                if not content.strip():
+                    raise ValueError(f"empty molecule file: {filename}")
                 molecule_path = write_uploaded_molecule(filename, content)
                 debug_import_timing("molecule write", started_at)
                 json_path = default_json_output_path(molecule_path, import_json_dir)
@@ -435,6 +447,7 @@ def make_handler(
                     output_path=json_path,
                     tolerance_cart=tolerance_cart,
                     indent=indent,
+                    timeout_sec=analysis_timeout_sec,
                 )
                 debug_import_timing("molecule export", started_at)
                 new_payload = json.loads(json_path.read_text(encoding="utf-8"))
@@ -481,7 +494,7 @@ def make_handler(
                 next_state["reload_request_id"] = int(shared_state.get("reload_request_id") or 0) + 1
                 next_state["structure_loaded"] = True
                 next_state["import_in_progress"] = False
-                next_state["import_status"] = import_status
+                next_state["import_status"] = import_status_with_warnings(import_status, new_payload)
                 next_state["json_path"] = str(json_path)
                 shared_state.clear()
                 shared_state.update(next_state)
@@ -496,6 +509,17 @@ def make_handler(
 
         def send_json(self, body: dict) -> None:
             self.send_bytes(json.dumps(body).encode("utf-8"), content_type="application/json")
+
+        def send_json_error(self, message: str, *, status: int = 500) -> None:
+            body = json.dumps({"ok": False, "error": message}).encode("utf-8")
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         def send_bytes(self, body: bytes, *, content_type: str) -> None:
             try:
@@ -545,6 +569,7 @@ def export_analysis_to_json_worker(
     output_path: Path,
     tolerance_cart: float,
     indent: int,
+    timeout_sec: float | None = None,
 ) -> Path:
     command = [
         sys.executable,
@@ -559,7 +584,18 @@ def export_analysis_to_json_worker(
         "--indent",
         str(indent),
     ]
-    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"analysis timed out after {timeout_sec:g} seconds for {input_path}"
+        ) from exc
     if result.returncode != 0:
         message = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(message or f"export worker failed with exit code {result.returncode}")
@@ -612,6 +648,7 @@ def export_analysis_to_json_worker_cached(
     output_path: Path,
     tolerance_cart: float,
     indent: int,
+    timeout_sec: float | None = None,
 ) -> tuple[Path, dict | None]:
     cached = cached_export_json_path(input_path, output_path, mode=mode)
     if cached is not None:
@@ -622,8 +659,17 @@ def export_analysis_to_json_worker_cached(
         output_path=output_path,
         tolerance_cart=tolerance_cart,
         indent=indent,
+        timeout_sec=timeout_sec,
     )
     return exported_path, None
+
+
+def import_status_with_warnings(import_status: str, payload: dict) -> str:
+    metadata = (payload.get("render_data") or {}).get("metadata") or {}
+    warnings = [str(item) for item in metadata.get("warnings") or [] if str(item)]
+    if not warnings:
+        return import_status
+    return f"{import_status}; warning: {' | '.join(warnings)}"
 
 
 def resolve_viewer_json_path(
@@ -747,6 +793,12 @@ def main() -> int:
         help="JSON indentation for generated CIF/XYZ exports.",
     )
     parser.add_argument(
+        "--analysis-timeout-sec",
+        type=float,
+        default=DEFAULT_ANALYSIS_TIMEOUT_SEC,
+        help="Maximum seconds to wait for browser CIF/XYZ import analysis.",
+    )
+    parser.add_argument(
         "--expanded",
         action="store_true",
         help="Show quarter-cell periodic display clones. Slower, but useful for boundary checks.",
@@ -784,6 +836,7 @@ def main() -> int:
         import_json_dir=args.import_json_dir,
         tolerance_cart=args.tolerance_cart,
         indent=args.indent,
+        analysis_timeout_sec=args.analysis_timeout_sec,
         default_display_mode=display_mode,
     )
     example_catalog()

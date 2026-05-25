@@ -95,6 +95,7 @@ class RenderMetadata:
     formula: str
     symmetry_label: str
     operation_count: int
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,7 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
             formula=result.structure.formula,
             symmetry_label=f"{result.space_group.number} {result.space_group.international}",
             operation_count=result.space_group.operation_count,
+            warnings=result.warnings,
         ),
         atoms=atoms,
         asymmetric_atoms=asymmetric_atoms,
