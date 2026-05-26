@@ -1,0 +1,58 @@
+# This file is exported from "ReciPro"
+# https://github.com/seto77/
+data_global
+_chemical_name 'Retgersite'
+loop_
+_publ_author_name
+'McIntyre G J'
+'Ptasiewicz-Bak H'
+'Olovsson I'
+_journal_name 'Acta Crystallographica B46 (1990) 27-39'
+_publ_section_title
+;
+ Bonding deformation and superposition effects in the electron density of
+ tetragonal nickel sulfate hexadeuterate NiSO4*6D2O
+Sample: X-ray
+ refinement
+
+AMCSD: 0009838
+;
+_chemical_formula_sum 'Ni S O10'
+_cell_length_a 6.780300
+_cell_length_b 6.780300
+_cell_length_c 18.288000
+_cell_angle_alpha 90.000000
+_cell_angle_beta 90.000000
+_cell_angle_gamma 90.000000
+_cell_volume 840.744496
+_exptl_crystal_density_diffrn 1.981042
+_space_group_IT_number 96
+_symmetry_Int_Tables_number 96
+_symmetry_cell_setting 'tetragonal'
+_symmetry_space_group_name_H-M 'P4sub32sub12'
+_symmetry_space_group_name_Hall 'P4nw2abw'
+loop_
+_symmetry_equiv_pos_as_xyz
+  'x,y,z'
+  '-x,-y,z+1/2'
+  '-y+1/2,x+1/2,z+3/4'
+  'y+1/2,-x+1/2,z+1/4'
+  '-x+1/2,y+1/2,-z+3/4'
+  'x+1/2,-y+1/2,-z+1/4'
+  'y,x,-z'
+  '-y,-x,-z+1/2'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_U_iso_or_equiv
+ Ni Ni -0.210390 -0.210390 0.000000 1.000000 0.014600
+ S S -0.709100 -0.709100 0.000000 1.000000 0.016700
+ O4 O -0.619650 0.379880 -0.066040 1.000000 0.031800
+ O5 O -0.923390 0.327700 -0.000500 1.000000 0.028700
+ ODw1 O -0.172840 0.046730 -0.052780 1.000000 0.030100
+ ODw2 O -0.470110 -0.243990 -0.056170 1.000000 0.022500
+ ODw3 O -0.065960 0.643630 -0.084930 1.000000 0.021300

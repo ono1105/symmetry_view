@@ -27,6 +27,7 @@ from crystal_viewer.export_pipeline import (
     export_analysis_to_json,
     slug_from_path,
 )
+from crystal_viewer.json_export import EXPORT_SCHEMA_VERSION
 from crystal_viewer.source_kinds import (
     SOURCE_KIND_CRYSTAL,
     SOURCE_KIND_EMPTY,
@@ -58,7 +59,7 @@ UPLOAD_MOLECULE_DIR = Path(tempfile.gettempdir()) / "symmetry_view_molecule_uplo
 DEFAULT_BROWSER_IMPORT_JSON_DIR = DEFAULT_JSON_EXPORT_DIR / "imported"
 DEFAULT_ANALYSIS_TIMEOUT_SEC = 120.0
 EXAMPLE_DIRS = {
-    SOURCE_KIND_CRYSTAL: PROJECT_ROOT / "examples/structures",
+    SOURCE_KIND_CRYSTAL: PROJECT_ROOT / "examples/cif",
     SOURCE_KIND_MOLECULE: PROJECT_ROOT / "examples/molecules",
 }
 EXAMPLE_SUFFIXES = {
@@ -83,7 +84,7 @@ def debug_import_timing(label: str, start: float) -> None:
 
 def empty_viewer_payload() -> dict:
     return {
-        "schema_version": 4,
+        "schema_version": EXPORT_SCHEMA_VERSION,
         "source_kind": SOURCE_KIND_EMPTY,
         "structure_loaded": False,
         "render_data": {
@@ -182,6 +183,7 @@ def normalize_example_catalog(loaded: dict) -> dict[str, list[dict]]:
                 "path": path,
                 "formula": str(raw.get("formula") or ""),
                 "symmetry": str(raw.get("symmetry") or ""),
+                "point_group": str(raw.get("point_group") or ""),
             }
             if raw.get("error"):
                 item["error"] = str(raw["error"])
@@ -207,6 +209,7 @@ def filesystem_example_items(kind: str) -> list[dict]:
             "path": str(path),
             "formula": "",
             "symmetry": "",
+            "point_group": "",
         })
     return items
 
@@ -615,6 +618,8 @@ def cached_export_json_path(
             return None
         payload = json.loads(output_path.read_text(encoding="utf-8"))
     except Exception:
+        return None
+    if int(payload.get("schema_version") or 0) < EXPORT_SCHEMA_VERSION:
         return None
 
     render_data = payload.get("render_data") or {}

@@ -2,24 +2,259 @@
   "crystal": [
     {
       "kind": "crystal",
-      "name": "f2_pd",
-      "path": "examples/structures/f2_pd.cif",
-      "formula": "PdF2",
-      "symmetry": "P2_13"
+      "name": "Adamantane",
+      "path": "examples/cif/Adamantane.cif",
+      "formula": "H8C5",
+      "symmetry": "No. 114 P-42_1c",
+      "point_group": "-42m"
     },
     {
       "kind": "crystal",
-      "name": "jacobsite",
-      "path": "examples/structures/jacobsite.cif",
-      "formula": "Mn(FeO2)2",
-      "symmetry": "Fd-3m"
+      "name": "AgCl",
+      "path": "examples/cif/AgCl.cif",
+      "formula": "AgCl",
+      "symmetry": "No. 11 P2_1/m",
+      "point_group": "2/m"
     },
     {
       "kind": "crystal",
-      "name": "mg2v2o7",
-      "path": "examples/structures/mg2v2o7.cif",
-      "formula": "Mg2V2O7",
-      "symmetry": "P-1"
+      "name": "Antimony",
+      "path": "examples/cif/Antimony.cif",
+      "formula": "Sb",
+      "symmetry": "No. 166 R-3m",
+      "point_group": "-3m"
+    },
+    {
+      "kind": "crystal",
+      "name": "BaTiO3",
+      "path": "examples/cif/BaTiO3.cif",
+      "formula": "BaTiO3",
+      "symmetry": "No. 160 R3m",
+      "point_group": "3m"
+    },
+    {
+      "kind": "crystal",
+      "name": "Babefphite",
+      "path": "examples/cif/Babefphite.cif",
+      "formula": "BaBePO4F",
+      "symmetry": "No. 1 P1",
+      "point_group": "1"
+    },
+    {
+      "kind": "crystal",
+      "name": "Bromine",
+      "path": "examples/cif/Bromine.cif",
+      "formula": "Br",
+      "symmetry": "No. 64 Cmce",
+      "point_group": "mmm"
+    },
+    {
+      "kind": "crystal",
+      "name": "C12H14N4",
+      "path": "examples/cif/C12H14N4.cif",
+      "formula": "C3N",
+      "symmetry": "No. 43 Fdd2",
+      "point_group": "mm2"
+    },
+    {
+      "kind": "crystal",
+      "name": "Cadmoselite",
+      "path": "examples/cif/Cadmoselite.cif",
+      "formula": "CdSe",
+      "symmetry": "No. 186 P6_3mc",
+      "point_group": "6mm"
+    },
+    {
+      "kind": "crystal",
+      "name": "Cl H4 N O2",
+      "path": "examples/cif/Cl H4 N O2.cif",
+      "formula": "NCl",
+      "symmetry": "No. 99 P4mm",
+      "point_group": "4mm"
+    },
+    {
+      "kind": "crystal",
+      "name": "Cl2 H6 N2",
+      "path": "examples/cif/Cl2 H6 N2.cif",
+      "formula": "NCl",
+      "symmetry": "No. 205 Pa-3",
+      "point_group": "m-3"
+    },
+    {
+      "kind": "crystal",
+      "name": "Edgarite",
+      "path": "examples/cif/Edgarite.cif",
+      "formula": "Nb3FeS6",
+      "symmetry": "No. 182 P6_322",
+      "point_group": "622"
+    },
+    {
+      "kind": "crystal",
+      "name": "Gd I S",
+      "path": "examples/cif/Gd I S.cif",
+      "formula": "GdSI",
+      "symmetry": "No. 174 P-6",
+      "point_group": "-6"
+    },
+    {
+      "kind": "crystal",
+      "name": "Ge Hf O4",
+      "path": "examples/cif/Ge Hf O4.cif",
+      "formula": "HfGeO4",
+      "symmetry": "No. 88 I4_1/a",
+      "point_group": "4/m"
+    },
+    {
+      "kind": "crystal",
+      "name": "H11 I N2 O6",
+      "path": "examples/cif/H11 I N2 O6.cif",
+      "formula": "I(NO3)2",
+      "symmetry": "No. 148 R-3",
+      "point_group": "-3"
+    },
+    {
+      "kind": "crystal",
+      "name": "Halite",
+      "path": "examples/cif/Halite.cif",
+      "formula": "NaCl",
+      "symmetry": "No. 225 Fm-3m",
+      "point_group": "m-3m"
+    },
+    {
+      "kind": "crystal",
+      "name": "Helium",
+      "path": "examples/cif/Helium.cif",
+      "formula": "He",
+      "symmetry": "No. 194 P6_3/mmc",
+      "point_group": "6/mmm"
+    },
+    {
+      "kind": "crystal",
+      "name": "Ho2Rh12As7",
+      "path": "examples/cif/Ho2Rh12As7.cif",
+      "formula": "Ho2As7Rh12",
+      "symmetry": "No. 176 P6_3/m",
+      "point_group": "6/m"
+    },
+    {
+      "kind": "crystal",
+      "name": "La6MgSi2S14",
+      "path": "examples/cif/La6MgSi2S14.cif",
+      "formula": "La6Mg(SiS7)2",
+      "symmetry": "No. 173 P6_3",
+      "point_group": "6"
+    },
+    {
+      "kind": "crystal",
+      "name": "Manganese-beta",
+      "path": "examples/cif/Manganese-beta.cif",
+      "formula": "Mn",
+      "symmetry": "No. 213 P4_132",
+      "point_group": "432"
+    },
+    {
+      "kind": "crystal",
+      "name": "MgHPO3(H2O)6",
+      "path": "examples/cif/MgHPO3(H2O)6.cif",
+      "formula": "MgPHO9",
+      "symmetry": "No. 146 R3",
+      "point_group": "3"
+    },
+    {
+      "kind": "crystal",
+      "name": "N2 O4",
+      "path": "examples/cif/N2 O4.cif",
+      "formula": "NO2",
+      "symmetry": "No. 199 I2_13",
+      "point_group": "23"
+    },
+    {
+      "kind": "crystal",
+      "name": "NbP",
+      "path": "examples/cif/NbP.cif",
+      "formula": "NbP",
+      "symmetry": "No. 141 I4_1/amd",
+      "point_group": "4/mmm"
+    },
+    {
+      "kind": "crystal",
+      "name": "O9 V5",
+      "path": "examples/cif/O9 V5.cif",
+      "formula": "V5O9",
+      "symmetry": "No. 2 P-1",
+      "point_group": "-1"
+    },
+    {
+      "kind": "crystal",
+      "name": "Pb(Al,Si)4O8",
+      "path": "examples/cif/Pb(Al,Si)4O8.cif",
+      "formula": "Al3.2Si4.8Pb4.396O16",
+      "symmetry": "No. 79 I4",
+      "point_group": "4"
+    },
+    {
+      "kind": "crystal",
+      "name": "Pharmacosiderite",
+      "path": "examples/cif/Pharmacosiderite.cif",
+      "formula": "Fe4(AsO7)3",
+      "symmetry": "No. 215 P-43m",
+      "point_group": "-43m"
+    },
+    {
+      "kind": "crystal",
+      "name": "Qusongite",
+      "path": "examples/cif/Qusongite.cif",
+      "formula": "WC",
+      "symmetry": "No. 187 P-6m2",
+      "point_group": "-6m2"
+    },
+    {
+      "kind": "crystal",
+      "name": "Ravatite",
+      "path": "examples/cif/Ravatite.cif",
+      "formula": "C",
+      "symmetry": "No. 4 P2_1",
+      "point_group": "2"
+    },
+    {
+      "kind": "crystal",
+      "name": "Retgersite",
+      "path": "examples/cif/Retgersite.cif",
+      "formula": "NiSO10",
+      "symmetry": "No. 96 P4_32_12",
+      "point_group": "422"
+    },
+    {
+      "kind": "crystal",
+      "name": "SiO2",
+      "path": "examples/cif/SiO2.cif",
+      "formula": "SiO2",
+      "symmetry": "No. 82 I-4",
+      "point_group": "-4"
+    },
+    {
+      "kind": "crystal",
+      "name": "Tellurium",
+      "path": "examples/cif/Tellurium.cif",
+      "formula": "Te",
+      "symmetry": "No. 154 P3_221",
+      "point_group": "32"
+    },
+    {
+      "kind": "crystal",
+      "name": "Tenorite",
+      "path": "examples/cif/Tenorite.cif",
+      "formula": "CuO",
+      "symmetry": "No. 9 Cc",
+      "point_group": "m"
+    },
+    {
+      "kind": "crystal",
+      "name": "Tridymite",
+      "path": "examples/cif/Tridymite.cif",
+      "formula": "SiO2",
+      "symmetry": "No. 20 C222_1",
+      "point_group": "222"
     }
   ],
   "molecule": [

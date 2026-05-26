@@ -10,20 +10,20 @@ _journal_name 'Physical Review B59 (1999) 750-761'
 _publ_section_title
 ;
  Pressure-induced phase transitions in AgCl, AgBr, and AgI
-Sample: P = 6.6 GPa,
- Phase II
+Sample: P = 10.8
+ GPa, Phase II
 
-AMCSD: 0015203
+AMCSD: 0015208
 ;
 _chemical_formula_sum 'Ag Cl'
-_cell_length_a 3.587000
-_cell_length_b 3.992000
-_cell_length_c 5.307000
+_cell_length_a 3.481000
+_cell_length_b 4.016000
+_cell_length_c 5.191000
 _cell_angle_alpha 90.000000
-_cell_angle_beta 98.400000
+_cell_angle_beta 102.870000
 _cell_angle_gamma 90.000000
-_cell_volume 75.177324
-_exptl_crystal_density_diffrn 6.331438
+_cell_volume 70.745530
+_exptl_crystal_density_diffrn 6.728066
 _space_group_IT_number 4
 _symmetry_Int_Tables_number 4
 _symmetry_cell_setting 'monoclinic'
@@ -41,5 +41,5 @@ _atom_site_fract_y
 _atom_site_fract_z
 _atom_site_occupancy
 _atom_site_U_iso_or_equiv
- Ag Ag 0.184000 0.250000 0.220000 1.000000 0.093722
- Cl Cl 0.300000 0.250000 0.713000 1.000000 0.041795
+ Ag Ag 0.138000 0.250000 0.210000 1.000000 0.060793
+ Cl Cl 0.322000 0.250000 0.696000 1.000000 0.035462

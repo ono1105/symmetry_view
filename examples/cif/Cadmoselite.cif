@@ -1,0 +1,66 @@
+# This file is exported from "ReciPro"
+# https://github.com/seto77/
+data_global
+_chemical_name 'Cadmoselite'
+loop_
+_publ_author_name
+'Freeman D K'
+'Mair S L'
+'Barnea Z'
+_journal_name 'Acta Crystallographica A33 (1977) 355-359'
+_publ_section_title
+;
+ The structure and Bijvoet ratios of cadmium selenide
+Locality:
+ synthetic
+
+AMCSD: 0019175
+;
+_chemical_formula_sum 'Cd Se'
+_cell_length_a 4.299000
+_cell_length_b 4.299000
+_cell_length_c 7.010000
+_cell_angle_alpha 90.000000
+_cell_angle_beta 90.000000
+_cell_angle_gamma 120.000000
+_cell_volume 112.197593
+_exptl_crystal_density_diffrn 5.664748
+_space_group_IT_number 186
+_symmetry_Int_Tables_number 186
+_symmetry_cell_setting 'hexagonal'
+_symmetry_space_group_name_H-M 'P6sub3mc'
+_symmetry_space_group_name_Hall 'P6c-2c'
+loop_
+_symmetry_equiv_pos_as_xyz
+  'x,y,z'
+  '-y,x-y,z'
+  '-x+y,-x,z'
+  '-x,-y,z+1/2'
+  'y,-x+y,z+1/2'
+  'x-y,x,z+1/2'
+  '-y,-x,z'
+  '-x+y,y,z'
+  'x,x-y,z'
+  'y,x,z+1/2'
+  'x-y,-y,z+1/2'
+  '-x,-x+y,z+1/2'
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_U_iso_or_equiv
+ Cd Cd 0.333333 0.666667 0.000000 1.000000 0.000000
+ Se Se 0.333333 0.666667 0.376790 1.000000 0.000000
+loop_
+_atom_site_aniso_label
+_atom_site_aniso_U_11
+_atom_site_aniso_U_22
+_atom_site_aniso_U_33
+_atom_site_aniso_U_23
+_atom_site_aniso_U_13
+_atom_site_aniso_U_12
+ Cd 0.018489 0.018489 0.022430 -0.000000 -0.000000 0.000000
+ Se 0.015322 0.015322 0.012149 -0.000000 -0.000000 0.000000

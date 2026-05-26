@@ -1,0 +1,43 @@
+# This file is exported from "ReciPro"
+# https://github.com/seto77/
+data_global
+_chemical_name 'Calcite'
+loop_
+_publ_author_name
+'Wyckoff R'
+_journal_name 'American Journal of Science 50 (1920) 317-360'
+_publ_section_title
+;
+ The Crystal Structures of some Carbonates of the Calcite Group
+
+COD:
+ 1010962
+_database_code_amcsd 0017889
+;
+_chemical_formula_sum 'Ca C O3'
+_cell_length_a 6.360000
+_cell_length_b 6.360000
+_cell_length_c 6.360000
+_cell_angle_alpha 46.100000
+_cell_angle_beta 46.100000
+_cell_angle_gamma 46.100000
+_cell_volume 121.856656
+_exptl_crystal_density_diffrn 2.727792
+_space_group_IT_number 161
+_symmetry_Int_Tables_number 161
+_symmetry_cell_setting 'trigonal'
+_symmetry_space_group_name_H-M 'R3c'
+_symmetry_space_group_name_Hall 'P3*-2n'
+loop_
+_symmetry_equiv_pos_as_xyz
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_U_iso_or_equiv
+ Ca1 Ca 0.250000 0.250000 0.250000 1.000000 0.000000
+ C1 C 0.000000 0.000000 0.000000 1.000000 0.000000
+ O1 O 0.250000 -0.250000 0.000000 1.000000 0.000000

@@ -1,0 +1,47 @@
+# This file is exported from "ReciPro"
+# https://github.com/seto77/
+data_global
+_chemical_name 'Ice II'
+loop_
+_publ_author_name
+'Kamb B'
+_journal_name 'Acta Crystallographica 17 (1964) 1437-1449'
+_publ_section_title
+;
+ Ice II: A proton-ordered form of ice
+Note: T = -75 C, P = 0.3 GPa
+Locality:
+ synthetic
+
+AMCSD: 0018367
+;
+_chemical_formula_sum 'O H2'
+_cell_length_a 7.780000
+_cell_length_b 7.780000
+_cell_length_c 7.780000
+_cell_angle_alpha 113.100000
+_cell_angle_beta 113.100000
+_cell_angle_gamma 113.100000
+_cell_volume 304.250424
+_exptl_crystal_density_diffrn 1.179890
+_space_group_IT_number 148
+_symmetry_Int_Tables_number 148
+_symmetry_cell_setting 'trigonal'
+_symmetry_space_group_name_H-M 'R-3'
+_symmetry_space_group_name_Hall '-P3*'
+loop_
+_symmetry_equiv_pos_as_xyz
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_occupancy
+_atom_site_U_iso_or_equiv
+ O1 O 0.273000 0.024000 -0.146000 1.000000 0.024444
+ O2 O 0.478000 0.750000 0.332000 1.000000 0.022544
+ H1 H 0.165000 0.069000 -0.190000 1.000000 0.026597
+ H2 H 0.413000 0.205000 -0.003000 1.000000 0.026597
+ H3 H 0.719000 0.401000 0.395000 1.000000 0.026597
+ H4 H 0.741000 0.203000 0.360000 1.000000 0.026597

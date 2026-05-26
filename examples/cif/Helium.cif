@@ -4,30 +4,26 @@ data_global
 _chemical_name 'Helium'
 loop_
 _publ_author_name
-'Schuch A F'
-'Grilly E R'
-'Mills R L'
-_journal_name 'Physical Review 110 (1958) 775-775'
+'Wyckoff R W G'
+_journal_name 'Crystal Structures 1 (1963) 7-83'
 _publ_section_title
 ;
- Structure of the alpha and beta forms of solid He
-Locality: synthetic
-Sample:
- at T = 3.3 K & P = .018 GPa
-Note: structure known as the beta form
+ Second edition. Interscience Publishers, New York, New York
+Sample at T = 2
+ K
+Hexagonal closest packed, hcp, structure
 
-AMCSD:
- 0015154
+AMCSD: 0011177
 ;
 _chemical_formula_sum 'He'
-_cell_length_a 3.460000
-_cell_length_b 3.460000
-_cell_length_c 5.600000
+_cell_length_a 3.570000
+_cell_length_b 3.570000
+_cell_length_c 5.830000
 _cell_angle_alpha 90.000000
 _cell_angle_beta 90.000000
 _cell_angle_gamma 120.000000
-_cell_volume 58.059174
-_exptl_crystal_density_diffrn 0.228955
+_cell_volume 64.348084
+_exptl_crystal_density_diffrn 0.206579
 _space_group_IT_number 194
 _symmetry_Int_Tables_number 194
 _symmetry_cell_setting 'hexagonal'
