@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,25 @@
       "source_file": "examples/cif/Edgarite.cif",
       "formula": "Nb3FeS6",
       "symmetry_label": "182 P6_322",
-      "operation_count": 12
+      "operation_count": 12,
+      "point_group_label": "622",
+      "lattice_parameters": {
+        "a": 5.761,
+        "b": 5.761,
+        "c": 12.201,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 119.99999999999999
+      },
+      "space_group_generators": [
+        "6_3",
+        "C2"
+      ],
+      "point_group_generators": [
+        "C6",
+        "C2"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

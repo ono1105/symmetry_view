@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,25 @@
       "source_file": "examples/cif/C12H14N4.cif",
       "formula": "C3N",
       "symmetry_label": "43 Fdd2",
-      "operation_count": 16
+      "operation_count": 16,
+      "point_group_label": "mm2",
+      "lattice_parameters": {
+        "a": 13.635,
+        "b": 26.353,
+        "c": 6.089,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 90.0
+      },
+      "space_group_generators": [
+        "g(1/4,3/4,3/4)",
+        "C2"
+      ],
+      "point_group_generators": [
+        "C2",
+        "σ"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

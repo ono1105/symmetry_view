@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,24 @@
       "source_file": "examples/cif/Tenorite.cif",
       "formula": "CuO",
       "symmetry_label": "9 Cc",
-      "operation_count": 4
+      "operation_count": 4,
+      "point_group_label": "m",
+      "lattice_parameters": {
+        "a": 4.6893,
+        "b": 3.4268,
+        "c": 5.1321,
+        "alpha": 90.0,
+        "beta": 99.653,
+        "gamma": 90.0
+      },
+      "space_group_generators": [
+        "g(0,0,1/2)",
+        "t(1/2,1/2,0)"
+      ],
+      "point_group_generators": [
+        "σ"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

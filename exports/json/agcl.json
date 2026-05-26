@@ -4,7 +4,7 @@
   "render_data": {
     "metadata": {
       "mode": "crystal",
-      "source_file": "/home/ken/work/symetry_view/examples/cif/AgCl.cif",
+      "source_file": "examples/cif/AgCl.cif",
       "formula": "AgCl",
       "symmetry_label": "11 P2_1/m",
       "operation_count": 4,

@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,25 @@
       "source_file": "examples/cif/Tellurium.cif",
       "formula": "Te",
       "symmetry_label": "154 P3_221",
-      "operation_count": 6
+      "operation_count": 6,
+      "point_group_label": "32",
+      "lattice_parameters": {
+        "a": 4.44693,
+        "b": 4.44693,
+        "c": 5.91492,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 119.99999999999999
+      },
+      "space_group_generators": [
+        "3_2",
+        "C2"
+      ],
+      "point_group_generators": [
+        "C3",
+        "C2"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

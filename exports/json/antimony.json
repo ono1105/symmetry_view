@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,25 @@
       "source_file": "examples/cif/Antimony.cif",
       "formula": "Sb",
       "symmetry_label": "166 R-3m",
-      "operation_count": 36
+      "operation_count": 36,
+      "point_group_label": "-3m",
+      "lattice_parameters": {
+        "a": 4.196,
+        "b": 4.196,
+        "c": 10.455,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 119.99999999999999
+      },
+      "space_group_generators": [
+        "S6",
+        "C2"
+      ],
+      "point_group_generators": [
+        "S6",
+        "C2"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

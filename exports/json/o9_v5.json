@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,24 @@
       "source_file": "examples/cif/O9 V5.cif",
       "formula": "V5O9",
       "symmetry_label": "2 P-1",
-      "operation_count": 4
+      "operation_count": 4,
+      "point_group_label": "-1",
+      "lattice_parameters": {
+        "a": 7.002,
+        "b": 8.3516,
+        "c": 10.9052,
+        "alpha": 91.91,
+        "beta": 108.39,
+        "gamma": 110.5
+      },
+      "space_group_generators": [
+        "i",
+        "t(1/2,0,1/2)"
+      ],
+      "point_group_generators": [
+        "i"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

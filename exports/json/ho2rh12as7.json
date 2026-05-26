@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,25 @@
       "source_file": "examples/cif/Ho2Rh12As7.cif",
       "formula": "Ho2As7Rh12",
       "symmetry_label": "176 P6_3/m",
-      "operation_count": 12
+      "operation_count": 12,
+      "point_group_label": "6/m",
+      "lattice_parameters": {
+        "a": 9.892,
+        "b": 9.892,
+        "c": 3.859,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 119.99999999999999
+      },
+      "space_group_generators": [
+        "6_3",
+        "i"
+      ],
+      "point_group_generators": [
+        "C6",
+        "i"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

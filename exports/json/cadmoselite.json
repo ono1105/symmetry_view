@@ -4,7 +4,7 @@
   "render_data": {
     "metadata": {
       "mode": "crystal",
-      "source_file": "/home/ken/work/symetry_view/examples/cif/Cadmoselite.cif",
+      "source_file": "examples/cif/Cadmoselite.cif",
       "formula": "CdSe",
       "symmetry_label": "186 P6_3mc",
       "operation_count": 12,

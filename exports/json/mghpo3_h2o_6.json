@@ -4,7 +4,7 @@
   "render_data": {
     "metadata": {
       "mode": "crystal",
-      "source_file": "/home/ken/work/symetry_view/examples/cif/MgHPO3(H2O)6.cif",
+      "source_file": "examples/cif/MgHPO3(H2O)6.cif",
       "formula": "MgPHO9",
       "symmetry_label": "146 R3",
       "operation_count": 9,

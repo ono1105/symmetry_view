@@ -4,7 +4,7 @@
   "render_data": {
     "metadata": {
       "mode": "crystal",
-      "source_file": "/home/ken/work/symetry_view/examples/cif/Cl2 H6 N2.cif",
+      "source_file": "examples/cif/Cl2 H6 N2.cif",
       "formula": "NCl",
       "symmetry_label": "205 Pa-3",
       "operation_count": 24,

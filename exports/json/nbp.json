@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,27 @@
       "source_file": "examples/cif/NbP.cif",
       "formula": "NbP",
       "symmetry_label": "141 I4_1/amd",
-      "operation_count": 32
+      "operation_count": 32,
+      "point_group_label": "4/mmm",
+      "lattice_parameters": {
+        "a": 3.325,
+        "b": 3.325,
+        "c": 11.38,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 90.0
+      },
+      "space_group_generators": [
+        "4_1",
+        "i",
+        "C2"
+      ],
+      "point_group_generators": [
+        "C4",
+        "C2",
+        "i"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,26 @@
       "source_file": "examples/cif/Cl H4 N O2.cif",
       "formula": "NCl",
       "symmetry_label": "99 P4mm",
-      "operation_count": 16
+      "operation_count": 16,
+      "point_group_label": "4mm",
+      "lattice_parameters": {
+        "a": 6.3,
+        "b": 6.3,
+        "c": 6.3,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 90.0
+      },
+      "space_group_generators": [
+        "C4",
+        "σ",
+        "t(1/2,1/2,0)"
+      ],
+      "point_group_generators": [
+        "C4",
+        "σ"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

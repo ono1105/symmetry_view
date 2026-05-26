@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,25 @@
       "source_file": "examples/cif/N2 O4.cif",
       "formula": "NO2",
       "symmetry_label": "199 I2_13",
-      "operation_count": 24
+      "operation_count": 24,
+      "point_group_label": "23",
+      "lattice_parameters": {
+        "a": 7.77,
+        "b": 7.77,
+        "c": 7.77,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 90.0
+      },
+      "space_group_generators": [
+        "3_1",
+        "C2"
+      ],
+      "point_group_generators": [
+        "C3",
+        "C2"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

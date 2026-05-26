@@ -1,13 +1,29 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
       "mode": "crystal",
-      "source_file": "examples/structures/mg2v2o7.cif",
+      "source_file": "/home/ken/work/symetry_view/examples/structures/mg2v2o7.cif",
       "formula": "Mg2V2O7",
       "symmetry_label": "2 P-1",
-      "operation_count": 2
+      "operation_count": 2,
+      "point_group_label": "-1",
+      "lattice_parameters": {
+        "a": 13.767,
+        "b": 5.414,
+        "c": 4.912,
+        "alpha": 81.42,
+        "beta": 106.82,
+        "gamma": 130.33
+      },
+      "space_group_generators": [
+        "i"
+      ],
+      "point_group_generators": [
+        "i"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

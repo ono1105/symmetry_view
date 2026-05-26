@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,25 @@
       "source_file": "examples/cif/Adamantane.cif",
       "formula": "H8C5",
       "symmetry_label": "114 P-42_1c",
-      "operation_count": 8
+      "operation_count": 8,
+      "point_group_label": "-42m",
+      "lattice_parameters": {
+        "a": 6.6,
+        "b": 6.6,
+        "c": 8.81,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 90.0
+      },
+      "space_group_generators": [
+        "S4",
+        "2_1"
+      ],
+      "point_group_generators": [
+        "S4",
+        "C2"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,24 @@
       "source_file": "examples/cif/SiO2.cif",
       "formula": "SiO2",
       "symmetry_label": "82 I-4",
-      "operation_count": 8
+      "operation_count": 8,
+      "point_group_label": "-4",
+      "lattice_parameters": {
+        "a": 8.6557,
+        "b": 8.6557,
+        "c": 4.7702,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 90.0
+      },
+      "space_group_generators": [
+        "S4",
+        "t(1/2,1/2,1/2)"
+      ],
+      "point_group_generators": [
+        "S4"
+      ],
+      "warnings": []
     },
     "atoms": [
       {

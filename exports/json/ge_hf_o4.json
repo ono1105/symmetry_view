@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
@@ -7,7 +7,25 @@
       "source_file": "examples/cif/Ge Hf O4.cif",
       "formula": "HfGeO4",
       "symmetry_label": "88 I4_1/a",
-      "operation_count": 16
+      "operation_count": 16,
+      "point_group_label": "4/m",
+      "lattice_parameters": {
+        "a": 4.862,
+        "b": 4.862,
+        "c": 10.497,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 90.0
+      },
+      "space_group_generators": [
+        "4_1",
+        "i"
+      ],
+      "point_group_generators": [
+        "C4",
+        "i"
+      ],
+      "warnings": []
     },
     "atoms": [
       {
