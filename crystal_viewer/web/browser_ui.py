@@ -897,12 +897,15 @@ function displayOperationSymbol(operation) {
 }
 
 function atomText(atom) {
-  const frac = atom.frac_label ? ` f=${atom.frac_label}` : "";
-  const asym = atom.asymmetric_index === null || atom.asymmetric_index === undefined
-    ? ""
-    : ` a=${atom.asymmetric_index}`;
   const motion = atomMotionText(atom);
-  return `${atom.index}: ${atom.element}${frac}${asym}${motion}`;
+  return `${atom.index}: ${atomDisplayLabel(atom)}${motion}`;
+}
+
+function atomDisplayLabel(atom) {
+  if (atom.asymmetric_index === null || atom.asymmetric_index === undefined) {
+    return atom.element;
+  }
+  return `${atom.element}${Number(atom.asymmetric_index) + 1}`;
 }
 
 function atomMotionText(atom) {
