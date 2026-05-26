@@ -334,18 +334,19 @@ HTML = """<!doctype html>
       background: #1b2027;
       border: 1px solid #3a4350;
       border-radius: 6px;
-      padding: 8px;
+      padding: 5px;
     }
     .atom-row {
       display: flex;
-      gap: 8px;
-      align-items: baseline;
-      padding: 4px 2px;
-      font-size: 13px;
+      gap: 5px;
+      align-items: center;
+      padding: 2px;
+      font-size: 12px;
+      line-height: 1.2;
     }
     .atom-row input[type="color"] {
-      width: 28px;
-      height: 24px;
+      width: 22px;
+      height: 20px;
       padding: 0;
       border: 0;
       background: transparent;
@@ -355,14 +356,14 @@ HTML = """<!doctype html>
       flex: 0 0 auto;
     }
     .visibility-toggle {
-      min-width: 58px;
-      height: 26px;
-      padding: 0 8px;
+      min-width: 42px;
+      height: 22px;
+      padding: 0 5px;
       border: 1px solid #3a4350;
       border-radius: 5px;
       background: #24303a;
       color: #edf2f7;
-      font-size: 12px;
+      font-size: 11px;
       line-height: 1;
       flex: 0 0 auto;
     }
@@ -404,6 +405,7 @@ HTML = """<!doctype html>
     }
     .atom-row span {
       color: #cbd5e1;
+      min-width: 0;
     }
     .atom-row.unmapped {
       background: rgba(248, 113, 113, 0.14);
@@ -417,7 +419,7 @@ HTML = """<!doctype html>
     }
     .atom-motion {
       color: #a7b5c8;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
       overflow-wrap: anywhere;
     }
@@ -895,10 +897,10 @@ function displayOperationSymbol(operation) {
 }
 
 function atomText(atom) {
-  const frac = atom.frac_label ? ` frac=${atom.frac_label}` : "";
+  const frac = atom.frac_label ? ` f=${atom.frac_label}` : "";
   const asym = atom.asymmetric_index === null || atom.asymmetric_index === undefined
     ? ""
-    : ` asym=${atom.asymmetric_index}`;
+    : ` a=${atom.asymmetric_index}`;
   const motion = atomMotionText(atom);
   return `${atom.index}: ${atom.element}${frac}${asym}${motion}`;
 }
@@ -908,16 +910,16 @@ function atomMotionText(atom) {
   if (!motion) return "";
   const target = motion.target_atom === null || motion.target_atom === undefined ? "?" : motion.target_atom;
   if (sourceKind === "crystal" && Array.isArray(motion.start_frac) && Array.isArray(motion.target_frac)) {
-    return ` <span class="atom-motion">${formatVector(motion.start_frac, formatFrac)} → ${formatVector(motion.target_frac, formatFrac)} target=${target}</span>`;
+    return ` <span class="atom-motion">${formatVector(motion.start_frac, formatFrac)} → ${formatVector(motion.target_frac, formatFrac)} #${target}</span>`;
   }
   if (Array.isArray(motion.start_cart) && Array.isArray(motion.target_cart)) {
-    return ` <span class="atom-motion">${formatVector(motion.start_cart, formatCoord)} → ${formatVector(motion.target_cart, formatCoord)} target=${target}</span>`;
+    return ` <span class="atom-motion">${formatVector(motion.start_cart, formatCoord)} → ${formatVector(motion.target_cart, formatCoord)} #${target}</span>`;
   }
-  return ` <span class="atom-motion">target=${target}</span>`;
+  return ` <span class="atom-motion">#${target}</span>`;
 }
 
 function formatVector(values, formatter) {
-  return `[${values.map(formatter).join(",")}]`;
+  return `(${values.map(formatter).join(",")})`;
 }
 
 function formatFrac(value) {
@@ -1293,7 +1295,7 @@ function renderExampleOptions() {
 
 function exampleOptionText(item) {
   const formula = item.formula ? `${item.formula} ` : "";
-  const symmetry = item.symmetry ? `SG ${formatSymbol(item.symmetry)}` : "";
+  const symmetry = item.symmetry ? formatSymbol(item.symmetry) : "";
   return symmetry ? `${formula}${item.name} — ${symmetry}` : `${formula}${item.name}`;
 }
 
