@@ -920,6 +920,10 @@ function formatVector(values, formatter) {
   return `[${values.map(formatter).join(",")}]`;
 }
 
+function formatFrac(value) {
+  return fmtFrac(value);
+}
+
 function formatCoord(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number.toFixed(3).replace(/\\.?0+$/, "") : "?";
