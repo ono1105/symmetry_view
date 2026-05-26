@@ -1,13 +1,31 @@
 {
-  "schema_version": 4,
+  "schema_version": 6,
   "source_kind": "crystal",
   "render_data": {
     "metadata": {
       "mode": "crystal",
-      "source_file": "examples/structures/jacobsite.cif",
+      "source_file": "/home/ken/work/symetry_view/examples/structures/jacobsite.cif",
       "formula": "Mn(FeO2)2",
       "symmetry_label": "227 Fd-3m",
-      "operation_count": 192
+      "operation_count": 192,
+      "point_group_label": "m-3m",
+      "lattice_parameters": {
+        "a": 8.515,
+        "b": 8.515,
+        "c": 8.515,
+        "alpha": 90.0,
+        "beta": 90.0,
+        "gamma": 90.0
+      },
+      "space_group_generators": [
+        "S6",
+        "4_1"
+      ],
+      "point_group_generators": [
+        "S6",
+        "C4"
+      ],
+      "warnings": []
     },
     "atoms": [
       {
