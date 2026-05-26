@@ -1,0 +1,201 @@
+# Viewer Guide
+
+This document is the current reference for JSON export, viewer usage, browser controls, and symmetry-operation animation.
+
+## Current Flow
+
+The project keeps analysis, renderer data, viewer state, and future game logic separated:
+
+```text
+CIF / XYZ
+  -> crystal or molecule analysis
+  -> RenderData
+  -> AtomMapping
+  -> JSON export
+  -> PyVista viewer + browser control panel
+  -> future renderer-independent game logic
+```
+
+The viewer should consume exported JSON and `RenderData`-shaped state. It should not depend on raw CIF parser or pymatgen objects.
+
+## JSON Export
+
+`tools/export_analysis_json.py` exports renderer-friendly JSON.
+
+```bash
+.venv/bin/python tools/export_analysis_json.py examples/cif/Halite.cif --mode crystal -o exports/json/halite.json
+.venv/bin/python tools/export_analysis_json.py examples/molecules/water.xyz --mode molecule -o exports/json/water.json
+```
+
+Current top-level shape:
+
+```json
+{
+  "schema_version": 6,
+  "source_kind": "crystal",
+  "render_data": {},
+  "atom_mappings": {}
+}
+```
+
+`render_data.metadata` currently includes:
+
+```text
+mode
+source_file
+formula
+symmetry_label
+operation_count
+point_group_label
+lattice_parameters
+space_group_generators
+point_group_generators
+warnings
+```
+
+Each operation contains:
+
+```text
+index
+label
+kind
+order
+angle_deg
+symbol
+matrix_frac
+translation_frac
+matrix_cart
+translation_cart
+```
+
+For crystals, `asymmetric_atoms` stores CIF atom sites and expanded atoms carry:
+
+```text
+asymmetric_index
+generation_operation_index
+```
+
+`atom_mappings` records source-to-target atom correspondences. It is used for correspondence and validation; animation paths should be generated from operation matrices plus selected axes, planes, or centers.
+
+## Browser-Controlled Viewer
+
+The preferred interactive prototype is:
+
+```bash
+.venv/bin/python tools/view_json_server.py exports/json/imported/jacobsite.json
+```
+
+Start empty and open structures from the browser:
+
+```bash
+.venv/bin/python tools/view_json_server.py --no-browser
+```
+
+Open a CIF or XYZ directly:
+
+```bash
+.venv/bin/python tools/view_json_server.py examples/cif/Halite.cif --no-browser
+.venv/bin/python tools/view_json_server.py examples/molecules/water.xyz --no-browser
+```
+
+The browser panel talks to a local stdlib HTTP server. PyVista remains responsible for the 3D scene.
+
+Current browser controls include:
+
+```text
+open CIF / XYZ / JSON / local path
+operation list and operation details
+operation filtering and sorting
+display range controls
+atom visibility and element visibility
+atom color controls
+selected atom animation scope
+play / stop / reset
+camera controls and view center controls
+GIF saving
+custom operation check and animation
+```
+
+`tools/view_json_server.py` should stay a thin entry point and HTTP API. Shared viewer code belongs under `crystal_viewer/viewer/`; browser-facing UI assets belong under `crystal_viewer/web/`.
+
+## CLI Viewers
+
+The older JSON-only viewers remain useful for debugging.
+
+```bash
+.venv/bin/python tools/view_json_pyvista.py exports/json/halite.json --list-operations
+.venv/bin/python tools/view_json_pyvista.py exports/json/halite.json --operation 1 --list-elements
+.venv/bin/python tools/view_json_pyvista.py exports/json/halite.json --operation 1 --animate
+.venv/bin/python tools/view_json_gui.py exports/json/halite.json
+```
+
+The native PyVista GUI avoids Qt/PyVistaQt because WSL/X11 had `BadWindow` failures when VTK was embedded in Qt.
+
+## Animation Rules
+
+Animations should show the selected symmetry operation, not just move atoms in straight lines to mapped targets.
+
+Primitive rules:
+
+```text
+rotation:       arc around selected axis
+inversion:      interpolation through selected center
+mirror:         interpolation through selected plane
+translation:    linear movement
+screw:          rotation phase, then shared translation phase
+glide:          mirror phase, then shared translation phase
+rotoinversion:  rotation phase, then inversion phase
+rotoreflection: rotation phase, then mirror phase
+```
+
+Important constraints:
+
+- When one operation has multiple equivalent axes, planes, or centers, the displayed element and animation path must use one compatible selected element.
+- Periodic display clones are display-only. They reuse source atom paths with appropriate shifts or evaluate the same operation from their displayed start positions, depending on the current animation path implementation.
+- Crystal animation should choose one shared periodic image shift per operation, usually from a representative atom, rather than letting every atom pick a different equivalent image.
+- `AtomMapping` is still used for correspondence and validation.
+
+## Display And Performance Notes
+
+The current PyVista viewer uses glyph-style atom meshes for large displayed ranges. This avoids creating one actor per atom and keeps range expansion and animation more responsive.
+
+Key concepts:
+
+```text
+ExpandedAtom: atom generated by crystallographic symmetry operation
+DisplayClone: lattice-translation copy used only for viewing
+element batch: same-element displayed atom instances grouped for glyph rendering
+```
+
+Range-related behavior should be checked with `tools/inspect_atom_instances.py` before changing rendering internals.
+
+## Future Game Architecture
+
+Future puzzle logic should live in `crystal_viewer/game/` and consume renderer-independent data. It should not call PyVista, browser DOM APIs, or raw parser objects.
+
+Recommended direction:
+
+```text
+1. Keep PyVista working as current renderer.
+2. Add game rules in crystal_viewer/game/.
+3. Add browser-integrated 3D code in crystal_viewer/web/.
+4. Let game code emit renderer-neutral commands such as select/highlight/animate operation.
+```
+
+## Validation Commands
+
+Focused checks:
+
+```bash
+.venv/bin/python -m py_compile crystal_viewer/render_data.py crystal_viewer/web/browser_ui.py tools/view_json_server.py
+.venv/bin/python -m unittest tests/test_render_metadata.py tests/test_rhombohedral_cif_fallback.py
+.venv/bin/python tools/inspect_atom_instances.py exports/json/imported/jacobsite.json --display-mode expanded_1_0 --glyph-preview
+```
+
+JSON validity:
+
+```bash
+.venv/bin/python -m json.tool exports/json/halite.json /tmp/halite_checked.json
+```
+
+Visual checks should still be done in the browser-controlled viewer for glyph rendering, animation, display range changes, and operation labels.

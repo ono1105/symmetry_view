@@ -130,8 +130,7 @@ rotoinversion_or_improper_4:
 tools/view_json_pyvista.py
 crystal_viewer/render_data.py
 crystal_viewer/json_export.py
-docs/ANIMATION_DESIGN.md
-docs/JSON_EXPORT.md
+docs/VIEWER_GUIDE.md
 docs/REVIEW_NOTES.md
 ```
 

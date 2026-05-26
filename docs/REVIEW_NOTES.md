@@ -122,7 +122,7 @@ active なコードは `crystal_viewer/` と `tools/` だけに絞られてい�
 
 ---
 
-## AtomMapping 実装のレビュー（`CLAUDE_HANDOFF.md` の質問への回答）
+## AtomMapping 実装のレビュー（旧 handoff doc の質問への回答）
 
 ### Q1. RenderData + AtomMapping の構造は将来の表示・アニメーション・パズル化に十分か
 
@@ -160,13 +160,13 @@ rawが必要なら `transformed_frac @ lattice` で計算できます。
 
 理由：
 - `RenderData` と `AtomMapping` のデータが正しいかを、3D環境なしで検証できる
-- Codex・Claude 間でレビューしやすくなる（`CLAUDE_HANDOFF.md` でも言及あり）
+- Codex・Claude 間でレビューしやすくなる（現在のレビュー入口は `docs/README.md` に統合）
 - 将来の表示層が VTK か PyVista かブラウザ（WebGL）かに関わらず使える
 
 JSON export があれば、次ステップで「JSON を読む最小表示」というアーキテクチャも選べます。
 
 **対応済み:** `crystal_viewer/json_export.py` と `tools/export_analysis_json.py` を追加。
-詳細は `docs/JSON_EXPORT.md` を参照。
+詳細は `docs/VIEWER_GUIDE.md` を参照。
 
 ### Q4. legacy `symmetry_core.py` をいつ取り込むべきか
 
@@ -213,10 +213,10 @@ if is_dataclass(value):
 
 `is_dataclass()` はクラス型にも True を返しますが、この関数はインスタンスにしか呼ばれないため問題なし。
 
-### `transformed_cart` の命名と JSON_EXPORT.md
+### `transformed_cart` の命名と JSON export docs
 
 レビューで指摘した「結晶モードの `transformed_cart` は `animation_frac @ lattice`（最近接像）であり raw 変換ではない」という点が、
-`docs/JSON_EXPORT.md` に正確に記載されていることを確認しました。
+現在は `docs/VIEWER_GUIDE.md` に統合されています。
 
 ```
 `transformed_cart` is computed from that animation image for crystals.
@@ -226,7 +226,7 @@ For molecule mappings, `transformed_cart` is the raw transformed Cartesian coord
 ### ルートの `claude_handoff.md` / `review_notes.md` について
 
 プロジェクトルートにある同名ファイルは `docs/` 内の本体へのポインタファイルです（数行のみ）。
-本体は `docs/CLAUDE_HANDOFF.md` / `docs/REVIEW_NOTES.md` です。
+本体は `docs/README.md` / `docs/REVIEW_NOTES.md` です。
 
 ---
 
@@ -297,7 +297,7 @@ For molecule mappings, `transformed_cart` is the raw transformed Cartesian coord
 **`--show-displacements` 単体使用時**（`--operation` なし）の挙動：
 `selected_mapping()` が `None` を返し、`"No atom mapping found. Use --operation with --show-displacements."` と表示して続行します。エラーにならず表示自体は出るため、使いやすい設計です ✓
 
-### 次ステップ（CURRENT_STATUS.md より）
+### 次ステップ（旧 status メモより）
 
 アニメーションプロトタイプ。方針：
 1. まず線形補間で動作確認
@@ -307,7 +307,7 @@ For molecule mappings, `transformed_cart` is the raw transformed Cartesian coord
 
 ---
 
-## アニメーション設計レビュー（`CLAUDE_HANDOFF.md` 質問8への回答）
+## アニメーション設計レビュー（旧 handoff doc 質問8への回答）
 
 仕様書 `docs/archive/specs/codex_final_spec_crystal_symmetry_viewer.md` Section 16 を参照しながら確認しました。
 
@@ -365,7 +365,7 @@ angle_deg: float | None  # rotation/screw のとき設定、それ以外 None
 1点のみ：
 
 **補間方式**（Section 16.3）: 仕様書は回転・らせん軸の円弧補間を「最初から」実装するよう指定しています。
-現在の `CURRENT_STATUS.md` の「まず線形」はそれとやや異なります。
+当時の status メモの「まず線形」はそれとやや異なります。
 Codex に伝える際は「線形は一時的、すぐに arc へ切り替える前提」と明示してください。
 
 それ以外は仕様書との整合性は取れています：
@@ -445,7 +445,7 @@ Codex に伝える際は「線形は一時的、すぐに arc へ切り替える
 |------|------|
 | `build_operation_path` の種別分岐順序 | `screw` が `rotation` より先に評価される ✓ |
 | `signed_angle_to_target` の符号決定 | +/-angle を試して target に近い方を選ぶ ✓ |
-| screw 分解（回転→平行移動） | `ANIMATION_DESIGN.md` Section「Screw operations」通り ✓ |
+| screw 分解（回転→平行移動） | 現在は `VIEWER_GUIDE.md` の animation rules に統合 ✓ |
 | glide 分解（鏡映→平行移動） | 仕様通り ✓ |
 | improper 分岐（rotoinversion/rotoreflection） | 設計上適切 ✓ |
 | GIF 出力パス | `open_gif` → `write_frame` ループ → `close` の順序が正しい ✓ |
@@ -891,7 +891,7 @@ if center is not None and shift_is_zero:
 | frac=[0.375,0.375,0.375]（一般位置） | 8 |
 | Jacobsite 全体 | 478（56原子から） |
 
-`update_animated_atoms` での `center = center + display_shift_cart` は正しい。DisplayClone は元原子の path に固定 lattice shift を加算するだけ（ANIMATION_DESIGN.md の設計通り ✓）。
+`update_animated_atoms` での `center = center + display_shift_cart` は正しい。DisplayClone は元原子の path に固定 lattice shift を加算するだけ（現在は `VIEWER_GUIDE.md` の設計に統合 ✓）。
 
 **観察（バグではない）**: FCC 面心原子が 18 インスタンスになるのは数学的に正しいが、視覚的に密集する可能性がある。将来的に上限を設けるか、ユーザーが表示范围を制御できるようにする余地がある。
 

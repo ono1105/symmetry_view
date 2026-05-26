@@ -25,8 +25,10 @@ analysis
   -> RenderData
   -> AtomMapping
   -> JSON export
-  -> minimal JSON-only PyVista viewer
-  -> operation animation prototype
+  -> PyVista viewer
+  -> browser control panel
+  -> operation animation
+  -> future renderer-independent game logic
 ```
 
 The previous GUI/VTK attempt is archived in `archive/old_gui_attempt/` and should not be used as the base for new work unless explicitly requested.
@@ -46,6 +48,7 @@ tools/inspect_render_data.py
 tools/inspect_atom_mapping.py
 tools/export_analysis_json.py
 tools/view_json_pyvista.py
+tools/view_json_server.py
 ```
 
 ## Data Model
@@ -58,7 +61,7 @@ The viewer should consume `RenderData` and `AtomMapping`, not raw CIF parser obj
 - `AtomMapping` records source-to-target atom correspondences for each symmetry operation.
 - JSON export is the boundary between analysis and display prototypes.
 
-JSON details are documented in `docs/JSON_EXPORT.md`.
+JSON details, viewer usage, and animation rules are documented in `docs/VIEWER_GUIDE.md`.
 
 ## Symmetry Operation Animation
 
@@ -84,11 +87,11 @@ Important constraints:
 - Atom mapping is used for correspondence and validation, but the visual path should be generated from the symmetry operation primitives.
 - Compound operations should not be represented as a single straight-line move unless a geometric fallback is unavoidable.
 
-Animation details are documented in `docs/ANIMATION_DESIGN.md`.
+Animation details are documented in `docs/VIEWER_GUIDE.md`.
 
 ## Current Viewer
 
-`tools/view_json_pyvista.py` is the current viewer prototype. It reads exported JSON only and can:
+`tools/view_json_pyvista.py` is the small CLI/debug viewer. It reads exported JSON only and can:
 
 - show atoms and unit cells,
 - show symmetry axes, planes, and centers,
@@ -110,18 +113,26 @@ The first GUI intentionally avoids Qt/PyVistaQt. WSL/X11 showed `BadWindow` fail
 For responsiveness, it defaults to source atoms only and offers `--expanded` for the half-cell periodic clone display used in visual checks.
 The expanded GUI display uses a quarter-cell margin rather than the wider half-cell margin used by earlier checks.
 
-`tools/view_json_server.py` is the preferred prototype for list-based controls. It is now a thin entry point plus stdlib HTTP API. Shared viewer responsibilities live under `crystal_viewer/viewer/`:
+`tools/view_json_server.py` is the preferred interactive prototype. It can start from JSON, CIF, XYZ, or an empty state. CIF/XYZ inputs are analyzed and exported to JSON before the existing viewer path is loaded.
+
+It is now a thin entry point plus stdlib HTTP API. Shared viewer responsibilities live under `crystal_viewer/viewer/`:
 
 ```text
-browser_ui.py          browser control panel HTML/JS
+browser_ui.py          compatibility wrapper for older imports
 custom_operation.py    custom operation construction and symmetry checking
 operation_labels.py    symbols, directions, fractional labels, and view targets
 pyvista_controller.py  PyVista state, camera control, animation, and GIF saving
 ```
 
-This split is intentionally coarse: it keeps the current JSON viewer stable while making future CIF loading and molecule-specific controls easier to add without turning the server entry point into the single core file. The browser UI supports operation filtering/selection, operation sorting, direction filtering, atom checkbox selection, Play, Stop, and Reset. Operation rows stay compact: operation symbol plus representative axis `[uvw]`, plane normal `(hkl)`, and center/point fractional coordinates.
+Browser-facing UI assets live under `crystal_viewer/web/`:
 
-Viewer usage is documented in `docs/MINIMAL_VIEWER.md`.
+```text
+browser_ui.py          browser control panel HTML/JS
+```
+
+This split is intentionally coarse: it keeps the current JSON viewer stable while making future CIF loading and molecule-specific controls easier to add without turning the server entry point into the single core file. The browser UI supports structure import, operation filtering/selection, operation sorting, direction filtering, atom visibility controls, color controls, Play, Stop, Reset, GIF saving, and custom operation checks. Operation rows stay compact: operation symbol plus representative axis `[uvw]`, plane normal `(hkl)`, and center/point fractional coordinates.
+
+Viewer usage is documented in `docs/VIEWER_GUIDE.md`.
 
 ## Intentional Differences From The Original Final Spec
 
@@ -131,7 +142,7 @@ Known intentional differences:
 
 ```text
 The first GUI is native PyVista and JSON-only for now.
-The browser-controlled viewer can accept a CIF path on the CLI or through browser controls, then auto-export JSON before opening it.
+The browser-controlled viewer can accept CIF, XYZ, JSON, or local paths on the CLI or through browser controls, then auto-export JSON before opening it.
 Mouse-based selected atom interaction is not implemented yet.
 Puzzle UI is not implemented yet.
 Molecular analysis is already implemented, although early crystal-only specs deferred it.
@@ -142,9 +153,9 @@ These differences do not change the project goal. They are staging choices to ke
 ## Known Non-Blocking Issues
 
 ```text
-screw operation labels can still appear as 2_?
 crystal analysis still depends on /home/ken/work/kouzoukaiseki/symmetry_core.py
 mixed-occupancy crystal sites are represented by their highest-occupancy element for now
+docs/archive files and old review notes mention earlier file names and should be treated as history
 ```
 
 ## Validation Samples
@@ -154,6 +165,7 @@ Representative input data:
 ```text
 examples/structures/
 examples/cif/
+examples/test/
 examples/molecules/
 ```
 
