@@ -210,21 +210,50 @@ HTML = """<!doctype html>
     }
     .structure-summary {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
       gap: 10px;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px;
+    }
+    .summary-grid.primary {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px 14px;
+    }
+    .summary-grid.primary .summary-item {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      max-width: 100%;
+    }
+    .summary-grid.primary .summary-label::after {
+      content: ":";
+    }
+    .summary-grid.compact {
+      grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+      gap: 6px 8px;
     }
     .summary-item {
       display: grid;
-      gap: 3px;
+      gap: 2px;
+      min-width: 0;
     }
     .summary-label {
       color: #91a0b3;
-      font-size: 12px;
+      font-size: 11px;
     }
     .summary-value {
       color: #f8fafc;
+      font-size: 13px;
       font-weight: 600;
-      overflow-wrap: anywhere;
+      overflow-wrap: normal;
+      word-break: keep-all;
+    }
+    .summary-grid.primary .summary-value {
+      overflow-wrap: break-word;
     }
     .panel {
       background: #151a20;
@@ -1014,6 +1043,16 @@ function basename(path) {
   return parts[parts.length - 1] || text;
 }
 
+function formatLength(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(4)} Å` : "-";
+}
+
+function formatAngle(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(3)}°` : "-";
+}
+
 function structureLoadedForSelectedKind() {
   const loaded = state.structure_loaded !== false && sourceKind !== "empty";
   return loaded && sourceKind === selectedStructureKind;
@@ -1028,6 +1067,41 @@ function setDefaultOperationSortForSourceKind() {
   directionFilterValue = "";
 }
 
+const CRYSTAL_POINT_GROUP_LABELS = {
+  "1": "C_1",
+  "-1": "C_i",
+  "2": "C_2",
+  "m": "C_s",
+  "2/m": "C_2h",
+  "222": "D_2",
+  "mm2": "C_2v",
+  "mmm": "D_2h",
+  "4": "C_4",
+  "-4": "S_4",
+  "4/m": "C_4h",
+  "422": "D_4",
+  "4mm": "C_4v",
+  "-42m": "D_2d",
+  "4/mmm": "D_4h",
+  "3": "C_3",
+  "-3": "S_6",
+  "32": "D_3",
+  "3m": "C_3v",
+  "-3m": "D_3d",
+  "6": "C_6",
+  "-6": "C_3h",
+  "6/m": "C_6h",
+  "622": "D_6",
+  "6mm": "C_6v",
+  "-6m2": "D_3h",
+  "6/mmm": "D_6h",
+  "23": "T",
+  "m-3": "T_h",
+  "432": "O",
+  "-43m": "T_d",
+  "m-3m": "O_h",
+};
+
 function renderStructureInfo() {
   const panel = document.getElementById("structure-info-panel");
   const root = document.getElementById("structure-info");
@@ -1038,33 +1112,98 @@ function renderStructureInfo() {
   }
   const metadata = state.metadata || {};
   const config = sourceKindConfig(sourceKind);
-  const items = [
-    ["Type", config.label],
+  const summaryItems = [
     ["Name", basename(metadata.source_file || state.json_path)],
     ["Formula", metadata.formula || "-"],
-    [config.symmetryLabel, metadata.symmetry_label || "-"],
-    [
-      "Operations",
-      metadata.operation_count !== undefined && metadata.operation_count !== null
-        ? metadata.operation_count
-        : operations.length,
-    ],
   ];
+  if (sourceKind === "crystal") {
+    summaryItems.push(
+      [
+        config.symmetryLabel,
+        symmetryLabelWithGenerators(metadata.symmetry_label, metadata.space_group_generators, { spaceGroup: true }),
+      ],
+      [
+        "Point group",
+        symmetryLabelWithGenerators(metadata.point_group_label || "-", metadata.point_group_generators, {
+          pointGroup: true,
+        }),
+      ],
+    );
+  } else {
+    summaryItems.push([
+      config.symmetryLabel,
+      symmetryLabelWithGenerators(metadata.symmetry_label || metadata.point_group_label, metadata.point_group_generators),
+    ]);
+  }
   root.innerHTML = "";
-  for (const [label, value] of items) {
-    const item = document.createElement("div");
-    item.className = "summary-item";
-    const labelEl = document.createElement("div");
-    labelEl.className = "summary-label";
-    labelEl.textContent = label;
-    const valueEl = document.createElement("div");
-    valueEl.className = "summary-value";
-    valueEl.textContent = String(value);
-    item.appendChild(labelEl);
-    item.appendChild(valueEl);
-    root.appendChild(item);
+
+  appendSummaryGrid(root, summaryItems, "primary");
+
+  const lattice = metadata.lattice_parameters;
+  if (sourceKind === "crystal" && lattice) {
+    appendSummaryGrid(root, [
+      ["a", formatLength(lattice.a)],
+      ["b", formatLength(lattice.b)],
+      ["c", formatLength(lattice.c)],
+      ["alpha", formatAngle(lattice.alpha)],
+      ["beta", formatAngle(lattice.beta)],
+      ["gamma", formatAngle(lattice.gamma)],
+    ], "compact");
   }
   panel.hidden = false;
+}
+
+function symmetryLabelWithGenerators(label, generators, options = {}) {
+  const base = options.spaceGroup
+    ? formatSpaceGroupLabel(label)
+    : options.pointGroup
+      ? formatCrystalPointGroupLabel(label)
+      : formatSymbol(label || "-");
+  const generatorSet = formatGeneratorSet(generators);
+  return generatorSet ? `${base} ${generatorSet}` : base;
+}
+
+function formatSpaceGroupLabel(label) {
+  const text = String(label || "-");
+  const match = text.match(/^([0-9]+)\\s+(.+)$/);
+  if (!match) return formatSymbol(text);
+  return `No. ${match[1]} ${formatSymbol(match[2])}`;
+}
+
+function formatCrystalPointGroupLabel(label) {
+  const text = String(label || "-").trim();
+  const schoenflies = CRYSTAL_POINT_GROUP_LABELS[text];
+  return schoenflies ? `${formatSymbol(schoenflies)}(${formatSymbol(text)})` : formatSymbol(text);
+}
+
+function formatGeneratorSet(generators) {
+  if (!Array.isArray(generators) || !generators.length) return "";
+  const values = generators.filter((value) => value && value !== "identity only");
+  if (!values.length) return "";
+  return `<${values.map((value) => formatSymbol(value)).join(", ")}>`;
+}
+
+function appendSummaryGrid(root, items, extraClass = "") {
+  const grid = document.createElement("div");
+  grid.className = extraClass ? `summary-grid ${extraClass}` : "summary-grid";
+  for (const [label, value] of items) {
+    grid.appendChild(summaryItem(label, value));
+  }
+  root.appendChild(grid);
+}
+
+function summaryItem(label, value) {
+  const item = document.createElement("div");
+  item.className = "summary-item";
+  const labelEl = document.createElement("div");
+  labelEl.className = "summary-label";
+  labelEl.textContent = label;
+  const valueEl = document.createElement("div");
+  valueEl.className = "summary-value";
+  valueEl.textContent = String(value);
+  item.appendChild(labelEl);
+  item.appendChild(valueEl);
+  return item;
 }
 
 function syncStructureKindButtons() {
@@ -1109,14 +1248,21 @@ function renderExampleOptions() {
   for (const item of items) {
     const option = document.createElement("option");
     option.value = item.path;
-    const formula = item.formula ? `${item.formula} ` : "";
-    const symmetry = item.symmetry ? ` — ${item.symmetry}` : "";
-    option.textContent = `${formula}${item.name}${symmetry}`;
+    option.textContent = exampleOptionText(item);
+    if (item.error) option.title = item.error;
     select.appendChild(option);
   }
   const hasSelectedExample = items.some(item => item.path === selectedExamplePath);
   select.value = hasSelectedExample ? selectedExamplePath : "";
   document.getElementById("open-example").disabled = importInProgress || items.length === 0;
+}
+
+function exampleOptionText(item) {
+  const formula = item.formula ? `${item.formula} ` : "";
+  const symmetry = item.symmetry ? `SG ${formatSymbol(item.symmetry)}` : "";
+  const pointGroup = item.point_group ? `PG ${formatCrystalPointGroupLabel(item.point_group)}` : "";
+  const details = [symmetry, pointGroup].filter(Boolean).join(" / ");
+  return details ? `${formula}${item.name} — ${details}` : `${formula}${item.name}`;
 }
 
 function beginImport(message) {

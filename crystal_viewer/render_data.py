@@ -19,6 +19,8 @@ from .geometry import normalize
 
 
 RenderMode = Literal["crystal", "molecule"]
+GENERATOR_ROTATION_SCALE = 1_000_000
+GENERATOR_TRANSLATION_SCALE = 120
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,10 @@ class RenderMetadata:
     formula: str
     symmetry_label: str
     operation_count: int
+    point_group_label: str | None = None
+    lattice_parameters: dict[str, float] | None = None
+    space_group_generators: tuple[str, ...] = ()
+    point_group_generators: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
 
@@ -189,6 +195,10 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
             formula=result.structure.formula,
             symmetry_label=f"{result.space_group.number} {result.space_group.international}",
             operation_count=result.space_group.operation_count,
+            point_group_label=result.space_group.point_group,
+            lattice_parameters=lattice_parameters_from_matrix(lattice),
+            space_group_generators=operation_generators(operations, mode="space"),
+            point_group_generators=operation_generators(operations, mode="point"),
             warnings=result.warnings,
         ),
         atoms=atoms,
@@ -236,6 +246,8 @@ def render_data_from_molecule(result: MoleculeAnalysisResult) -> RenderData:
             formula=result.molecule.formula,
             symmetry_label=result.point_group.symbol,
             operation_count=result.point_group.operation_count,
+            point_group_label=result.point_group.symbol,
+            point_group_generators=operation_generators(operations, mode="point"),
         ),
         atoms=atoms,
         asymmetric_atoms=(),
@@ -353,6 +365,282 @@ def operation_group_label(operation_indices: tuple[int, ...], symbols_by_index: 
         counts[symbol] = counts.get(symbol, 0) + 1
     parts = [f"{symbol}x{count}" if count > 1 else symbol for symbol, count in sorted(counts.items())]
     return ", ".join(parts)
+
+
+def lattice_parameters_from_matrix(lattice: np.ndarray) -> dict[str, float]:
+    vectors = np.asarray(lattice, dtype=float)
+    a_vec, b_vec, c_vec = vectors
+    return {
+        "a": float(np.linalg.norm(a_vec)),
+        "b": float(np.linalg.norm(b_vec)),
+        "c": float(np.linalg.norm(c_vec)),
+        "alpha": vector_angle_deg(b_vec, c_vec),
+        "beta": vector_angle_deg(a_vec, c_vec),
+        "gamma": vector_angle_deg(a_vec, b_vec),
+    }
+
+
+def vector_angle_deg(first: np.ndarray, second: np.ndarray) -> float:
+    first = np.asarray(first, dtype=float)
+    second = np.asarray(second, dtype=float)
+    denom = float(np.linalg.norm(first) * np.linalg.norm(second))
+    if denom <= 0:
+        return 0.0
+    cosine = float(np.dot(first, second) / denom)
+    return float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
+
+
+def operation_generators(
+    operations: tuple[RenderOperationData, ...],
+    *,
+    mode: Literal["space", "point"],
+) -> tuple[str, ...]:
+    keyed_operations = generator_operation_keys(operations, mode=mode)
+    if not keyed_operations:
+        return ()
+    target = {key for _, key in keyed_operations}
+    identity = generator_identity_key(mode)
+    if target == {identity}:
+        return ("identity only",)
+
+    candidates = [(operation, key) for operation, key in keyed_operations if key != identity]
+    selected: list[tuple[RenderOperationData, tuple]] = []
+    generated = {identity}
+    while generated != target and candidates:
+        best_index = -1
+        best_generated = generated
+        for index, (_, key) in enumerate(candidates):
+            candidate_generated = generator_closure(
+                [selected_key for _, selected_key in selected] + [key],
+                mode=mode,
+                target=target,
+            )
+            if len(candidate_generated) > len(best_generated):
+                best_index = index
+                best_generated = candidate_generated
+        if best_index < 0:
+            break
+        selected.append(candidates.pop(best_index))
+        generated = best_generated
+
+    if generated != target:
+        return tuple(generator_label(operation, mode=mode) for operation, key in keyed_operations if key != identity)
+    return tuple(generator_label(operation, mode=mode) for operation, _ in selected)
+
+
+def generator_operation_keys(
+    operations: tuple[RenderOperationData, ...],
+    *,
+    mode: Literal["space", "point"],
+) -> list[tuple[RenderOperationData, tuple]]:
+    keyed: list[tuple[RenderOperationData, tuple]] = []
+    seen: set[tuple] = set()
+    for operation in operations:
+        matrix = operation.matrix_frac if operation.matrix_frac is not None else operation.matrix_cart
+        if matrix is None:
+            continue
+        rotation = rotation_key(matrix)
+        if mode == "point":
+            key = rotation
+        else:
+            translation = operation.translation_frac if operation.translation_frac is not None else operation.translation_cart
+            key = (rotation, translation_key(translation))
+        if key in seen:
+            continue
+        seen.add(key)
+        keyed.append((operation, key))
+    return keyed
+
+
+def generator_identity_key(mode: Literal["space", "point"]) -> tuple:
+    identity_rotation = rotation_key(np.eye(3))
+    if mode == "point":
+        return identity_rotation
+    return (identity_rotation, translation_key(np.zeros(3)))
+
+
+def generator_closure(
+    generators: list[tuple],
+    *,
+    mode: Literal["space", "point"],
+    target: set[tuple],
+) -> set[tuple]:
+    generated = {generator_identity_key(mode)}
+    changed = True
+    while changed:
+        changed = False
+        for existing in tuple(generated):
+            for generator in generators:
+                for composed in (
+                    compose_generator_keys(existing, generator, mode=mode),
+                    compose_generator_keys(generator, existing, mode=mode),
+                ):
+                    if composed in target and composed not in generated:
+                        generated.add(composed)
+                        changed = True
+    return generated
+
+
+def compose_generator_keys(first: tuple, second: tuple, *, mode: Literal["space", "point"]) -> tuple:
+    if mode == "point":
+        return rotation_key(rotation_from_key(first) @ rotation_from_key(second))
+    first_rotation_key, first_translation_key = first
+    second_rotation_key, second_translation_key = second
+    first_rotation = rotation_from_key(first_rotation_key)
+    second_rotation = rotation_from_key(second_rotation_key)
+    first_translation = translation_from_key(first_translation_key)
+    second_translation = translation_from_key(second_translation_key)
+    return (
+        rotation_key(first_rotation @ second_rotation),
+        translation_key(first_rotation @ second_translation + first_translation),
+    )
+
+
+def rotation_key(matrix: np.ndarray) -> tuple[tuple[int, int, int], ...]:
+    rounded = np.rint(np.asarray(matrix, dtype=float) * GENERATOR_ROTATION_SCALE).astype(int)
+    return tuple(tuple(int(value) for value in row) for row in rounded)
+
+
+def rotation_from_key(key: tuple[tuple[int, int, int], ...]) -> np.ndarray:
+    return np.asarray(key, dtype=float) / GENERATOR_ROTATION_SCALE
+
+
+def translation_key(translation: np.ndarray | None) -> tuple[int, int, int]:
+    if translation is None:
+        return (0, 0, 0)
+    wrapped = np.mod(np.asarray(translation, dtype=float), 1.0)
+    scaled = np.mod(np.rint(wrapped * GENERATOR_TRANSLATION_SCALE).astype(int), GENERATOR_TRANSLATION_SCALE)
+    return tuple(int(value) for value in scaled)
+
+
+def translation_from_key(key: tuple[int, int, int]) -> np.ndarray:
+    return np.asarray(key, dtype=float) / GENERATOR_TRANSLATION_SCALE
+
+
+def generator_label(operation: RenderOperationData, *, mode: Literal["space", "point"]) -> str:
+    if mode == "point":
+        return point_generator_label(operation)
+    return space_generator_label(operation)
+
+
+def point_generator_label(operation: RenderOperationData) -> str:
+    kind = str(operation.kind)
+    if kind == "identity":
+        return "E"
+    if kind == "mirror" or "glide" in kind:
+        return "σ"
+    if kind == "inversion":
+        return "i"
+    if "rotoinversion" in kind or "rotoreflection" in kind or "improper" in kind:
+        if operation.order is not None and operation.order > 1:
+            return f"S{operation.order}"
+    if kind.startswith("rotation") or kind.startswith("screw"):
+        if operation.order is not None and operation.order > 1:
+            return f"C{operation.order}"
+    return normalize_generator_symbol(operation.symbol or operation.kind)
+
+
+def space_generator_label(operation: RenderOperationData) -> str:
+    if is_translation_operation(operation):
+        return f"t({format_fractional_vector(operation_translation_vector(operation))})"
+    if "glide" in str(operation.kind):
+        return f"g({format_fractional_vector(operation_translation_vector(operation))})"
+    symbol = operation.symbol or operation.kind
+    if "?" in str(symbol):
+        return generator_fallback_symbol(operation)
+    return normalize_generator_symbol(symbol)
+
+
+def is_translation_operation(operation: RenderOperationData) -> bool:
+    matrix = operation.matrix_frac if operation.matrix_frac is not None else operation.matrix_cart
+    translation = operation_translation_vector(operation)
+    if matrix is None or translation is None:
+        return False
+    return bool(
+        np.linalg.norm(np.asarray(matrix, dtype=float) - np.eye(3)) <= 1e-8
+        and np.linalg.norm(np.asarray(translation, dtype=float)) > 1e-8
+    )
+
+
+def operation_translation_vector(operation: RenderOperationData) -> np.ndarray | None:
+    return operation.translation_frac if operation.translation_frac is not None else operation.translation_cart
+
+
+def format_fractional_vector(vector: np.ndarray | None) -> str:
+    if vector is None:
+        return "0,0,0"
+    return ",".join(format_fractional_component(value) for value in np.mod(np.asarray(vector, dtype=float), 1.0))
+
+
+def format_fractional_component(value: float) -> str:
+    value = float(value)
+    if np.isclose(value, 0.0, atol=1e-8) or np.isclose(value, 1.0, atol=1e-8):
+        return "0"
+    for denominator in (2, 3, 4, 6, 8, 12):
+        numerator = int(round(value * denominator))
+        if numerator == denominator:
+            numerator = 0
+        if np.isclose(value, numerator / denominator, atol=1e-8):
+            return f"{numerator}/{denominator}" if numerator != 0 else "0"
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def normalize_generator_symbol(symbol: str) -> str:
+    text = str(symbol).strip()
+    text = text.replace("sigma", "σ")
+    text = text.replace("_v", "v").replace("_h", "h").replace("_d", "d")
+    if text == "m":
+        return "σ"
+    if text.isdigit() and int(text) > 1:
+        return f"C{text}"
+    if text.startswith("-") and text[1:].isdigit():
+        order = int(text[1:])
+        if order == 1:
+            return "i"
+        return f"S{order if order % 2 == 0 else order * 2}"
+    return text
+
+
+def generator_fallback_symbol(operation: RenderOperationData) -> str:
+    if operation.order is not None and operation.order > 1:
+        if str(operation.kind).startswith("screw"):
+            inferred = infer_compact_screw_symbol(operation)
+            return inferred if inferred is not None else f"C{operation.order}"
+        if "rotation" in str(operation.kind):
+            return f"C{operation.order}"
+    if str(operation.kind) == "mirror":
+        return "σ"
+    if str(operation.kind) == "inversion":
+        return "i"
+    return normalize_generator_symbol(operation.kind)
+
+
+def infer_compact_screw_symbol(operation: RenderOperationData) -> str | None:
+    if operation.order is None or operation.order <= 1 or operation.translation_frac is None:
+        return None
+    matrix = operation.matrix_frac if operation.matrix_frac is not None else operation.matrix_cart
+    if matrix is None:
+        return None
+    values, vectors = np.linalg.eig(np.asarray(matrix, dtype=float))
+    candidates = [index for index, value in enumerate(values) if abs(value - 1.0) <= 1e-6]
+    if not candidates:
+        return None
+    axis = np.real(vectors[:, candidates[0]])
+    norm = float(np.linalg.norm(axis))
+    if norm <= 0:
+        return None
+    axis = axis / norm
+    translation = np.asarray(operation.translation_frac, dtype=float)
+    fraction = abs(float(np.dot(translation, axis)))
+    fraction -= np.floor(fraction)
+    screw = int(np.floor(fraction * operation.order + 0.5 + 1e-8))
+    if screw == 0 and not np.isclose(fraction, 0.0, atol=1e-6):
+        screw = 1
+    if screw <= 0:
+        return None
+    if screw >= operation.order:
+        screw = operation.order - 1
+    return f"{operation.order}_{screw}"
 
 
 def bounds_points(atoms: tuple[RenderAtomData, ...], unit_cell: UnitCellRenderData | None) -> np.ndarray:
