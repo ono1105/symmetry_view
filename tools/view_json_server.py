@@ -42,6 +42,7 @@ from crystal_viewer.viewer.custom_operation import (
 )
 from crystal_viewer.web.browser_ui import HTML
 from crystal_viewer.viewer.operation_labels import atom_frac_label
+from crystal_viewer.viewer.operation_lookup import selected_mapping
 from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 from crystal_viewer.viewer.render_state import (
     apply_render_state_update,
@@ -156,6 +157,29 @@ def atom_api_items(atoms: list[dict]) -> list[dict]:
         }
         for atom in atoms
     ]
+
+
+def atom_motion_api_items(render_data: dict, atom_mappings: dict | None, operation_index: int | None) -> list[dict]:
+    mapping = selected_mapping(atom_mappings, operation_index)
+    if mapping is None:
+        return []
+    atoms_by_index = {atom["index"]: atom for atom in render_data.get("atoms", [])}
+    items = []
+    for entry in mapping.get("entries", []):
+        source_index = entry.get("source_atom")
+        source_atom = atoms_by_index.get(source_index, {})
+        items.append({
+            "source_atom": source_index,
+            "target_atom": entry.get("target_atom"),
+            "start_frac": source_atom.get("frac"),
+            "start_cart": source_atom.get("cart"),
+            "target_frac": entry.get("animation_frac") or entry.get("transformed_frac") or entry.get("wrapped_frac"),
+            "target_cart": entry.get("transformed_cart"),
+            "wrapped_frac": entry.get("wrapped_frac"),
+            "animation_frac": entry.get("animation_frac"),
+            "distance": entry.get("distance"),
+        })
+    return items
 
 
 def example_catalog() -> dict[str, list[dict]]:
@@ -284,6 +308,17 @@ def make_handler(
                 with state_lock:
                     atoms = list(session.atoms)
                 body = {"atoms": atom_api_items(atoms)}
+                self.send_json(body)
+                return
+            if path == "/api/atom_motion":
+                with state_lock:
+                    render_data = session.render_data
+                    atom_mappings = session.atom_mappings
+                    operation_index = int(shared_state.get("operation_index", 0))
+                body = {
+                    "operation_index": operation_index,
+                    "entries": atom_motion_api_items(render_data, atom_mappings, operation_index),
+                }
                 self.send_json(body)
                 return
             if path == "/api/state":

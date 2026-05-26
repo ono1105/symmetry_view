@@ -415,6 +415,12 @@ HTML = """<!doctype html>
       font-size: 11px;
       margin-left: 6px;
     }
+    .atom-motion {
+      color: #a7b5c8;
+      font-size: 12px;
+      font-weight: 500;
+      overflow-wrap: anywhere;
+    }
     .hint {
       color: #91a0b3;
       font-size: 12px;
@@ -809,6 +815,7 @@ HTML = """<!doctype html>
 <script>
 let operations = [];
 let atoms = [];
+let atomMotionBySource = new Map();
 let state = {};
 let directionFilterValue = "";
 let atomElementFilterValue = "";
@@ -892,7 +899,30 @@ function atomText(atom) {
   const asym = atom.asymmetric_index === null || atom.asymmetric_index === undefined
     ? ""
     : ` asym=${atom.asymmetric_index}`;
-  return `${atom.index}: ${atom.element}${frac}${asym}`;
+  const motion = atomMotionText(atom);
+  return `${atom.index}: ${atom.element}${frac}${asym}${motion}`;
+}
+
+function atomMotionText(atom) {
+  const motion = atomMotionBySource.get(atom.index);
+  if (!motion) return "";
+  const target = motion.target_atom === null || motion.target_atom === undefined ? "?" : motion.target_atom;
+  if (sourceKind === "crystal" && Array.isArray(motion.start_frac) && Array.isArray(motion.target_frac)) {
+    return ` <span class="atom-motion">${formatVector(motion.start_frac, formatFrac)} → ${formatVector(motion.target_frac, formatFrac)} target=${target}</span>`;
+  }
+  if (Array.isArray(motion.start_cart) && Array.isArray(motion.target_cart)) {
+    return ` <span class="atom-motion">${formatVector(motion.start_cart, formatCoord)} → ${formatVector(motion.target_cart, formatCoord)} target=${target}</span>`;
+  }
+  return ` <span class="atom-motion">target=${target}</span>`;
+}
+
+function formatVector(values, formatter) {
+  return `[${values.map(formatter).join(",")}]`;
+}
+
+function formatCoord(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(3).replace(/\\.?0+$/, "") : "?";
 }
 
 function normalizeColor(value, fallback = "#9aa5b1") {
@@ -1260,9 +1290,7 @@ function renderExampleOptions() {
 function exampleOptionText(item) {
   const formula = item.formula ? `${item.formula} ` : "";
   const symmetry = item.symmetry ? `SG ${formatSymbol(item.symmetry)}` : "";
-  const pointGroup = item.point_group ? `PG ${formatCrystalPointGroupLabel(item.point_group)}` : "";
-  const details = [symmetry, pointGroup].filter(Boolean).join(" / ");
-  return details ? `${formula}${item.name} — ${details}` : `${formula}${item.name}`;
+  return symmetry ? `${formula}${item.name} — ${symmetry}` : `${formula}${item.name}`;
 }
 
 function beginImport(message) {
@@ -1691,6 +1719,7 @@ async function postState(update) {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(update),
   });
+  await refreshAtomMotion();
   syncSpeedButtons();
   syncDisplayButtons();
   syncProjectionButtons();
@@ -1705,6 +1734,19 @@ async function postState(update) {
   renderStructureInfo();
   renderStatus();
   renderOperationDetails();
+}
+
+async function refreshAtomMotion() {
+  if (!structureLoadedForSelectedKind() || activeMode !== "standard") {
+    atomMotionBySource = new Map();
+    return;
+  }
+  const result = await api("/api/atom_motion");
+  atomMotionBySource = new Map(
+    (result.entries || [])
+      .filter(entry => entry.source_atom !== null && entry.source_atom !== undefined)
+      .map(entry => [entry.source_atom, entry])
+  );
 }
 
 async function importCifFile() {
@@ -1727,7 +1769,7 @@ async function importCifFile() {
       body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    applyLoadedStructure(result, "CIF import failed", "", {name: file.name, kind: "CIF"});
+    await applyLoadedStructure(result, "CIF import failed", "", {name: file.name, kind: "CIF"});
   } finally {
     finishImport(requestId);
   }
@@ -1753,7 +1795,7 @@ async function importMoleculeFile() {
       body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    applyLoadedStructure(result, "Molecule import failed", "", {name: file.name, kind: "XYZ"});
+    await applyLoadedStructure(result, "Molecule import failed", "", {name: file.name, kind: "XYZ"});
   } finally {
     finishImport(requestId);
   }
@@ -1778,13 +1820,13 @@ async function openSelectedExample() {
       body: JSON.stringify({kind: selectedStructureKind, path, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    applyLoadedStructure(result, "Example load failed", path, {name: path, kind: selectedStructureKind});
+    await applyLoadedStructure(result, "Example load failed", path, {name: path, kind: selectedStructureKind});
   } finally {
     finishImport(requestId);
   }
 }
 
-function applyLoadedStructure(result, fallbackError, examplePath = "", context = {}) {
+async function applyLoadedStructure(result, fallbackError, examplePath = "", context = {}) {
   if (result.stale) {
     state = result.state || state;
     renderStatus();
@@ -1827,6 +1869,7 @@ function applyLoadedStructure(result, fallbackError, examplePath = "", context =
   syncPlayToggleButton();
   syncGifSavingControls();
   renderOperations();
+  await refreshAtomMotion();
   renderAtoms();
   renderStructureInfo();
   renderStatus();
@@ -2240,6 +2283,7 @@ async function boot() {
   }
   sourceKind = state.source_kind || "crystal";
   setDefaultOperationSortForSourceKind();
+  await refreshAtomMotion();
   syncSourceKindControls();
   renderDirectionFilter();
   renderAtomElementFilter();
