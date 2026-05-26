@@ -30,6 +30,10 @@ class ViewerSession:
         self.operation_summary_items = other.operation_summary_items
 
     @property
+    def atom_mappings(self) -> dict | None:
+        return self.payload.get("atom_mappings")
+
+    @property
     def source_kind(self) -> str:
         return normalize_source_kind(
             self.payload.get(
