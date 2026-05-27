@@ -100,6 +100,14 @@ Open a CIF or XYZ directly:
 
 The browser panel talks to a local stdlib HTTP server. PyVista remains responsible for the 3D scene.
 
+Atom display defaults live in:
+
+```text
+crystal_viewer/viewer/atom_defaults.json
+```
+
+This JSON can override default atom colors, mesh style, and highlight radius scale. Invalid or missing values fall back to built-in defaults in `atom_style.py`.
+
 Current browser controls include:
 
 ```text

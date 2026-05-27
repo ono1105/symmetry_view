@@ -818,6 +818,7 @@ HTML = """<!doctype html>
 let operations = [];
 let atoms = [];
 let atomMotionBySource = new Map();
+let lastAtomRenderSignature = "";
 let state = {};
 let directionFilterValue = "";
 let atomElementFilterValue = "";
@@ -1530,6 +1531,9 @@ function renderElementColorControls() {
 }
 
 function renderAtoms() {
+  const signature = atomListRenderSignature();
+  if (signature === lastAtomRenderSignature) return;
+  lastAtomRenderSignature = signature;
   const root = document.getElementById("atoms");
   const selected = new Set(state.selected_atoms || []);
   root.innerHTML = "";
@@ -1575,6 +1579,32 @@ function renderAtoms() {
     label.appendChild(span);
     root.appendChild(label);
   }
+}
+
+function atomListRenderSignature() {
+  return JSON.stringify({
+    atoms: atoms.map(atom => [
+      atom.index,
+      atom.element,
+      atom.asymmetric_index,
+      atom.default_color,
+    ]),
+    selected_atoms: state.selected_atoms || [],
+    element_colors: state.element_colors || {},
+    atom_colors: state.atom_colors || {},
+    element_hidden: state.element_hidden || {},
+    atom_hidden: state.atom_hidden || {},
+    atomElementFilterValue,
+    unmapped: [...customUnmappedAtoms].sort((a, b) => a - b),
+    motion: [...atomMotionBySource.entries()].map(([source, motion]) => [
+      source,
+      motion.target_atom,
+      motion.start_frac,
+      motion.target_frac,
+      motion.start_cart,
+      motion.target_cart,
+    ]),
+  });
 }
 
 function syncSpeedButtons() {
@@ -1783,7 +1813,7 @@ async function importCifFile() {
       body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    await applyLoadedStructure(result, "CIF import failed", "", {name: file.name, kind: "CIF"});
+    await applyLoadedStructureSafely(result, "CIF import failed", "CIF display failed", "", {name: file.name, kind: "CIF"});
   } finally {
     finishImport(requestId);
   }
@@ -1809,7 +1839,7 @@ async function importMoleculeFile() {
       body: JSON.stringify({filename: file.name, content, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    await applyLoadedStructure(result, "Molecule import failed", "", {name: file.name, kind: "XYZ"});
+    await applyLoadedStructureSafely(result, "Molecule import failed", "Molecule display failed", "", {name: file.name, kind: "XYZ"});
   } finally {
     finishImport(requestId);
   }
@@ -1834,9 +1864,18 @@ async function openSelectedExample() {
       body: JSON.stringify({kind: selectedStructureKind, path, request_id: requestId}),
     });
     if (!isCurrentImport(requestId)) return;
-    await applyLoadedStructure(result, "Example load failed", path, {name: path, kind: selectedStructureKind});
+    await applyLoadedStructureSafely(result, "Example load failed", "Example display failed", path, {name: path, kind: selectedStructureKind});
   } finally {
     finishImport(requestId);
+  }
+}
+
+async function applyLoadedStructureSafely(result, fallbackError, displayError, examplePath = "", context = {}) {
+  try {
+    await applyLoadedStructure(result, fallbackError, examplePath, context);
+  } catch (error) {
+    console.error(displayError, error);
+    showLoadError(displayError, error, context);
   }
 }
 

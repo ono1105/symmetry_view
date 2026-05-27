@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 from pymatgen.core import Element
 
 
-ELEMENT_COLORS = {
+ATOM_DEFAULTS_PATH = Path(__file__).with_name("atom_defaults.json")
+
+
+_BUILTIN_ELEMENT_COLORS = {
     # CPK/Jmol-style defaults. User-defined element/atom colors still override these.
     "H": "#ffffff",
     "He": "#d9ffff",
@@ -111,10 +117,10 @@ ELEMENT_COLORS = {
     "Lr": "#c70066",
 }
 
-DEFAULT_ATOM_COLOR = "#9aa5b1"
+_BUILTIN_DEFAULT_ATOM_COLOR = "#9aa5b1"
 _ELEMENT_RADIUS_CACHE: dict[int, float] = {}
 
-ATOM_MESH_STYLE = {
+_BUILTIN_ATOM_MESH_STYLE = {
     "smooth_shading": True,
     "lighting": False,
     "ambient": 0.35,
@@ -123,7 +129,81 @@ ATOM_MESH_STYLE = {
     "specular_power": 18,
 }
 
-HIGHLIGHT_RADIUS_SCALE = 0.96
+_BUILTIN_HIGHLIGHT_RADIUS_SCALE = 0.96
+
+
+def _normalize_hex_color_value(value) -> str | None:
+    text = str(value).strip()
+    if len(text) == 7 and text.startswith("#"):
+        digits = text[1:]
+    elif len(text) == 6:
+        digits = text
+    else:
+        return None
+    if all(char in "0123456789abcdefABCDEF" for char in digits):
+        return "#" + digits.lower()
+    return None
+
+
+def load_atom_style_defaults(path: Path = ATOM_DEFAULTS_PATH) -> dict:
+    element_colors = dict(_BUILTIN_ELEMENT_COLORS)
+    default_atom_color = _BUILTIN_DEFAULT_ATOM_COLOR
+    atom_mesh_style = dict(_BUILTIN_ATOM_MESH_STYLE)
+    highlight_radius_scale = _BUILTIN_HIGHLIGHT_RADIUS_SCALE
+
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {
+            "element_colors": element_colors,
+            "default_atom_color": default_atom_color,
+            "atom_mesh_style": atom_mesh_style,
+            "highlight_radius_scale": highlight_radius_scale,
+        }
+    except Exception:
+        return {
+            "element_colors": element_colors,
+            "default_atom_color": default_atom_color,
+            "atom_mesh_style": atom_mesh_style,
+            "highlight_radius_scale": highlight_radius_scale,
+        }
+
+    color = _normalize_hex_color_value(loaded.get("default_atom_color", ""))
+    if color is not None:
+        default_atom_color = color
+    for element, color_value in (loaded.get("element_colors") or {}).items():
+        color = _normalize_hex_color_value(color_value)
+        if color is not None:
+            element_colors[str(element)] = color
+    for key, value in (loaded.get("atom_mesh_style") or {}).items():
+        if key not in atom_mesh_style:
+            continue
+        if isinstance(atom_mesh_style[key], bool):
+            atom_mesh_style[key] = bool(value)
+        else:
+            try:
+                atom_mesh_style[key] = float(value)
+            except (TypeError, ValueError):
+                pass
+    try:
+        highlight_radius_scale = float(
+            loaded.get("highlight_radius_scale", highlight_radius_scale)
+        )
+    except (TypeError, ValueError):
+        pass
+    return {
+        "element_colors": element_colors,
+        "default_atom_color": default_atom_color,
+        "atom_mesh_style": atom_mesh_style,
+        "highlight_radius_scale": highlight_radius_scale,
+    }
+
+
+_ATOM_STYLE_DEFAULTS = load_atom_style_defaults()
+ELEMENT_COLORS = _ATOM_STYLE_DEFAULTS["element_colors"]
+DEFAULT_ATOM_COLOR = _ATOM_STYLE_DEFAULTS["default_atom_color"]
+ATOM_MESH_STYLE = _ATOM_STYLE_DEFAULTS["atom_mesh_style"]
+HIGHLIGHT_RADIUS_SCALE = _ATOM_STYLE_DEFAULTS["highlight_radius_scale"]
 
 
 def element_radius_angstrom(atomic_number: int) -> float:
@@ -194,16 +274,7 @@ def atom_color(
 
 
 def normalize_hex_color(value) -> str | None:
-    text = str(value).strip()
-    if len(text) == 7 and text.startswith("#"):
-        digits = text[1:]
-    elif len(text) == 6:
-        digits = text
-    else:
-        return None
-    if all(char in "0123456789abcdefABCDEF" for char in digits):
-        return "#" + digits.lower()
-    return None
+    return _normalize_hex_color_value(value)
 
 
 def color_to_rgb(color: str) -> tuple[float, float, float]:
