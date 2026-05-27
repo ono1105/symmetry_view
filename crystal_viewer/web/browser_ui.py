@@ -1750,12 +1750,17 @@ async function refreshAtomMotion() {
     atomMotionBySource = new Map();
     return;
   }
-  const result = await api("/api/atom_motion");
-  atomMotionBySource = new Map(
-    (result.entries || [])
-      .filter(entry => entry.source_atom !== null && entry.source_atom !== undefined)
-      .map(entry => [entry.source_atom, entry])
-  );
+  try {
+    const result = await api("/api/atom_motion");
+    atomMotionBySource = new Map(
+      (result.entries || [])
+        .filter(entry => entry.source_atom !== null && entry.source_atom !== undefined)
+        .map(entry => [entry.source_atom, entry])
+    );
+  } catch (error) {
+    atomMotionBySource = new Map();
+    console.warn("Atom motion refresh failed", error);
+  }
 }
 
 async function importCifFile() {

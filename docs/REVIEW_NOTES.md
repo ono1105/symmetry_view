@@ -3169,3 +3169,139 @@ CIF の空間群記述が間違っている可能性は常にあるため、「�
 | Ice II.cif | 36 | 148 (R-3) |
 
 ※ Calcite の CIF 記載は R3c (161) だが、spglib は実際の原子配置から R-3c (167) を検出する。これは「CIF の空間群が間違っていた」ケースで、spglib を権威とする設計の正しさを示す例。
+
+---
+
+## ブラウザ UI・サーバー全体レビュー (2026-05-27)
+
+atom motion 表示機能追加後の全体監査。コードは変更せず診断のみ。
+
+---
+
+### Bug (高): `operation_lookup.py` の `id()` キャッシュが GC 後に誤ヒットする
+
+**場所:** `crystal_viewer/viewer/operation_lookup.py:4–16, 46–52`
+
+```python
+_MAPPING_CACHE_BY_LIST_ID: dict[int, tuple[int, dict[int, dict]]] = {}
+
+def selected_mapping(atom_mappings, operation_index):
+    mappings = atom_mappings.get("mappings", [])
+    cache_key = id(mappings)          # ← 問題箇所
+    cached = _MAPPING_CACHE_BY_LIST_ID.get(cache_key)
+    if cached is None or cached[0] != len(mappings):
+        ...
+```
+
+Python の `id()` はオブジェクトが生存中のみ一意。`mappings` リストが GC で解放された後、別のリストが同じメモリアドレスを得ると `len` チェックをすり抜けて古いキャッシュが返りうる。`_OPERATION_CACHE_BY_LIST_ID` も同様。
+
+**修正案:** `WeakKeyDictionary` に変更するか、`ViewerSession` オブジェクト自体のキャッシュ（セッションが生きている間はリストも生きている）にする。もしくはキャッシュを `ViewerSession` のインスタンス変数に移し、`replace_from()` 時にクリアする。
+
+---
+
+### Bug (中): `postState()` の呼び出し元が `refreshAtomMotion()` の例外を無視する
+
+**場所:** `crystal_viewer/web/browser_ui.py:1716–1737`
+
+```js
+async function postState(update) {
+  state = await api("/api/state", ...);
+  await refreshAtomMotion();  // ← 例外が起きると以下が実行されない
+  syncSpeedButtons();
+  ...
+  renderAtoms();
+}
+```
+
+play・stop・速度変更・投影切り替えなど大半のボタンが `.catch()` なしで `postState()` を呼ぶ。`refreshAtomMotion()` がネットワークエラー等で失敗すると、その操作以降 UI が無音で無反応になる（`syncSpeedButtons` 以降が実行されないため）。
+
+**修正案:** `refreshAtomMotion()` 内で例外を catch して `atomMotionBySource = new Map()` に戻す（表示がなくなるだけで UI は動き続ける）か、`postState()` 内に `try/catch` を設けて UI 更新だけは続行させる。
+
+---
+
+### Bug (低): `format_fraction()` が 1.0 を "0" と表示する
+
+**場所:** `crystal_viewer/viewer/operation_labels.py:504`
+
+```python
+def format_fraction(value: float) -> str:
+    value = float(value)
+    if abs(value) < 1e-8 or abs(value - 1.0) < 1e-8:
+        return "0"
+```
+
+`atom_frac_label()` と `point_label()` で使用。境界原子の分率座標が正確に 1.0 になると "0" と表示される。結晶学的には等価だがデバッグ時に混乱しやすい。
+
+---
+
+### 潜在バグ: `pop_render_state_snapshot()` が `shared_state` を副作用で破壊する
+
+**場所:** `crystal_viewer/viewer/render_state.py:172, 175`
+
+```python
+clear_custom_check=bool(state.pop("clear_custom_check", False)),
+reset=bool(state.pop("reset", False)),
+```
+
+`.pop()` で共有 dict からキーを削除する一回読み切り設計。`state_lock` 下で呼ばれているので現状は安全だが、関数シグネチャからは破壊的であることが読み取れず、将来の呼び出し元が誤用しやすい。
+
+**推奨:** 関数名を `take_render_state_snapshot()` などに変更するか、呼び出し元で明示的に `state.pop("reset", False)` してから渡す設計にする。
+
+---
+
+### 潜在バグ: `_EXAMPLE_CATALOG_CACHE` がプロセス生存中に更新されない
+
+**場所:** `tools/view_json_server.py:78`
+
+```python
+_EXAMPLE_CATALOG_CACHE: dict[str, list[dict]] | None = None
+```
+
+サーバー起動後に `examples/cif/` へファイルを追加・削除しても、カタログに反映されない。ローカルツールとして許容範囲だが、文書化されていない。
+
+---
+
+### 潜在バグ: `refreshState()` が `refreshAtomMotion()` を呼ばない
+
+**場所:** `crystal_viewer/web/browser_ui.py:1902–1928`
+
+1秒ごとの状態ポーリング `refreshState()` は `operation_index` 変化を検出できるが、`atomMotionBySource` を更新しない。現状は `operation_index` の変更が必ず `postState()` 経由なので問題ないが、PyVista 側からの操作選択変更をサポートする場合はここに `refreshAtomMotion()` の追加が必要になる。
+
+---
+
+### 効率化: `renderAtoms()` の毎回フル DOM 再構築
+
+**場所:** `crystal_viewer/web/browser_ui.py:1523`
+
+`postState()` は play/stop・速度変更・投影変更など原子に無関係な操作でも `renderAtoms()` を呼ぶ。100 原子以上の構造で全 DOM ノードを毎回破棄・再生成するため、操作ごとに画面がちらつく可能性がある。
+
+**推奨:** `atoms` や `atomMotionBySource`、`state.selected_atoms`、`state.atom_hidden`、`state.atom_colors` のいずれも変化していない場合は `renderAtoms()` をスキップするガードを追加する。
+
+---
+
+### テスト不足（重要パスがほぼ無カバー）
+
+現在 `tests/` には 3 ファイル・273 行しかなく、HTTP API エンドポイント・スレッド安全性・キャッシュ動作・エラー系がほぼ未テスト。
+
+| 優先度 | 対象 |
+|--------|------|
+| 高 | `operation_lookup.py` のキャッシュ（id 再利用バグの回帰テスト） |
+| 高 | `cached_export_json_path()` の無効化ロジック（mtime・schema_version 比較） |
+| 高 | HTTP API 全エンドポイントの正常系・エラー系 |
+| 中 | `initial_render_state()` の `preserved` 引数が正しく引き継がれること |
+| 中 | スレッド安全性（concurrent reload 時の session 整合性） |
+| 低 | `format_fraction()` の境界値（0.0, 1.0, 負値, >1 の値） |
+
+### Codex 対応メモ (2026-05-27)
+
+妥当と判断して対応:
+
+- `operation_lookup.py` の `id()` ベースのグローバルキャッシュを削除。GC 後の `id()` 再利用による stale lookup の可能性をなくした。
+- `refreshAtomMotion()` の例外を関数内で捕捉し、失敗時は atom motion 表示だけ空にして UI 更新を継続するようにした。
+- `tests/test_operation_lookup.py` を追加し、同じ長さで内容が異なる mapping / operation list を正しく参照する回帰テストを追加した。
+
+今回は保留:
+
+- `format_fraction(1.0) -> "0"` は周期座標の wrap 表示として意図的な面があり、現在の atom list では単独の frac 表示もなくしたため未変更。
+- `pop_render_state_snapshot()` の破壊的読み取りは一回読み切り state key の設計と一致しており、現状の呼び出しは `state_lock` 下に限定されるため未変更。
+- `_EXAMPLE_CATALOG_CACHE` はサーバ起動時のローカルカタログ固定として許容。example 変更後はサーバ再起動または `tools/regenerate_example_assets.py --clean` を使う運用に寄せる。

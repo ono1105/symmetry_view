@@ -82,7 +82,7 @@ generation_operation_index
 The preferred interactive prototype is:
 
 ```bash
-.venv/bin/python tools/view_json_server.py exports/json/imported/jacobsite.json
+.venv/bin/python tools/view_json_server.py exports/json/halite.json
 ```
 
 Start empty and open structures from the browser:
@@ -189,7 +189,7 @@ Focused checks:
 ```bash
 .venv/bin/python -m py_compile crystal_viewer/render_data.py crystal_viewer/web/browser_ui.py tools/view_json_server.py
 .venv/bin/python -m unittest tests/test_render_metadata.py tests/test_rhombohedral_cif_fallback.py
-.venv/bin/python tools/inspect_atom_instances.py exports/json/imported/jacobsite.json --display-mode expanded_1_0 --glyph-preview
+.venv/bin/python tools/inspect_atom_instances.py exports/json/halite.json --display-mode expanded_1_0 --glyph-preview
 ```
 
 JSON validity:

@@ -163,19 +163,22 @@ docs/archive files and old review notes mention earlier file names and should be
 Representative input data:
 
 ```text
-examples/structures/
 examples/cif/
-examples/test/
 examples/molecules/
 ```
 
 Generated JSON samples:
 
 ```text
-exports/json/f2_pd.json
-exports/json/jacobsite.json
-exports/json/mg2v2o7.json
+exports/json/halite.json
+exports/json/sio2.json
 exports/json/water.json
+```
+
+Regenerate the tracked JSON samples and browser catalog from the canonical inputs:
+
+```bash
+.venv/bin/python tools/regenerate_example_assets.py --clean
 ```
 
 Local GIF/PNG checks live under `exports/gifs/<structure>/` and are intentionally not tracked.

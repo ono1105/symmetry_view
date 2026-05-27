@@ -20,13 +20,14 @@ tools/
   inspect_render_data.py  RenderData確認CLI
   inspect_atom_mapping.py AtomMapping確認CLI
   export_analysis_json.py JSON export CLI
+  regenerate_example_assets.py examples/cif・examples/moleculesからJSON/catalogを再生成
   view_json_pyvista.py    JSONを読む最小PyVista表示
 
 examples/
-  structures/
-    f2_pd.cif
-    jacobsite.cif
-    mg2v2o7.cif
+  cif/
+    Halite.cif
+    SiO2.cif
+    ...
   molecules/
     water.xyz
     methane.xyz
@@ -58,7 +59,7 @@ pip install -r requirements.txt
 結晶解析:
 
 ```bash
-.venv/bin/python tools/analyze_structure.py examples/structures/f2_pd.cif
+.venv/bin/python tools/analyze_structure.py examples/cif/Halite.cif
 ```
 
 分子解析:
@@ -70,57 +71,51 @@ pip install -r requirements.txt
 共通描画データ:
 
 ```bash
-.venv/bin/python tools/inspect_render_data.py examples/structures/f2_pd.cif --mode crystal
+.venv/bin/python tools/inspect_render_data.py examples/cif/Halite.cif --mode crystal
 .venv/bin/python tools/inspect_render_data.py examples/molecules/methane.xyz --mode molecule
 ```
 
 原子対応:
 
 ```bash
-.venv/bin/python tools/inspect_atom_mapping.py examples/structures/f2_pd.cif --mode crystal
+.venv/bin/python tools/inspect_atom_mapping.py examples/cif/Halite.cif --mode crystal
 .venv/bin/python tools/inspect_atom_mapping.py examples/molecules/water.xyz --mode molecule
 ```
 
 JSON export:
 
 ```bash
-.venv/bin/python tools/export_analysis_json.py examples/structures/f2_pd.cif --mode crystal -o exports/json/f2_pd.json
-.venv/bin/python tools/export_analysis_json.py examples/structures/jacobsite.cif --mode crystal -o exports/json/jacobsite.json
-.venv/bin/python tools/export_analysis_json.py examples/structures/mg2v2o7.cif --mode crystal -o exports/json/mg2v2o7.json
+.venv/bin/python tools/export_analysis_json.py examples/cif/Halite.cif --mode crystal -o exports/json/halite.json
 .venv/bin/python tools/export_analysis_json.py examples/molecules/water.xyz --mode molecule -o exports/json/water.json
+.venv/bin/python tools/regenerate_example_assets.py --clean
 ```
 
 最小表示:
 
 ```bash
-.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json
-.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --list-operations
-.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --list-elements
-.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1
-.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --show-mapping --show-displacements
-.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope representative --animation-fps 6 --animation-output exports/gifs/f2_pd/f2_pd_op1_rep.gif
-.venv/bin/python tools/view_json_pyvista.py exports/json/f2_pd.json --operation 1 --element-index 0 --animate --animation-scope all --representative-atom 0 --animation-fps 6 --animation-output exports/gifs/f2_pd/f2_pd_op1_all.gif
-.venv/bin/python tools/view_json_pyvista.py exports/json/jacobsite.json --operation 26 --element-index 0 --animate --animation-fps 6 --animation-output exports/gifs/jacobsite/jacobsite_op26_glide.gif
+.venv/bin/python tools/view_json_pyvista.py exports/json/halite.json
+.venv/bin/python tools/view_json_pyvista.py exports/json/halite.json --list-operations
+.venv/bin/python tools/view_json_pyvista.py exports/json/halite.json --operation 1 --list-elements
+.venv/bin/python tools/view_json_pyvista.py exports/json/halite.json --operation 1
+.venv/bin/python tools/view_json_pyvista.py exports/json/halite.json --operation 1 --show-mapping --show-displacements
 .venv/bin/python tools/view_json_pyvista.py exports/json/water.json
 ```
 
 簡単なGUI:
 
 ```bash
-.venv/bin/python tools/view_json_gui.py exports/json/f2_pd.json
-.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json
-.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --list-operations
-.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --list-atoms
-.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --operation 25
-.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --scope selected --selected-atoms 0 1 2
-.venv/bin/python tools/view_json_gui.py exports/json/jacobsite.json --expanded
-.venv/bin/python tools/view_json_server.py exports/json/jacobsite.json
+.venv/bin/python tools/view_json_gui.py exports/json/halite.json
+.venv/bin/python tools/view_json_gui.py exports/json/halite.json --list-operations
+.venv/bin/python tools/view_json_gui.py exports/json/halite.json --list-atoms
+.venv/bin/python tools/view_json_gui.py exports/json/halite.json --operation 1
+.venv/bin/python tools/view_json_gui.py exports/json/halite.json --expanded
+.venv/bin/python tools/view_json_server.py exports/json/halite.json
 ```
 
 `tools/` ディレクトリに移動している場合:
 
 ```bash
-../.venv/bin/python view_json_gui.py ../exports/json/jacobsite.json
+../.venv/bin/python view_json_gui.py ../exports/json/halite.json
 ```
 
 `exports/json/` は共有用のJSON本体、`exports/gifs/<structure>/` はローカル確認用のGIF出力置き場です。
