@@ -5,7 +5,12 @@ import unittest
 from pathlib import Path
 
 from crystal_viewer.json_export import EXPORT_SCHEMA_VERSION
-from tools.view_json_server import atom_motion_api_items, cached_export_json_path
+from tools.view_json_server import (
+    atom_motion_api_items,
+    cached_export_json_path,
+    example_catalog,
+    resolve_example_path,
+)
 
 
 class AtomMotionApiItemsTest(unittest.TestCase):
@@ -116,6 +121,33 @@ class CachedExportJsonPathTest(unittest.TestCase):
         output_mtime = input_path.stat().st_mtime + 10
         os.utime(output_path, (output_mtime, output_mtime))
         return input_path, output_path
+
+
+class ExampleCatalogAndPathTest(unittest.TestCase):
+    def test_example_catalog_uses_canonical_directories(self):
+        catalog = example_catalog()
+
+        self.assertEqual(len(catalog["crystal"]), 32)
+        self.assertEqual(len(catalog["molecule"]), 11)
+        self.assertTrue(
+            all(item["path"].startswith("examples/cif/") for item in catalog["crystal"])
+        )
+        self.assertTrue(
+            all(item["path"].startswith("examples/molecules/") for item in catalog["molecule"])
+        )
+
+    def test_resolve_example_path_accepts_catalog_crystal(self):
+        path = resolve_example_path("crystal", "examples/cif/Halite.cif")
+
+        self.assertEqual(path.name, "Halite.cif")
+
+    def test_resolve_example_path_rejects_noncanonical_directory(self):
+        with self.assertRaises(ValueError):
+            resolve_example_path("crystal", "examples/molecules/water.xyz")
+
+    def test_resolve_example_path_rejects_parent_escape(self):
+        with self.assertRaises(ValueError):
+            resolve_example_path("crystal", "examples/cif/../molecules/water.xyz")
 
 
 if __name__ == "__main__":
