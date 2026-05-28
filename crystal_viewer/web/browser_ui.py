@@ -433,19 +433,21 @@ HTML = """<!doctype html>
       margin-left: 6px;
     }
     .atom-motion {
-      display: flex;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 4px;
-      align-items: baseline;
+      align-items: start;
       min-width: 0;
       color: #a7b5c8;
       font-size: 11px;
       font-weight: 500;
+      line-height: 1.25;
     }
     .atom-motion-path {
       min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      overflow-wrap: anywhere;
+      white-space: normal;
     }
     .atom-motion-target {
       flex: 0 0 auto;
@@ -966,7 +968,7 @@ function atomMotionParts(atom) {
 }
 
 function formatVector(values, formatter) {
-  return `(${values.map(formatter).join(",")})`;
+  return `(${values.map(formatter).join(", ")})`;
 }
 
 function formatFrac(value) {
