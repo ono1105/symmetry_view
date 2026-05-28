@@ -25,6 +25,7 @@ from crystal_viewer.viewer.operation_lookup import (
 from crystal_viewer.viewer.scene_rendering import (
     add_animated_atoms,
     add_atoms,
+    add_atom_legend,
     add_displacements,
     add_glyph_atoms,
     add_orientation_axes,
@@ -154,6 +155,7 @@ def main() -> int:
 
     add_title(plotter, render_data, args.json_path, args.operation)
     add_orientation_axes(plotter, unit_cell=bool(render_data.get("unit_cell")))
+    add_atom_legend(plotter, render_data)
     plotter.reset_camera()
 
     if args.animate:

@@ -27,7 +27,7 @@ def viewer_text_color(background_mode: str) -> str:
     return VIEWER_DARK_TEXT_COLOR if background_mode == "dark" else VIEWER_LIGHT_TEXT_COLOR
 
 
-def setup_viewer_lighting(plotter: pv.Plotter, *, background_mode: str = "light") -> None:
+def setup_viewer_lighting(plotter: pv.Plotter, *, background_mode: str = "dark") -> None:
     plotter.set_background(viewer_background_color(background_mode))
     try:
         plotter.remove_all_lights()
@@ -83,6 +83,46 @@ def add_orientation_axes(plotter: pv.Plotter, *, unit_cell: bool = False) -> Non
         ylabel=labels[1],
         zlabel=labels[2],
     )
+
+
+def atom_legend_entries(render_data: dict, *, element_colors: dict | None = None) -> list[list[str]]:
+    by_element = {}
+    for atom in render_data.get("atoms", []):
+        element = str(atom.get("element", "")).strip()
+        if element and element not in by_element:
+            by_element[element] = atom
+    return [
+        [element, atom_color(atom, element_colors=element_colors)]
+        for element, atom in sorted(by_element.items())
+    ]
+
+
+def add_atom_legend(
+    plotter: pv.Plotter,
+    render_data: dict,
+    *,
+    element_colors: dict | None = None,
+    background_mode: str = "dark",
+):
+    labels = atom_legend_entries(render_data, element_colors=element_colors)
+    if not labels:
+        return None
+    height = min(max(0.06, 0.035 * len(labels) + 0.035), 0.42)
+    try:
+        actor = plotter.add_legend(
+            labels=labels,
+            bcolor=viewer_background_color(background_mode),
+            border=True,
+            size=(0.15, height),
+            loc="upper right",
+            face="circle",
+        )
+        actor.GetEntryTextProperty().SetColor(
+            (0.93, 0.95, 0.97) if background_mode == "dark" else (0.07, 0.09, 0.13)
+        )
+        return actor
+    except Exception:
+        return None
 
 
 def add_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "expanded") -> None:

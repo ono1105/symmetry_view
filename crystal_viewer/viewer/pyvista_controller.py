@@ -34,6 +34,7 @@ from crystal_viewer.viewer.operation_labels import (
 )
 from crystal_viewer.viewer.render_state import pop_render_state_snapshot
 from crystal_viewer.viewer.scene_rendering import (
+    add_atom_legend,
     add_orientation_axes,
     add_unit_cell,
     setup_viewer_lighting,
@@ -90,6 +91,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_gif_3view_request_id: int | None = None
         self.last_custom_op_check_id: object = None
         self.custom_check_actors: list = []
+        self.legend_actor = None
         self.custom_view_direction_cart: np.ndarray | None = None
         self.custom_focus_cart: np.ndarray | None = None
         self.custom_speed_multiplier: float = 1.0
@@ -128,7 +130,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         atom_hidden = snapshot.atom_hidden
         display_mode = snapshot.display_mode
         active_mode = snapshot.active_mode
-        background_mode = "dark" if snapshot.background_mode == "dark" else "light"
+        background_mode = "light" if snapshot.background_mode == "light" else "dark"
 
         if snapshot.reload_request_id is not None and snapshot.reload_request_id != self.last_reload_request_id:
             self.reload_from_session(
@@ -150,6 +152,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if background_mode != self.last_background_mode:
             self.background_mode = background_mode
             self.plotter.set_background(viewer_background_color(background_mode))
+            self.update_atom_legend()
             self.last_background_mode = background_mode
             should_update_status = True
             should_render = True
@@ -179,6 +182,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 self.apply_atom_colors()
             self.last_element_colors = dict(element_colors)
             self.last_atom_colors = dict(atom_colors)
+            self.update_atom_legend()
             should_render = True
 
         if element_hidden != self.last_element_hidden or atom_hidden != self.last_atom_hidden:
@@ -454,11 +458,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.sphere_mesh_cache = {}
         self.paths = {}
         self.status_actor = None
+        self.legend_actor = None
 
         self.plotter.clear()
         if self.debug_timer:
             print(f"[viewer] reload clear {time.monotonic() - debug_start:.3f}s", flush=True)
-        self.background_mode = "dark" if self.shared_state.get("background_mode") == "dark" else "light"
+        self.background_mode = "light" if self.shared_state.get("background_mode") == "light" else "dark"
         setup_viewer_lighting(self.plotter, background_mode=self.background_mode)
         self.display_mode = ""
         self.rebuild_display_atoms(display_mode)
@@ -467,6 +472,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if self.render_data.get("unit_cell"):
             add_unit_cell(self.plotter, self.render_data["unit_cell"])
         add_orientation_axes(self.plotter, unit_cell=bool(self.render_data.get("unit_cell")))
+        self.update_atom_legend()
         if self.debug_timer:
             print(f"[viewer] reload axes {time.monotonic() - debug_start:.3f}s", flush=True)
         self.set_operation_index(operation_index)
@@ -514,6 +520,19 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 actor.GetProperty().SetColor(*color_to_rgb(color))
             except Exception:
                 pass
+
+    def update_atom_legend(self) -> None:
+        if self.legend_actor is not None:
+            try:
+                self.plotter.remove_actor(self.legend_actor)
+            except Exception:
+                pass
+        self.legend_actor = add_atom_legend(
+            self.plotter,
+            self.render_data,
+            element_colors=getattr(self, "element_colors", {}),
+            background_mode=getattr(self, "background_mode", "dark"),
+        )
 
     def use_glyph_atom_rendering(self) -> bool:
         return not bool(getattr(self, "atom_colors", {}))

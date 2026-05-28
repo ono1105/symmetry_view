@@ -48,6 +48,7 @@ from crystal_viewer.viewer.display_atoms import display_atom_instances
 from crystal_viewer.viewer.glyph_atoms import build_element_glyph_mesh, update_element_glyph_instance
 from crystal_viewer.viewer.operation_lookup import selected_mapping
 from crystal_viewer.viewer.scene_rendering import (
+    add_atom_legend,
     add_orientation_axes,
     add_unit_cell,
     setup_viewer_lighting,
@@ -91,7 +92,8 @@ class NativePyVistaViewer:
         self.speed = 1.0
         self.timer_interval_ms = 33
         self.status_actor = None
-        self.background_mode = "light"
+        self.legend_actor = None
+        self.background_mode = "dark"
 
         self.plotter = pv.Plotter()
         setup_viewer_lighting(self.plotter, background_mode=self.background_mode)
@@ -101,6 +103,11 @@ class NativePyVistaViewer:
         if self.render_data.get("unit_cell"):
             add_unit_cell(self.plotter, self.render_data["unit_cell"])
         add_orientation_axes(self.plotter, unit_cell=bool(self.render_data.get("unit_cell")))
+        self.legend_actor = add_atom_legend(
+            self.plotter,
+            self.render_data,
+            background_mode=self.background_mode,
+        )
         self.plotter.reset_camera()
 
         self.add_controls()

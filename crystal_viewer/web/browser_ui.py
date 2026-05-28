@@ -799,8 +799,8 @@ HTML = """<!doctype html>
         <div class="camera-block">
           <label>Background</label>
           <div class="button-row flush" id="background-controls">
-            <button class="secondary background-button selected" data-background-mode="light">White</button>
-            <button class="secondary background-button" data-background-mode="dark">Black</button>
+            <button class="secondary background-button" data-background-mode="light">White</button>
+            <button class="secondary background-button selected" data-background-mode="dark">Black</button>
           </div>
         </div>
         <div class="camera-block">
@@ -1686,7 +1686,7 @@ function syncProjectionButtons() {
 }
 
 function syncBackgroundButtons() {
-  const backgroundMode = state.background_mode || "light";
+  const backgroundMode = state.background_mode || "dark";
   for (const button of document.querySelectorAll(".background-button")) {
     button.classList.toggle("selected", button.dataset.backgroundMode === backgroundMode);
   }

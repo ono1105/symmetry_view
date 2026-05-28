@@ -41,6 +41,11 @@ class RenderStateTest(unittest.TestCase):
         self.assertEqual(state["display_mode"], "expanded_quarter")
         self.assertEqual(state["reload_request_id"], 7)
 
+    def test_initial_render_state_defaults_to_dark_background(self):
+        state = initial_render_state(minimal_payload(), initial_operation=None, display_mode="source")
+
+        self.assertEqual(state["background_mode"], "dark")
+
     def test_apply_render_state_update_ignores_unknown_keys(self):
         state = initial_render_state(minimal_payload(), initial_operation=None, display_mode="source")
 
