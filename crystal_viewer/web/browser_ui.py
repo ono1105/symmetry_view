@@ -797,6 +797,13 @@ HTML = """<!doctype html>
           </div>
         </div>
         <div class="camera-block">
+          <label>Background</label>
+          <div class="button-row flush" id="background-controls">
+            <button class="secondary background-button selected" data-background-mode="light">White</button>
+            <button class="secondary background-button" data-background-mode="dark">Black</button>
+          </div>
+        </div>
+        <div class="camera-block">
           <div class="button-row flush">
             <button id="view-direction" class="secondary">View along direction</button>
             <button id="reset-view" class="secondary">Reset view center</button>
@@ -1678,6 +1685,13 @@ function syncProjectionButtons() {
   }
 }
 
+function syncBackgroundButtons() {
+  const backgroundMode = state.background_mode || "light";
+  for (const button of document.querySelectorAll(".background-button")) {
+    button.classList.toggle("selected", button.dataset.backgroundMode === backgroundMode);
+  }
+}
+
 function syncImproperModeControl() {
   document.getElementById("improper-mode").value = state.improper_mode || "auto";
 }
@@ -1812,6 +1826,7 @@ async function postState(update) {
   syncSpeedButtons();
   syncDisplayButtons();
   syncProjectionButtons();
+  syncBackgroundButtons();
   syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
@@ -1967,6 +1982,7 @@ async function applyLoadedStructure(result, fallbackError, examplePath = "", con
   syncSpeedButtons();
   syncDisplayButtons();
   syncProjectionButtons();
+  syncBackgroundButtons();
   syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
@@ -2011,6 +2027,7 @@ async function refreshState() {
     syncSpeedButtons();
     syncDisplayButtons();
     syncProjectionButtons();
+    syncBackgroundButtons();
     syncImproperModeControl();
     syncAtomModeButtons();
     syncPlayToggleButton();
@@ -2098,6 +2115,12 @@ for (const button of document.querySelectorAll(".display-button")) {
 for (const button of document.querySelectorAll(".projection-button")) {
   button.addEventListener("click", () => postState({
     projection_mode: button.dataset.projectionMode,
+    playing: false,
+  }));
+}
+for (const button of document.querySelectorAll(".background-button")) {
+  button.addEventListener("click", () => postState({
+    background_mode: button.dataset.backgroundMode,
     playing: false,
   }));
 }
@@ -2394,6 +2417,7 @@ async function boot() {
   syncSpeedButtons();
   syncDisplayButtons();
   syncProjectionButtons();
+  syncBackgroundButtons();
   syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();

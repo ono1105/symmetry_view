@@ -47,11 +47,13 @@ from crystal_viewer.viewer.cli_helpers import (
 from crystal_viewer.viewer.display_atoms import display_atom_instances
 from crystal_viewer.viewer.glyph_atoms import build_element_glyph_mesh, update_element_glyph_instance
 from crystal_viewer.viewer.operation_lookup import selected_mapping
-from crystal_viewer.viewer.scene_rendering import add_orientation_axes, add_unit_cell, setup_viewer_lighting
+from crystal_viewer.viewer.scene_rendering import (
+    add_orientation_axes,
+    add_unit_cell,
+    setup_viewer_lighting,
+    viewer_text_color,
+)
 from crystal_viewer.viewer.symmetry_elements import add_symmetry_elements
-
-
-VIEWER_TEXT_COLOR = "#111827"
 
 
 class NativePyVistaViewer:
@@ -89,9 +91,10 @@ class NativePyVistaViewer:
         self.speed = 1.0
         self.timer_interval_ms = 33
         self.status_actor = None
+        self.background_mode = "light"
 
         self.plotter = pv.Plotter()
-        setup_viewer_lighting(self.plotter)
+        setup_viewer_lighting(self.plotter, background_mode=self.background_mode)
 
     def show(self) -> None:
         self.rebuild_display_atoms(self.display_mode)
@@ -522,7 +525,7 @@ class NativePyVistaViewer:
             text,
             position="upper_left",
             font_size=9,
-            color=VIEWER_TEXT_COLOR,
+            color=viewer_text_color(getattr(self, "background_mode", "light")),
         )
 
 

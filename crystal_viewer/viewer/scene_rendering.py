@@ -10,14 +10,25 @@ from crystal_viewer.viewer.glyph_atoms import build_element_glyph_preview
 from crystal_viewer.viewer.operation_lookup import selected_mapping
 
 
-VIEWER_BACKGROUND_COLOR = "#ffffff"
+VIEWER_LIGHT_BACKGROUND_COLOR = "#ffffff"
+VIEWER_DARK_BACKGROUND_COLOR = "#101216"
+VIEWER_LIGHT_TEXT_COLOR = "#111827"
+VIEWER_DARK_TEXT_COLOR = "#eef2f7"
 AXIS_A_COLOR = "#ff0000"
 AXIS_B_COLOR = "#00b000"
 AXIS_C_COLOR = "#2468ff"
 
 
-def setup_viewer_lighting(plotter: pv.Plotter, *, background: str = VIEWER_BACKGROUND_COLOR) -> None:
-    plotter.set_background(background)
+def viewer_background_color(background_mode: str) -> str:
+    return VIEWER_DARK_BACKGROUND_COLOR if background_mode == "dark" else VIEWER_LIGHT_BACKGROUND_COLOR
+
+
+def viewer_text_color(background_mode: str) -> str:
+    return VIEWER_DARK_TEXT_COLOR if background_mode == "dark" else VIEWER_LIGHT_TEXT_COLOR
+
+
+def setup_viewer_lighting(plotter: pv.Plotter, *, background_mode: str = "light") -> None:
+    plotter.set_background(viewer_background_color(background_mode))
     try:
         plotter.remove_all_lights()
     except Exception:

@@ -518,6 +518,7 @@ def make_handler(
                 preserved = {
                     "speed": shared_state.get("speed", 1.0),
                     "projection_mode": shared_state.get("projection_mode", "perspective"),
+                    "background_mode": shared_state.get("background_mode", "light"),
                     "improper_mode": shared_state.get("improper_mode", "auto"),
                     "display_mode": shared_state.get("display_mode", default_display_mode),
                     "reload_request_id": shared_state.get("reload_request_id"),

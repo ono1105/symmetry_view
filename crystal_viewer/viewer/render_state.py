@@ -18,6 +18,7 @@ STATE_UPDATE_KEYS = frozenset(
         "atom_hidden",
         "speed",
         "projection_mode",
+        "background_mode",
         "improper_mode",
         "display_mode",
         "active_mode",
@@ -52,6 +53,7 @@ class RenderStateSnapshot:
     atom_hidden: dict[str, bool]
     speed: float
     projection_mode: str
+    background_mode: str
     improper_mode: str
     display_mode: str
     active_mode: str
@@ -109,6 +111,7 @@ def initial_render_state(
         "atom_hidden": {},
         "speed": float(preserved.get("speed", 1.0)),
         "projection_mode": preserved.get("projection_mode", "perspective"),
+        "background_mode": preserved.get("background_mode", "light"),
         "improper_mode": preserved.get("improper_mode", "auto"),
         "display_mode": preserved.get("display_mode", display_mode),
         "active_mode": "standard",
@@ -155,6 +158,7 @@ def pop_render_state_snapshot(state: dict) -> RenderStateSnapshot:
         atom_hidden=dict(state.get("atom_hidden", {})),
         speed=float(state.get("speed", 1.0)),
         projection_mode=str(state.get("projection_mode", "perspective")),
+        background_mode=str(state.get("background_mode", "light")),
         improper_mode=str(state.get("improper_mode", "auto")),
         display_mode=str(state.get("display_mode", "")),
         active_mode=str(state.get("active_mode", "standard")),

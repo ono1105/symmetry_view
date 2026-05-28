@@ -33,7 +33,12 @@ from crystal_viewer.viewer.operation_labels import (
     visual_translation_direction_cart,
 )
 from crystal_viewer.viewer.render_state import pop_render_state_snapshot
-from crystal_viewer.viewer.scene_rendering import add_orientation_axes, add_unit_cell, setup_viewer_lighting
+from crystal_viewer.viewer.scene_rendering import (
+    add_orientation_axes,
+    add_unit_cell,
+    setup_viewer_lighting,
+    viewer_background_color,
+)
 from crystal_viewer.viewer.symmetry_elements import (
     add_symmetry_element_actors,
     add_symmetry_elements,
@@ -72,6 +77,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_atom_hidden: dict[str, bool] | None = None
         self.last_display_mode: str | None = self.display_mode
         self.last_projection_mode: str | None = None
+        self.last_background_mode: str | None = None
         self.last_improper_mode: str | None = None
         self.improper_mode = str(shared_state.get("improper_mode", "auto"))
         self.last_reload_request_id: int | None = shared_state.get("reload_request_id")
@@ -122,6 +128,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         atom_hidden = snapshot.atom_hidden
         display_mode = snapshot.display_mode
         active_mode = snapshot.active_mode
+        background_mode = "dark" if snapshot.background_mode == "dark" else "light"
 
         if snapshot.reload_request_id is not None and snapshot.reload_request_id != self.last_reload_request_id:
             self.reload_from_session(
@@ -136,7 +143,15 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.last_selected_atoms = snapshot.selected_atoms
             self.last_display_mode = snapshot.display_mode
             self.last_active_mode = snapshot.active_mode
+            self.last_background_mode = background_mode
             self.last_custom_op_check_id = None
+            should_render = True
+
+        if background_mode != self.last_background_mode:
+            self.background_mode = background_mode
+            self.plotter.set_background(viewer_background_color(background_mode))
+            self.last_background_mode = background_mode
+            should_update_status = True
             should_render = True
 
         projection_mode = "orthographic" if snapshot.projection_mode == "orthographic" else "perspective"
@@ -443,7 +458,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.clear()
         if self.debug_timer:
             print(f"[viewer] reload clear {time.monotonic() - debug_start:.3f}s", flush=True)
-        setup_viewer_lighting(self.plotter)
+        self.background_mode = "dark" if self.shared_state.get("background_mode") == "dark" else "light"
+        setup_viewer_lighting(self.plotter, background_mode=self.background_mode)
         self.display_mode = ""
         self.rebuild_display_atoms(display_mode)
         if self.debug_timer:
