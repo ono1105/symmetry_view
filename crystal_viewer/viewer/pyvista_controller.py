@@ -33,7 +33,7 @@ from crystal_viewer.viewer.operation_labels import (
     visual_translation_direction_cart,
 )
 from crystal_viewer.viewer.render_state import pop_render_state_snapshot
-from crystal_viewer.viewer.scene_rendering import add_unit_cell
+from crystal_viewer.viewer.scene_rendering import add_unit_cell, setup_viewer_lighting
 from crystal_viewer.viewer.symmetry_elements import (
     add_symmetry_element_actors,
     add_symmetry_elements,
@@ -443,7 +443,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.clear()
         if self.debug_timer:
             print(f"[viewer] reload clear {time.monotonic() - debug_start:.3f}s", flush=True)
-        self.plotter.set_background("#ffffff")
+        setup_viewer_lighting(self.plotter)
         self.display_mode = ""
         self.rebuild_display_atoms(display_mode)
         if self.debug_timer:

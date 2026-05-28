@@ -113,11 +113,11 @@
   },
   "atom_mesh_style": {
     "smooth_shading": true,
-    "lighting": false,
-    "ambient": 0.35,
-    "diffuse": 0.65,
-    "specular": 0.12,
-    "specular_power": 18
+    "lighting": true,
+    "ambient": 0.22,
+    "diffuse": 0.78,
+    "specular": 0.24,
+    "specular_power": 28
   },
   "highlight_radius_scale": 0.96
 }

@@ -10,6 +10,36 @@ from crystal_viewer.viewer.glyph_atoms import build_element_glyph_preview
 from crystal_viewer.viewer.operation_lookup import selected_mapping
 
 
+VIEWER_BACKGROUND_COLOR = "#ffffff"
+
+
+def setup_viewer_lighting(plotter: pv.Plotter, *, background: str = VIEWER_BACKGROUND_COLOR) -> None:
+    plotter.set_background(background)
+    try:
+        plotter.remove_all_lights()
+    except Exception:
+        pass
+    try:
+        plotter.add_light(
+            pv.Light(
+                position=(8.0, -10.0, 12.0),
+                focal_point=(0.0, 0.0, 0.0),
+                color="#ffffff",
+                intensity=0.85,
+                positional=True,
+                cone_angle=55.0,
+                exponent=1.5,
+            )
+        )
+        plotter.add_light(pv.Light(light_type="camera light", intensity=0.22))
+    except Exception:
+        pass
+    try:
+        plotter.enable_shadows()
+    except Exception:
+        pass
+
+
 def add_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "expanded") -> None:
     for item in display_atom_instances(render_data, display_mode=display_mode):
         atom = item["atom"]

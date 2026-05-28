@@ -374,19 +374,18 @@ HTML = """<!doctype html>
       border-color: #29313c;
     }
     .element-color-list {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+      display: flex;
+      flex-wrap: wrap;
       gap: 6px;
       margin-bottom: 12px;
     }
     .element-color-item {
       display: grid;
-      grid-template-columns: auto auto minmax(0, 1fr);
+      grid-template-columns: auto auto auto;
       gap: 6px;
       align-items: center;
       color: #cbd5e1;
       font-size: 12px;
-      min-width: 0;
     }
     .element-color-item.hidden {
       opacity: 0.45;
@@ -397,24 +396,6 @@ HTML = """<!doctype html>
       padding: 0;
       border: 0;
       background: transparent;
-    }
-    .element-legend-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      min-width: 0;
-      white-space: nowrap;
-    }
-    .element-legend-sphere {
-      width: 22px;
-      height: 22px;
-      border-radius: 999px;
-      box-shadow: inset -5px -6px 8px rgba(0, 0, 0, 0.32), inset 4px 4px 7px rgba(255, 255, 255, 0.65);
-      flex: 0 0 auto;
-    }
-    .element-legend-text {
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
     .check-row {
       display: flex;
@@ -1556,7 +1537,6 @@ function renderElementColorControls() {
     label.className = "element-color-item";
     const visible = !elementHidden[element];
     if (!visible) label.classList.add("hidden");
-    const color = normalizeColor(elementColors[element] || (sample && sample.default_color));
     const visibleButton = visibilityButton(visible, `${visible ? "Hide" : "Show"} ${element}`, () => {
       const next = Object.assign({}, state.element_hidden || {});
       if (visible) next[element] = true;
@@ -1565,26 +1545,18 @@ function renderElementColorControls() {
     });
     const input = document.createElement("input");
     input.type = "color";
-    input.value = color;
+    input.value = normalizeColor(elementColors[element] || (sample && sample.default_color));
     input.title = `Color for ${element}`;
     input.addEventListener("change", () => {
       const next = Object.assign({}, state.element_colors || {});
       next[element] = input.value;
       postState({element_colors: next});
     });
-    const legend = document.createElement("span");
-    legend.className = "element-legend-label";
-    const sphere = document.createElement("span");
-    sphere.className = "element-legend-sphere";
-    sphere.style.background = `radial-gradient(circle at 32% 28%, #ffffff 0%, ${color} 28%, ${color} 62%, rgba(0,0,0,0.38) 100%)`;
     const span = document.createElement("span");
-    span.className = "element-legend-text";
     span.textContent = element;
-    legend.appendChild(sphere);
-    legend.appendChild(span);
     label.appendChild(visibleButton);
     label.appendChild(input);
-    label.appendChild(legend);
+    label.appendChild(span);
     root.appendChild(label);
   }
 }

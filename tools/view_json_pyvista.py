@@ -28,6 +28,7 @@ from crystal_viewer.viewer.scene_rendering import (
     add_displacements,
     add_glyph_atoms,
     add_unit_cell,
+    setup_viewer_lighting,
 )
 from crystal_viewer.viewer.symmetry_elements import (
     add_symmetry_elements,
@@ -128,7 +129,7 @@ def main() -> int:
         or args.screenshot is not None
         or args.animation_output is not None
     )
-    plotter.set_background("#ffffff")
+    setup_viewer_lighting(plotter)
 
     animated_atoms = None
     if args.animate and not args.no_atoms:
