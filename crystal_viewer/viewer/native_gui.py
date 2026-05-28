@@ -532,7 +532,7 @@ class NativePyVistaViewer:
             text,
             position="upper_left",
             font_size=9,
-            color=viewer_text_color(getattr(self, "background_mode", "light")),
+            color=viewer_text_color(getattr(self, "background_mode", "dark")),
         )
 
 
