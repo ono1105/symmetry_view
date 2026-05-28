@@ -29,6 +29,7 @@ def animation_paths(
     selected_atoms: tuple[int, ...] = (),
     improper_mode: str = "auto",
     display_mode: str = "source",
+    cell_origin_mode: str = "center",
 ) -> dict[int, dict]:
     atoms_by_index = {atom["index"]: atom for atom in render_data["atoms"]}
     axis, plane, center, reference_entry, shared_shift, shared_angle = select_animation_context(
@@ -50,6 +51,7 @@ def animation_paths(
         plane,
         center,
         display_mode,
+        cell_origin_mode,
     )
 
     translation_override = shared_step_translation(
@@ -108,6 +110,7 @@ def display_equivalent_operation_context(
     plane: dict | None,
     center: dict | None,
     display_mode: str,
+    cell_origin_mode: str = "center",
 ) -> tuple[dict, dict | None, dict | None, dict | None]:
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
@@ -118,7 +121,7 @@ def display_equivalent_operation_context(
         return operation, axis, plane, center
 
     anchor = np.asarray(anchor, dtype=float)
-    displayed_anchor = display_point_cart(render_data, anchor, display_mode)
+    displayed_anchor = display_point_cart(render_data, anchor, display_mode, cell_origin_mode)
     shift = displayed_anchor - anchor
     if np.linalg.norm(shift) < 1e-10:
         return operation, axis, plane, center

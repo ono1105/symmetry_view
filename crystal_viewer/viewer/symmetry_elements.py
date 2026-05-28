@@ -27,6 +27,7 @@ def add_symmetry_elements(
     operation_index: int | None,
     element_index: int | None = None,
     display_mode: str = "source",
+    cell_origin_mode: str = "center",
     improper_mode: str = "auto",
 ) -> list:
     axes, planes, centers = display_symmetry_elements(
@@ -36,7 +37,15 @@ def add_symmetry_elements(
         element_index,
         improper_mode=improper_mode,
     )
-    return add_symmetry_element_actors(plotter, render_data, axes, planes, centers, display_mode=display_mode)
+    return add_symmetry_element_actors(
+        plotter,
+        render_data,
+        axes,
+        planes,
+        centers,
+        display_mode=display_mode,
+        cell_origin_mode=cell_origin_mode,
+    )
 
 
 def add_symmetry_element_actors(
@@ -47,20 +56,21 @@ def add_symmetry_element_actors(
     centers: list[dict],
     *,
     display_mode: str = "source",
+    cell_origin_mode: str = "center",
 ) -> list:
     actors = []
-    span = display_scene_span(render_data, display_mode)
+    span = display_scene_span(render_data, display_mode, cell_origin_mode)
     axis_length = max(span * 0.75, 1.0)
     plane_scale = max(span * 0.45, 0.8)
 
     for axis in axes:
-        point = display_point_cart(render_data, axis["point_cart"], display_mode)
+        point = display_point_cart(render_data, axis["point_cart"], display_mode, cell_origin_mode)
         direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
         line = pv.Line(point - axis_length * direction, point + axis_length * direction)
         actors.append(plotter.add_mesh(line, color="#58d68d", line_width=6))
 
     for plane in planes:
-        point = display_point_cart(render_data, plane["point_cart"], display_mode)
+        point = display_point_cart(render_data, plane["point_cart"], display_mode, cell_origin_mode)
         basis1 = normalize(np.asarray(plane["basis1_cart"], dtype=float)) * plane_scale
         basis2 = normalize(np.asarray(plane["basis2_cart"], dtype=float)) * plane_scale
         points = np.array(
@@ -84,7 +94,7 @@ def add_symmetry_element_actors(
         )
 
     for center in centers:
-        point = display_point_cart(render_data, center["point_cart"], display_mode)
+        point = display_point_cart(render_data, center["point_cart"], display_mode, cell_origin_mode)
         cube = pv.Cube(
             center=point,
             x_length=max(span * 0.055, 0.12),

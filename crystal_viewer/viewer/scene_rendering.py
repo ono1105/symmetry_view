@@ -5,7 +5,7 @@ import pyvista as pv
 
 from crystal_viewer.viewer.atom_style import ATOM_MESH_STYLE, atom_color, display_atom_radius
 from crystal_viewer.viewer.atom_instances import element_instance_batches
-from crystal_viewer.viewer.display_atoms import display_atom_instances, scene_span
+from crystal_viewer.viewer.display_atoms import display_atom_instances, display_fractional_bounds, scene_span
 from crystal_viewer.viewer.glyph_atoms import build_element_glyph_preview
 from crystal_viewer.viewer.operation_lookup import selected_mapping
 
@@ -125,8 +125,14 @@ def add_atom_legend(
         return None
 
 
-def add_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "expanded") -> None:
-    for item in display_atom_instances(render_data, display_mode=display_mode):
+def add_atoms(
+    plotter: pv.Plotter,
+    render_data: dict,
+    *,
+    display_mode: str = "expanded",
+    cell_origin_mode: str = "center",
+) -> None:
+    for item in display_atom_instances(render_data, display_mode=display_mode, cell_origin_mode=cell_origin_mode):
         atom = item["atom"]
         center = item["cart"]
         radius = display_atom_radius(atom, render_data)
@@ -140,8 +146,14 @@ def add_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "ex
         plotter.add_mesh(sphere, color=color, **ATOM_MESH_STYLE)
 
 
-def add_glyph_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "expanded") -> None:
-    for batch in element_instance_batches(render_data, display_mode=display_mode):
+def add_glyph_atoms(
+    plotter: pv.Plotter,
+    render_data: dict,
+    *,
+    display_mode: str = "expanded",
+    cell_origin_mode: str = "center",
+) -> None:
+    for batch in element_instance_batches(render_data, display_mode=display_mode, cell_origin_mode=cell_origin_mode):
         preview = build_element_glyph_preview(batch, render_data)
         color = atom_color({"element": batch.element, "atomic_number": batch.atomic_number})
         plotter.add_mesh(preview.glyph_mesh, color=color, **ATOM_MESH_STYLE)
@@ -152,12 +164,13 @@ def add_animated_atoms(
     render_data: dict,
     *,
     display_mode: str = "expanded",
+    cell_origin_mode: str = "center",
     theta_resolution: int = 16,
     phi_resolution: int = 10,
     smooth_shading: bool = True,
 ) -> list[dict]:
     animated = []
-    for item in display_atom_instances(render_data, display_mode=display_mode):
+    for item in display_atom_instances(render_data, display_mode=display_mode, cell_origin_mode=cell_origin_mode):
         atom = item["atom"]
         center = item["cart"]
         radius = display_atom_radius(atom, render_data)
@@ -187,10 +200,11 @@ def add_animated_atoms(
     return animated
 
 
-def add_unit_cell(plotter: pv.Plotter, unit_cell: dict) -> None:
+def add_unit_cell(plotter: pv.Plotter, unit_cell: dict, *, display_mode: str = "source", cell_origin_mode: str = "center") -> None:
     vertices = np.asarray(unit_cell["vertices_cart"], dtype=float)
     lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    vertices = vertices - (np.asarray([0.5, 0.5, 0.5], dtype=float) @ lattice)
+    lower, _upper = display_fractional_bounds(display_mode, cell_origin_mode)
+    vertices = vertices + (np.asarray([lower, lower, lower], dtype=float) @ lattice)
     edge_colors = {
         (0, 1): AXIS_A_COLOR,
         (2, 4): AXIS_A_COLOR,

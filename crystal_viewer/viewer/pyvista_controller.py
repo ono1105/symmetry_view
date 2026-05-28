@@ -19,7 +19,7 @@ from crystal_viewer.viewer.animation_path import build_operation_path
 from crystal_viewer.viewer.atom_style import HIGHLIGHT_RADIUS_SCALE, atom_color, color_to_rgb
 from crystal_viewer.viewer.display_atoms import (
     display_atom_instances,
-    display_mode_margin,
+    display_fractional_bounds,
     display_scene_center,
     display_scene_span,
 )
@@ -77,6 +77,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_element_hidden: dict[str, bool] | None = None
         self.last_atom_hidden: dict[str, bool] | None = None
         self.last_display_mode: str | None = self.display_mode
+        self.last_cell_origin_mode: str | None = self.cell_origin_mode
         self.last_projection_mode: str | None = None
         self.last_background_mode: str | None = None
         self.last_legend_visible: bool | None = None
@@ -130,6 +131,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         element_hidden = snapshot.element_hidden
         atom_hidden = snapshot.atom_hidden
         display_mode = snapshot.display_mode
+        cell_origin_mode = "corner" if snapshot.cell_origin_mode == "corner" else "center"
         active_mode = snapshot.active_mode
         background_mode = "light" if snapshot.background_mode == "light" else "dark"
         legend_visible = bool(snapshot.legend_visible)
@@ -146,10 +148,25 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.last_scope = snapshot.scope
             self.last_selected_atoms = snapshot.selected_atoms
             self.last_display_mode = snapshot.display_mode
+            self.last_cell_origin_mode = cell_origin_mode
             self.last_active_mode = snapshot.active_mode
             self.last_background_mode = background_mode
             self.last_legend_visible = legend_visible
             self.last_custom_op_check_id = None
+            should_render = True
+
+        if cell_origin_mode != self.last_cell_origin_mode:
+            self.reload_from_session(
+                display_mode=snapshot.display_mode,
+                operation_index=snapshot.operation_index,
+                scope=snapshot.scope,
+                selected_atoms=snapshot.selected_atoms,
+            )
+            self.last_cell_origin_mode = cell_origin_mode
+            self.last_operation_index = snapshot.operation_index
+            self.last_scope = snapshot.scope
+            self.last_selected_atoms = snapshot.selected_atoms
+            self.last_display_mode = snapshot.display_mode
             should_render = True
 
         if background_mode != self.last_background_mode:
@@ -406,6 +423,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 operation_index=operation_index,
                 element_index=None,
                 display_mode=self.display_mode,
+                cell_origin_mode=self.cell_origin_mode,
                 improper_mode=self.improper_mode,
             )
             self.element_actor_cache[cache_key] = actors
@@ -455,6 +473,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.scope = scope
         self.selected_atoms = selected_atoms
         self.display_mode = display_mode
+        self.cell_origin_mode = "corner" if self.shared_state.get("cell_origin_mode") == "corner" else "center"
 
         self.element_actors = []
         self.element_actor_cache = {}
@@ -478,7 +497,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if self.debug_timer:
             print(f"[viewer] reload atoms {time.monotonic() - debug_start:.3f}s", flush=True)
         if self.render_data.get("unit_cell"):
-            add_unit_cell(self.plotter, self.render_data["unit_cell"])
+            add_unit_cell(self.plotter, self.render_data["unit_cell"], cell_origin_mode=self.cell_origin_mode)
         add_orientation_axes(self.plotter, unit_cell=bool(self.render_data.get("unit_cell")))
         self.update_atom_legend(visible=bool(self.shared_state.get("legend_visible", False)))
         if self.debug_timer:
@@ -600,7 +619,15 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if direction is None:
             return None
         direction = normalize(direction)
-        center = operation_focus_point_cart(self.render_data, operation, axes, planes, centers, self.display_mode)
+        center = operation_focus_point_cart(
+            self.render_data,
+            operation,
+            axes,
+            planes,
+            centers,
+            self.display_mode,
+            self.cell_origin_mode,
+        )
         distance = self.camera_distance_for_view(center, direction)
         up = camera_up_vector(direction)
         return center, direction, up, distance
@@ -631,7 +658,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
     def camera_view_extent(self, center: np.ndarray, direction: np.ndarray) -> tuple[float, float]:
         points = self.camera_reference_points()
         if points.size == 0:
-            span = display_scene_span(self.render_data, self.display_mode)
+            span = display_scene_span(self.render_data, self.display_mode, self.cell_origin_mode)
             radius = max(span * 0.35, 1.0)
             return radius, span
 
@@ -643,7 +670,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         projected_radii = np.linalg.norm(projected, axis=1)
         full_radius = float(np.max(projected_radii)) if len(projected_radii) else 1.0
         robust_radius = float(np.percentile(projected_radii, 85)) if len(projected_radii) > 4 else full_radius
-        scene_span = display_scene_span(self.render_data, self.display_mode)
+        scene_span = display_scene_span(self.render_data, self.display_mode, self.cell_origin_mode)
 
         source_kind = str(self.render_data.get("metadata", {}).get("mode", "crystal"))
         if source_kind == "molecule":
@@ -659,16 +686,21 @@ class BrowserControlledViewer(NativePyVistaViewer):
     def camera_reference_points(self) -> np.ndarray:
         points = []
         try:
-            points.extend(item["cart"] for item in display_atom_instances(self.render_data, display_mode=self.display_mode))
+            points.extend(
+                item["cart"]
+                for item in display_atom_instances(
+                    self.render_data,
+                    display_mode=self.display_mode,
+                    cell_origin_mode=self.cell_origin_mode,
+                )
+            )
         except Exception:
             points.extend(np.asarray(atom["cart"], dtype=float) for atom in self.render_data.get("atoms", []))
 
         unit_cell = self.render_data.get("unit_cell")
         if unit_cell is not None:
             lattice = np.asarray(unit_cell["lattice"], dtype=float)
-            margin = display_mode_margin(self.display_mode)
-            lower = -0.5 - margin
-            upper = 0.5 + margin
+            lower, upper = display_fractional_bounds(self.display_mode, self.cell_origin_mode)
             corners = np.asarray(
                 [
                     [x, y, z]
@@ -721,7 +753,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.reset_camera_clipping_range()
 
     def display_center(self) -> np.ndarray:
-        return display_scene_center(self.render_data, self.display_mode)
+        return display_scene_center(self.render_data, self.display_mode, self.cell_origin_mode)
 
     def reset_view_center(self) -> None:
         self.set_camera_center(self.display_center())
@@ -754,8 +786,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.reset_camera_clipping_range()
 
     def recenter_camera_for_display_mode(self, old_display_mode: str, new_display_mode: str) -> None:
-        old_center = display_scene_center(self.render_data, old_display_mode)
-        new_center = display_scene_center(self.render_data, new_display_mode)
+        old_center = display_scene_center(self.render_data, old_display_mode, self.cell_origin_mode)
+        new_center = display_scene_center(self.render_data, new_display_mode, self.cell_origin_mode)
         shift = new_center - old_center
         if np.linalg.norm(shift) < 1e-10:
             return
@@ -942,6 +974,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             plane_dict,
             center_dict,
             self.display_mode,
+            self.cell_origin_mode,
         )
         path_matrix = np.asarray(fake_op["matrix_cart"], dtype=float)
         path_translation = np.asarray(fake_op["translation_cart"], dtype=float)
@@ -990,12 +1023,18 @@ class BrowserControlledViewer(NativePyVistaViewer):
                     planes,
                     centers,
                     display_mode=self.display_mode,
+                    cell_origin_mode=self.cell_origin_mode,
                 )
             )
         direction = result.get("view_direction_cart")
         if direction is not None:
             self.custom_view_direction_cart = np.asarray(direction, dtype=float)
-        self.custom_focus_cart = custom_focus_point_cart(result, self.render_data, self.display_mode)
+        self.custom_focus_cart = custom_focus_point_cart(
+            result,
+            self.render_data,
+            self.display_mode,
+            self.cell_origin_mode,
+        )
 
         if not result.get("unmapped"):
             return

@@ -837,6 +837,11 @@ HTML = """<!doctype html>
             <button class="secondary display-button" data-display-mode="expanded_0_75">±3/4</button>
             <button class="secondary display-button" data-display-mode="expanded_1_0">±1</button>
           </div>
+          <label>Unit cell origin</label>
+          <div class="button-row flush" id="cell-origin-controls">
+            <button class="secondary cell-origin-button selected" data-cell-origin-mode="center">Center</button>
+            <button class="secondary cell-origin-button" data-cell-origin-mode="corner">Corner</button>
+          </div>
         </div>
       </section>
       <section class="panel">
@@ -1687,6 +1692,13 @@ function syncDisplayButtons() {
   }
 }
 
+function syncCellOriginButtons() {
+  const cellOriginMode = state.cell_origin_mode || "center";
+  for (const button of document.querySelectorAll(".cell-origin-button")) {
+    button.classList.toggle("selected", button.dataset.cellOriginMode === cellOriginMode);
+  }
+}
+
 function syncProjectionButtons() {
   const projectionMode = state.projection_mode || "perspective";
   for (const button of document.querySelectorAll(".projection-button")) {
@@ -1841,6 +1853,7 @@ async function postState(update) {
   await refreshAtomMotion();
   syncSpeedButtons();
   syncDisplayButtons();
+  syncCellOriginButtons();
   syncProjectionButtons();
   syncBackgroundButtons();
   syncLegendButtons();
@@ -1998,6 +2011,7 @@ async function applyLoadedStructure(result, fallbackError, examplePath = "", con
   syncOperationSelection();
   syncSpeedButtons();
   syncDisplayButtons();
+  syncCellOriginButtons();
   syncProjectionButtons();
   syncBackgroundButtons();
   syncLegendButtons();
@@ -2044,6 +2058,7 @@ async function refreshState() {
     syncOperationSelection();
     syncSpeedButtons();
     syncDisplayButtons();
+    syncCellOriginButtons();
     syncProjectionButtons();
     syncBackgroundButtons();
     syncLegendButtons();
@@ -2127,6 +2142,13 @@ for (const button of document.querySelectorAll(".speed-button")) {
 for (const button of document.querySelectorAll(".display-button")) {
   button.addEventListener("click", () => postState({
     display_mode: button.dataset.displayMode,
+    playing: false,
+    reset: true,
+  }));
+}
+for (const button of document.querySelectorAll(".cell-origin-button")) {
+  button.addEventListener("click", () => postState({
+    cell_origin_mode: button.dataset.cellOriginMode,
     playing: false,
     reset: true,
   }));
@@ -2441,6 +2463,7 @@ async function boot() {
   renderElementColorControls();
   syncSpeedButtons();
   syncDisplayButtons();
+  syncCellOriginButtons();
   syncProjectionButtons();
   syncBackgroundButtons();
   syncLegendButtons();

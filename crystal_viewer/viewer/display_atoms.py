@@ -5,7 +5,23 @@ from itertools import product
 import numpy as np
 
 
-def display_atom_instances(render_data: dict, *, display_mode: str = "expanded") -> list[dict]:
+def normalized_cell_origin_mode(cell_origin_mode: str = "center") -> str:
+    return "corner" if cell_origin_mode == "corner" else "center"
+
+
+def display_fractional_bounds(display_mode: str = "source", cell_origin_mode: str = "center") -> tuple[float, float]:
+    margin = display_mode_margin(display_mode)
+    if normalized_cell_origin_mode(cell_origin_mode) == "corner":
+        return -margin, 1.0 + margin
+    return -0.5 - margin, 0.5 + margin
+
+
+def display_atom_instances(
+    render_data: dict,
+    *,
+    display_mode: str = "expanded",
+    cell_origin_mode: str = "center",
+) -> list[dict]:
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         return [
@@ -36,9 +52,13 @@ def display_atom_instances(render_data: dict, *, display_mode: str = "expanded")
             continue
 
         frac = np.asarray(frac, dtype=float)
-        for shift in display_fractional_shifts(frac, display_mode=display_mode):
+        for shift in display_fractional_shifts(
+            frac,
+            display_mode=display_mode,
+            cell_origin_mode=cell_origin_mode,
+        ):
             shift_cart = shift @ lattice
-            is_primary = is_primary_centered_image(frac, shift)
+            is_primary = is_primary_display_image(frac, shift, cell_origin_mode=cell_origin_mode)
             instances.append(
                 {
                     "atom": atom,
@@ -51,11 +71,15 @@ def display_atom_instances(render_data: dict, *, display_mode: str = "expanded")
     return instances
 
 
-def display_fractional_shifts(frac: np.ndarray, *, display_mode: str = "expanded") -> list[np.ndarray]:
+def display_fractional_shifts(
+    frac: np.ndarray,
+    *,
+    display_mode: str = "expanded",
+    cell_origin_mode: str = "center",
+) -> list[np.ndarray]:
     margin = display_mode_margin(display_mode)
     shifts = []
-    lower = -0.5 - margin
-    upper = 0.5 + margin
+    lower, upper = display_fractional_bounds(display_mode, cell_origin_mode)
     for shift in periodic_shifts(max(int(np.ceil(margin + 1.0)), 1)):
         image_frac = frac + shift
         if np.all(image_frac >= lower - 1e-9) and np.all(image_frac < upper - 1e-9):
@@ -63,9 +87,10 @@ def display_fractional_shifts(frac: np.ndarray, *, display_mode: str = "expanded
     return shifts
 
 
-def is_primary_centered_image(frac: np.ndarray, shift: np.ndarray) -> bool:
+def is_primary_display_image(frac: np.ndarray, shift: np.ndarray, *, cell_origin_mode: str = "center") -> bool:
     image_frac = np.asarray(frac, dtype=float) + np.asarray(shift, dtype=float)
-    return bool(np.all(image_frac >= -0.5 - 1e-9) and np.all(image_frac < 0.5 - 1e-9))
+    lower, upper = display_fractional_bounds("source", cell_origin_mode)
+    return bool(np.all(image_frac >= lower - 1e-9) and np.all(image_frac < upper - 1e-9))
 
 
 def periodic_shifts(limit: int = 1) -> np.ndarray:
@@ -99,21 +124,19 @@ def scene_span(render_data: dict) -> float:
     return float(span if span > 1e-9 else 1.0)
 
 
-def display_scene_span(render_data: dict, display_mode: str = "source") -> float:
+def display_scene_span(render_data: dict, display_mode: str = "source", cell_origin_mode: str = "center") -> float:
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         return scene_span(render_data)
-    margin = display_mode_margin(display_mode)
     lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    lower = -0.5 - margin
-    upper = 0.5 + margin
+    lower, upper = display_fractional_bounds(display_mode, cell_origin_mode)
     corners_frac = np.asarray(list(product((lower, upper), repeat=3)), dtype=float)
     corners_cart = corners_frac @ lattice
     span = np.linalg.norm(corners_cart.max(axis=0) - corners_cart.min(axis=0))
     return float(span if span > 1e-9 else scene_span(render_data))
 
 
-def display_scene_center(render_data: dict, display_mode: str = "source") -> np.ndarray:
+def display_scene_center(render_data: dict, display_mode: str = "source", cell_origin_mode: str = "center") -> np.ndarray:
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         atoms = render_data.get("atoms", [])
@@ -121,16 +144,28 @@ def display_scene_center(render_data: dict, display_mode: str = "source") -> np.
             points = np.asarray([atom["cart"] for atom in atoms], dtype=float)
             return np.mean(points, axis=0)
         return np.zeros(3)
+    if normalized_cell_origin_mode(cell_origin_mode) == "corner":
+        lattice = np.asarray(unit_cell["lattice"], dtype=float)
+        return np.asarray([0.5, 0.5, 0.5], dtype=float) @ lattice
     return np.zeros(3)
 
 
-def display_point_cart(render_data: dict, point_cart: list[float] | np.ndarray, display_mode: str) -> np.ndarray:
+def display_point_cart(
+    render_data: dict,
+    point_cart: list[float] | np.ndarray,
+    display_mode: str,
+    cell_origin_mode: str = "center",
+) -> np.ndarray:
     point = np.asarray(point_cart, dtype=float)
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         return point
     lattice = np.asarray(unit_cell["lattice"], dtype=float)
     frac = point @ np.linalg.inv(lattice)
-    wrapped = frac - np.round(frac)
-    wrapped = np.where(wrapped >= 0.5 - 1e-9, wrapped - 1.0, wrapped)
+    if normalized_cell_origin_mode(cell_origin_mode) == "corner":
+        wrapped = frac - np.floor(frac)
+        wrapped = np.where(wrapped >= 1.0 - 1e-9, wrapped - 1.0, wrapped)
+    else:
+        wrapped = frac - np.round(frac)
+        wrapped = np.where(wrapped >= 0.5 - 1e-9, wrapped - 1.0, wrapped)
     return wrapped @ lattice

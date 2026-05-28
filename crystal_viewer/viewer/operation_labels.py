@@ -261,23 +261,29 @@ def operation_focus_point_cart(
     planes: list[dict],
     centers: list[dict],
     display_mode: str,
+    cell_origin_mode: str = "center",
 ) -> np.ndarray:
     effective_axis = axes[0] if axes else effective_axis_from_operation(operation, centers)
     if effective_axis is not None:
-        return display_point_cart(render_data, effective_axis["point_cart"], display_mode)
+        return display_point_cart(render_data, effective_axis["point_cart"], display_mode, cell_origin_mode)
     if planes:
-        return display_point_cart(render_data, planes[0]["point_cart"], display_mode)
+        return display_point_cart(render_data, planes[0]["point_cart"], display_mode, cell_origin_mode)
     if centers:
-        return display_point_cart(render_data, centers[0]["point_cart"], display_mode)
-    return display_scene_center(render_data, display_mode)
+        return display_point_cart(render_data, centers[0]["point_cart"], display_mode, cell_origin_mode)
+    return display_scene_center(render_data, display_mode, cell_origin_mode)
 
 
-def custom_focus_point_cart(result: dict, render_data: dict, display_mode: str) -> np.ndarray | None:
+def custom_focus_point_cart(
+    result: dict,
+    render_data: dict,
+    display_mode: str,
+    cell_origin_mode: str = "center",
+) -> np.ndarray | None:
     elements = result.get("elements") or {}
     for key in ("axes", "planes", "centers"):
         items = elements.get(key) or []
         if items:
-            return display_point_cart(render_data, items[0]["point_cart"], display_mode)
+            return display_point_cart(render_data, items[0]["point_cart"], display_mode, cell_origin_mode)
     return None
 
 

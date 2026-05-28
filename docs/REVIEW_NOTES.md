@@ -3305,3 +3305,89 @@ _EXAMPLE_CATALOG_CACHE: dict[str, list[dict]] | None = None
 - `format_fraction(1.0) -> "0"` は周期座標の wrap 表示として意図的な面があり、現在の atom list では単独の frac 表示もなくしたため未変更。
 - `pop_render_state_snapshot()` の破壊的読み取りは一回読み切り state key の設計と一致しており、現状の呼び出しは `state_lock` 下に限定されるため未変更。
 - `_EXAMPLE_CATALOG_CACHE` はサーバ起動時のローカルカタログ固定として許容。example 変更後はサーバ再起動または `tools/regenerate_example_assets.py --clean` を使う運用に寄せる。
+
+---
+
+## 照明・背景・凡例まわりレビュー（Claude）（2026-05-28）
+
+対象コミット: `e17a8bf` → `2dd0c26` → `80e0fbb` → `c1b10f3` → `0cc5789`
+
+変更ファイル: `scene_rendering.py`, `atom_style.py`, `atom_defaults.json`, `pyvista_controller.py`, `native_gui.py`, `render_state.py`, `browser_ui.py`, `tests/test_render_state.py`, `tools/view_json_pyvista.py`, `tools/view_json_server.py`
+
+### バグ 1（クラッシュ）: `update_atom_legend(visible=...)` — TypeError
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py` 行 158, 164
+
+`BrowserControlledViewer.update_atom_legend()` は `visible` パラメータを受け付けない定義だが、`_on_timer_inner` 内で `self.update_atom_legend(visible=legend_visible)` と呼ばれている。
+
+```python
+# 定義 (line 532) — visible なし
+def update_atom_legend(self) -> None: ...
+
+# 呼び出し (lines 158, 164) — TypeError になる
+self.update_atom_legend(visible=legend_visible)
+```
+
+`on_timer` に外側の `try/except` がないため、ブラウザ UI から背景切り替えまたは凡例トグルを操作するたびにタイマーコールバック内で `TypeError: update_atom_legend() got an unexpected keyword argument 'visible'` が発生する。背景切り替えと凡例切り替えが両方ブロークン。
+
+**修正案:** `update_atom_legend(self, *, visible: bool = True)` のシグネチャにして、`visible=False` のときは legend actor を削除するだけで新たに追加しないようにする。
+
+### バグ 2（ロジック）: `legend_visible=False` が反映されない
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py` 行 532–543, `reload_from_session` 行 483
+
+`update_atom_legend()` の実装は常に凡例を追加する。バグ 1 が修正されても `visible=False` を渡しても凡例は削除されない。
+
+また `reload_from_session`（行 483）は `legend_visible` の状態を無視して `self.update_atom_legend()` を無条件呼び出しするため、ファイルリロード後は `legend_visible=False` でも常に凡例が表示される。
+
+デフォルトは `render_state.py` で `"legend_visible": False` なので、初回ロード時から凡例が意図せず表示される。
+
+### バグ 3（軽微）: F と N の色が同一
+
+**場所:** `crystal_viewer/viewer/atom_defaults.json` 行 17, 19
+
+```json
+"N": "#b0b9e6",
+"F": "#b0b9e6",   // N と同じ
+```
+
+`b453aa3`（VESTA-style atom colors 追加）時のコピペミスと思われる。F と N が視覚的に区別できない。VESTA の F は淡い黄緑系（JMol デフォルトは `#90e050`）が一般的。
+
+### 軽微な不整合: `native_gui.py` の `getattr` デフォルト値
+
+**場所:** `crystal_viewer/viewer/native_gui.py` 行 536
+
+```python
+color=viewer_text_color(getattr(self, "background_mode", "light"))
+```
+
+`__init__` では `self.background_mode = "dark"` と設定されており、フォールバック値 `"light"` と矛盾する。実行時に `background_mode` が未設定になることはないため実害なし。ただし仮にフォールバックが使われると暗い背景に薄いテキストが重なって見えなくなる。
+
+### 修正優先度まとめ
+
+| # | 場所 | 種類 | 優先度 |
+|---|------|------|--------|
+| 1 | `pyvista_controller.py:158,164` | クラッシュ (TypeError) | 高 |
+| 2 | `pyvista_controller.py:532`, `reload_from_session:483` | 凡例表示ロジック | 中 |
+| 3 | `atom_defaults.json` F の色 | 色の誤り | 低 |
+| 4 | `native_gui.py:536` getattr デフォルト | 軽微な不整合 | 低 |
+
+### 対応状況
+
+| # | 状況 | 対応コミット |
+|---|------|-------------|
+| 1 | 修正済み。`update_atom_legend(..., visible=...)` を受け付けるようにし、非表示時は actor を削除する。 | `193a284` |
+| 2 | 修正済み。`legend_visible=False` の初期状態では凡例を追加せず、reload 時も state を反映する。 | `193a284` |
+| 3 | 修正済み。F を `#90e050` に変更し、N と区別できるようにした。 | `34c36e3` |
+| 4 | 修正済み。`native_gui.py` の fallback を `"dark"` に変更した。 | `34c36e3` |
+
+### 正常な部分
+
+| 項目 | 評価 |
+|------|------|
+| `setup_viewer_lighting` のカメラ相対ライト設計 | headlight + 2方向のカメラライト構成。明るさ・角度とも妥当 ✓ |
+| `add_atom_legend` の高さ計算 | `min(max(0.06, 0.035*n + 0.035), 0.42)` — 要素数に比例して適切にスケール ✓ |
+| `render_state.py` の `background_mode`/`legend_visible` 初期値 | デフォルト `"dark"` / `False` で新しい見た目方針に整合 ✓ |
+| `atom_legend_entries` で `atom_colors` を無視 | 凡例は要素単位表示なので element_colors のみ使うのが正しい ✓ |
+| `ATOM_MESH_STYLE` の材質パラメータ | `ambient=0.56, diffuse=0.54, specular=0.42, specular_power=42` ← 反射感が出る設定として妥当 ✓ |
+| `view_json_pyvista.py` の `add_atom_legend` 追加 | `background_mode` デフォルト `"dark"` と `setup_viewer_lighting` のデフォルトが一致 ✓ |

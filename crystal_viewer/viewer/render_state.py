@@ -20,6 +20,7 @@ STATE_UPDATE_KEYS = frozenset(
         "projection_mode",
         "background_mode",
         "legend_visible",
+        "cell_origin_mode",
         "improper_mode",
         "display_mode",
         "active_mode",
@@ -56,6 +57,7 @@ class RenderStateSnapshot:
     projection_mode: str
     background_mode: str
     legend_visible: bool
+    cell_origin_mode: str
     improper_mode: str
     display_mode: str
     active_mode: str
@@ -115,6 +117,7 @@ def initial_render_state(
         "projection_mode": preserved.get("projection_mode", "perspective"),
         "background_mode": preserved.get("background_mode", "dark"),
         "legend_visible": bool(preserved.get("legend_visible", False)),
+        "cell_origin_mode": preserved.get("cell_origin_mode", "center"),
         "improper_mode": preserved.get("improper_mode", "auto"),
         "display_mode": preserved.get("display_mode", display_mode),
         "active_mode": "standard",
@@ -163,6 +166,7 @@ def pop_render_state_snapshot(state: dict) -> RenderStateSnapshot:
         projection_mode=str(state.get("projection_mode", "perspective")),
         background_mode=str(state.get("background_mode", "dark")),
         legend_visible=bool(state.get("legend_visible", False)),
+        cell_origin_mode=str(state.get("cell_origin_mode", "center")),
         improper_mode=str(state.get("improper_mode", "auto")),
         display_mode=str(state.get("display_mode", "")),
         active_mode=str(state.get("active_mode", "standard")),

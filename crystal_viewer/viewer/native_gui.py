@@ -94,6 +94,7 @@ class NativePyVistaViewer:
         self.status_actor = None
         self.legend_actor = None
         self.background_mode = "dark"
+        self.cell_origin_mode = "center"
 
         self.plotter = pv.Plotter()
         setup_viewer_lighting(self.plotter, background_mode=self.background_mode)
@@ -101,7 +102,7 @@ class NativePyVistaViewer:
     def show(self) -> None:
         self.rebuild_display_atoms(self.display_mode)
         if self.render_data.get("unit_cell"):
-            add_unit_cell(self.plotter, self.render_data["unit_cell"])
+            add_unit_cell(self.plotter, self.render_data["unit_cell"], cell_origin_mode=self.cell_origin_mode)
         add_orientation_axes(self.plotter, unit_cell=bool(self.render_data.get("unit_cell")))
         self.legend_actor = add_atom_legend(
             self.plotter,
@@ -198,6 +199,7 @@ class NativePyVistaViewer:
                 operation_index=operation_index,
                 element_index=None,
                 display_mode=self.display_mode,
+                cell_origin_mode=self.cell_origin_mode,
             )
         self.element_actors = self.element_actor_cache[operation_index]
         for actor in self.element_actors:
@@ -268,7 +270,11 @@ class NativePyVistaViewer:
             visible_items = self.ensure_glyph_display_atoms(self.display_mode)
         else:
             visible_items = []
-            for display_item in display_atom_instances(self.render_data, display_mode=self.display_mode):
+            for display_item in display_atom_instances(
+                self.render_data,
+                display_mode=self.display_mode,
+                cell_origin_mode=self.cell_origin_mode,
+            ):
                 if not self.display_atom_visible(display_item):
                     continue
                 item = self.ensure_display_atom(display_item)
@@ -353,6 +359,7 @@ class NativePyVistaViewer:
             for batch in element_instance_batches(
                 self.render_data,
                 display_mode=display_mode,
+                cell_origin_mode=self.cell_origin_mode,
                 item_filter=self.display_atom_visible,
             ):
                 glyph = build_element_glyph_mesh(batch, self.render_data)
@@ -450,6 +457,7 @@ class NativePyVistaViewer:
             selected_atoms=selected_atoms,
             improper_mode=getattr(self, "improper_mode", "auto"),
             display_mode=self.display_mode,
+            cell_origin_mode=self.cell_origin_mode,
         )
         if unit_cell_only:
             for path in self.paths.values():

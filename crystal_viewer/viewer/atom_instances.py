@@ -32,10 +32,15 @@ def element_instance_batches(
     render_data: dict,
     *,
     display_mode: str,
+    cell_origin_mode: str = "center",
     item_filter=None,
 ) -> tuple[ElementInstanceBatch, ...]:
     grouped: dict[str, list[dict]] = {}
-    for item in display_atom_instances(render_data, display_mode=display_mode):
+    for item in display_atom_instances(
+        render_data,
+        display_mode=display_mode,
+        cell_origin_mode=cell_origin_mode,
+    ):
         if item_filter is not None and not item_filter(item):
             continue
         atom = item["atom"]
