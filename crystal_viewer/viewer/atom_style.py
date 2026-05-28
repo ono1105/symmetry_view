@@ -123,10 +123,10 @@ _ELEMENT_RADIUS_CACHE: dict[int, float] = {}
 _BUILTIN_ATOM_MESH_STYLE = {
     "smooth_shading": True,
     "lighting": True,
-    "ambient": 0.52,
-    "diffuse": 0.58,
-    "specular": 0.2,
-    "specular_power": 24,
+    "ambient": 0.62,
+    "diffuse": 0.52,
+    "specular": 0.18,
+    "specular_power": 22,
 }
 
 _BUILTIN_HIGHLIGHT_RADIUS_SCALE = 0.96

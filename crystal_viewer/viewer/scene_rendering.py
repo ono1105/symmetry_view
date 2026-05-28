@@ -24,9 +24,9 @@ def setup_viewer_lighting(plotter: pv.Plotter, *, background: str = VIEWER_BACKG
             position=(8.0, -10.0, 12.0),
             focal_point=(0.0, 0.0, 0.0),
             color="#ffffff",
-            intensity=0.75,
+            intensity=0.88,
             positional=True,
-            cone_angle=60.0,
+            cone_angle=70.0,
             exponent=1.0,
         )
         try:
@@ -39,13 +39,23 @@ def setup_viewer_lighting(plotter: pv.Plotter, *, background: str = VIEWER_BACKG
                 position=(-7.0, 8.0, 9.0),
                 focal_point=(0.0, 0.0, 0.0),
                 color="#ffffff",
-                intensity=0.28,
+                intensity=0.42,
                 positional=True,
-                cone_angle=80.0,
+                cone_angle=95.0,
                 exponent=1.0,
             )
         )
-        plotter.add_light(pv.Light(light_type="camera light", intensity=0.55))
+        plotter.add_light(
+            pv.Light(
+                position=(-9.0, -6.0, -7.0),
+                focal_point=(0.0, 0.0, 0.0),
+                color="#ffffff",
+                intensity=0.24,
+                positional=True,
+                cone_angle=110.0,
+                exponent=1.0,
+            )
+        )
     except Exception:
         pass
     try:

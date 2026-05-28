@@ -114,10 +114,10 @@
   "atom_mesh_style": {
     "smooth_shading": true,
     "lighting": true,
-    "ambient": 0.52,
-    "diffuse": 0.58,
-    "specular": 0.2,
-    "specular_power": 24
+    "ambient": 0.62,
+    "diffuse": 0.52,
+    "specular": 0.18,
+    "specular_power": 22
   },
   "highlight_radius_scale": 0.96
 }
