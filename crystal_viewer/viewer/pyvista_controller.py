@@ -79,6 +79,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_display_mode: str | None = self.display_mode
         self.last_projection_mode: str | None = None
         self.last_background_mode: str | None = None
+        self.last_legend_visible: bool | None = None
         self.last_improper_mode: str | None = None
         self.improper_mode = str(shared_state.get("improper_mode", "auto"))
         self.last_reload_request_id: int | None = shared_state.get("reload_request_id")
@@ -131,6 +132,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         display_mode = snapshot.display_mode
         active_mode = snapshot.active_mode
         background_mode = "light" if snapshot.background_mode == "light" else "dark"
+        legend_visible = bool(snapshot.legend_visible)
 
         if snapshot.reload_request_id is not None and snapshot.reload_request_id != self.last_reload_request_id:
             self.reload_from_session(
@@ -146,15 +148,21 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.last_display_mode = snapshot.display_mode
             self.last_active_mode = snapshot.active_mode
             self.last_background_mode = background_mode
+            self.last_legend_visible = legend_visible
             self.last_custom_op_check_id = None
             should_render = True
 
         if background_mode != self.last_background_mode:
             self.background_mode = background_mode
             self.plotter.set_background(viewer_background_color(background_mode))
-            self.update_atom_legend()
+            self.update_atom_legend(visible=legend_visible)
             self.last_background_mode = background_mode
             should_update_status = True
+            should_render = True
+
+        if legend_visible != self.last_legend_visible:
+            self.update_atom_legend(visible=legend_visible)
+            self.last_legend_visible = legend_visible
             should_render = True
 
         projection_mode = "orthographic" if snapshot.projection_mode == "orthographic" else "perspective"
@@ -182,7 +190,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 self.apply_atom_colors()
             self.last_element_colors = dict(element_colors)
             self.last_atom_colors = dict(atom_colors)
-            self.update_atom_legend()
+            self.update_atom_legend(visible=legend_visible)
             should_render = True
 
         if element_hidden != self.last_element_hidden or atom_hidden != self.last_atom_hidden:
@@ -472,7 +480,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if self.render_data.get("unit_cell"):
             add_unit_cell(self.plotter, self.render_data["unit_cell"])
         add_orientation_axes(self.plotter, unit_cell=bool(self.render_data.get("unit_cell")))
-        self.update_atom_legend()
+        self.update_atom_legend(visible=bool(self.shared_state.get("legend_visible", False)))
         if self.debug_timer:
             print(f"[viewer] reload axes {time.monotonic() - debug_start:.3f}s", flush=True)
         self.set_operation_index(operation_index)
@@ -521,12 +529,17 @@ class BrowserControlledViewer(NativePyVistaViewer):
             except Exception:
                 pass
 
-    def update_atom_legend(self) -> None:
+    def update_atom_legend(self, *, visible: bool | None = None) -> None:
         if self.legend_actor is not None:
             try:
                 self.plotter.remove_actor(self.legend_actor)
             except Exception:
                 pass
+        if visible is None:
+            visible = bool(getattr(self, "last_legend_visible", False))
+        if not visible:
+            self.legend_actor = None
+            return
         self.legend_actor = add_atom_legend(
             self.plotter,
             self.render_data,

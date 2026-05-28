@@ -19,6 +19,7 @@ STATE_UPDATE_KEYS = frozenset(
         "speed",
         "projection_mode",
         "background_mode",
+        "legend_visible",
         "improper_mode",
         "display_mode",
         "active_mode",
@@ -54,6 +55,7 @@ class RenderStateSnapshot:
     speed: float
     projection_mode: str
     background_mode: str
+    legend_visible: bool
     improper_mode: str
     display_mode: str
     active_mode: str
@@ -112,6 +114,7 @@ def initial_render_state(
         "speed": float(preserved.get("speed", 1.0)),
         "projection_mode": preserved.get("projection_mode", "perspective"),
         "background_mode": preserved.get("background_mode", "dark"),
+        "legend_visible": bool(preserved.get("legend_visible", False)),
         "improper_mode": preserved.get("improper_mode", "auto"),
         "display_mode": preserved.get("display_mode", display_mode),
         "active_mode": "standard",
@@ -159,6 +162,7 @@ def pop_render_state_snapshot(state: dict) -> RenderStateSnapshot:
         speed=float(state.get("speed", 1.0)),
         projection_mode=str(state.get("projection_mode", "perspective")),
         background_mode=str(state.get("background_mode", "dark")),
+        legend_visible=bool(state.get("legend_visible", False)),
         improper_mode=str(state.get("improper_mode", "auto")),
         display_mode=str(state.get("display_mode", "")),
         active_mode=str(state.get("active_mode", "standard")),

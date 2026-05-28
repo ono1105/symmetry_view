@@ -804,6 +804,13 @@ HTML = """<!doctype html>
           </div>
         </div>
         <div class="camera-block">
+          <label>Legend</label>
+          <div class="button-row flush" id="legend-controls">
+            <button class="secondary legend-button selected" data-legend-visible="false">Hide</button>
+            <button class="secondary legend-button" data-legend-visible="true">Show</button>
+          </div>
+        </div>
+        <div class="camera-block">
           <div class="button-row flush">
             <button id="view-direction" class="secondary">View along direction</button>
             <button id="reset-view" class="secondary">Reset view center</button>
@@ -1692,6 +1699,13 @@ function syncBackgroundButtons() {
   }
 }
 
+function syncLegendButtons() {
+  const legendVisible = Boolean(state.legend_visible);
+  for (const button of document.querySelectorAll(".legend-button")) {
+    button.classList.toggle("selected", (button.dataset.legendVisible === "true") === legendVisible);
+  }
+}
+
 function syncImproperModeControl() {
   document.getElementById("improper-mode").value = state.improper_mode || "auto";
 }
@@ -1827,6 +1841,7 @@ async function postState(update) {
   syncDisplayButtons();
   syncProjectionButtons();
   syncBackgroundButtons();
+  syncLegendButtons();
   syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
@@ -1983,6 +1998,7 @@ async function applyLoadedStructure(result, fallbackError, examplePath = "", con
   syncDisplayButtons();
   syncProjectionButtons();
   syncBackgroundButtons();
+  syncLegendButtons();
   syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
@@ -2028,6 +2044,7 @@ async function refreshState() {
     syncDisplayButtons();
     syncProjectionButtons();
     syncBackgroundButtons();
+    syncLegendButtons();
     syncImproperModeControl();
     syncAtomModeButtons();
     syncPlayToggleButton();
@@ -2121,6 +2138,12 @@ for (const button of document.querySelectorAll(".projection-button")) {
 for (const button of document.querySelectorAll(".background-button")) {
   button.addEventListener("click", () => postState({
     background_mode: button.dataset.backgroundMode,
+    playing: false,
+  }));
+}
+for (const button of document.querySelectorAll(".legend-button")) {
+  button.addEventListener("click", () => postState({
+    legend_visible: button.dataset.legendVisible === "true",
     playing: false,
   }));
 }
@@ -2418,6 +2441,7 @@ async function boot() {
   syncDisplayButtons();
   syncProjectionButtons();
   syncBackgroundButtons();
+  syncLegendButtons();
   syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
