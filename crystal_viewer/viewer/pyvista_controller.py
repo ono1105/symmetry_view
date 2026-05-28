@@ -33,7 +33,7 @@ from crystal_viewer.viewer.operation_labels import (
     visual_translation_direction_cart,
 )
 from crystal_viewer.viewer.render_state import pop_render_state_snapshot
-from crystal_viewer.viewer.scene_rendering import add_unit_cell, setup_viewer_lighting
+from crystal_viewer.viewer.scene_rendering import add_orientation_axes, add_unit_cell, setup_viewer_lighting
 from crystal_viewer.viewer.symmetry_elements import (
     add_symmetry_element_actors,
     add_symmetry_elements,
@@ -450,7 +450,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             print(f"[viewer] reload atoms {time.monotonic() - debug_start:.3f}s", flush=True)
         if self.render_data.get("unit_cell"):
             add_unit_cell(self.plotter, self.render_data["unit_cell"])
-        self.plotter.add_axes()
+        add_orientation_axes(self.plotter, unit_cell=bool(self.render_data.get("unit_cell")))
         if self.debug_timer:
             print(f"[viewer] reload axes {time.monotonic() - debug_start:.3f}s", flush=True)
         self.set_operation_index(operation_index)

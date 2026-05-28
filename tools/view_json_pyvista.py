@@ -27,6 +27,7 @@ from crystal_viewer.viewer.scene_rendering import (
     add_atoms,
     add_displacements,
     add_glyph_atoms,
+    add_orientation_axes,
     add_unit_cell,
     setup_viewer_lighting,
 )
@@ -152,7 +153,7 @@ def main() -> int:
         add_displacements(plotter, render_data, atom_mappings, operation_index=args.operation)
 
     add_title(plotter, render_data, args.json_path, args.operation)
-    plotter.add_axes()
+    add_orientation_axes(plotter, unit_cell=bool(render_data.get("unit_cell")))
     plotter.reset_camera()
 
     if args.animate:

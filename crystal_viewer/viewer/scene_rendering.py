@@ -11,6 +11,9 @@ from crystal_viewer.viewer.operation_lookup import selected_mapping
 
 
 VIEWER_BACKGROUND_COLOR = "#ffffff"
+AXIS_A_COLOR = "#ff0000"
+AXIS_B_COLOR = "#00b000"
+AXIS_C_COLOR = "#2468ff"
 
 
 def setup_viewer_lighting(plotter: pv.Plotter, *, background: str = VIEWER_BACKGROUND_COLOR) -> None:
@@ -20,39 +23,34 @@ def setup_viewer_lighting(plotter: pv.Plotter, *, background: str = VIEWER_BACKG
     except Exception:
         pass
     try:
-        main_light = pv.Light(
-            position=(8.0, -10.0, 12.0),
-            focal_point=(0.0, 0.0, 0.0),
-            color="#ffffff",
-            intensity=0.88,
-            positional=True,
-            cone_angle=70.0,
-            exponent=1.0,
-        )
-        try:
-            main_light.shadow_attenuation = 0.35
-        except Exception:
-            pass
-        plotter.add_light(main_light)
         plotter.add_light(
             pv.Light(
-                position=(-7.0, 8.0, 9.0),
+                light_type="headlight",
+                color="#ffffff",
+                intensity=0.55,
+            )
+        )
+        plotter.add_light(
+            pv.Light(
+                light_type="camera light",
+                position=(-3.5, 4.0, 5.5),
                 focal_point=(0.0, 0.0, 0.0),
                 color="#ffffff",
-                intensity=0.42,
+                intensity=0.72,
                 positional=True,
-                cone_angle=95.0,
+                cone_angle=80.0,
                 exponent=1.0,
             )
         )
         plotter.add_light(
             pv.Light(
-                position=(-9.0, -6.0, -7.0),
+                light_type="camera light",
+                position=(4.0, -3.5, 3.0),
                 focal_point=(0.0, 0.0, 0.0),
                 color="#ffffff",
-                intensity=0.24,
+                intensity=0.28,
                 positional=True,
-                cone_angle=110.0,
+                cone_angle=100.0,
                 exponent=1.0,
             )
         )
@@ -62,6 +60,18 @@ def setup_viewer_lighting(plotter: pv.Plotter, *, background: str = VIEWER_BACKG
         plotter.enable_shadows()
     except Exception:
         pass
+
+
+def add_orientation_axes(plotter: pv.Plotter, *, unit_cell: bool = False) -> None:
+    labels = ("a", "b", "c") if unit_cell else ("X", "Y", "Z")
+    plotter.add_axes(
+        x_color=AXIS_A_COLOR,
+        y_color=AXIS_B_COLOR,
+        z_color=AXIS_C_COLOR,
+        xlabel=labels[0],
+        ylabel=labels[1],
+        zlabel=labels[2],
+    )
 
 
 def add_atoms(plotter: pv.Plotter, render_data: dict, *, display_mode: str = "expanded") -> None:
@@ -131,18 +141,18 @@ def add_unit_cell(plotter: pv.Plotter, unit_cell: dict) -> None:
     lattice = np.asarray(unit_cell["lattice"], dtype=float)
     vertices = vertices - (np.asarray([0.5, 0.5, 0.5], dtype=float) @ lattice)
     edge_colors = {
-        (0, 1): "#ff0000",
-        (2, 4): "#ff0000",
-        (3, 5): "#ff0000",
-        (6, 7): "#ff0000",
-        (0, 2): "#00b000",
-        (1, 4): "#00b000",
-        (3, 6): "#00b000",
-        (5, 7): "#00b000",
-        (0, 3): "#2468ff",
-        (1, 5): "#2468ff",
-        (2, 6): "#2468ff",
-        (4, 7): "#2468ff",
+        (0, 1): AXIS_A_COLOR,
+        (2, 4): AXIS_A_COLOR,
+        (3, 5): AXIS_A_COLOR,
+        (6, 7): AXIS_A_COLOR,
+        (0, 2): AXIS_B_COLOR,
+        (1, 4): AXIS_B_COLOR,
+        (3, 6): AXIS_B_COLOR,
+        (5, 7): AXIS_B_COLOR,
+        (0, 3): AXIS_C_COLOR,
+        (1, 5): AXIS_C_COLOR,
+        (2, 6): AXIS_C_COLOR,
+        (4, 7): AXIS_C_COLOR,
     }
     for start, end in unit_cell["edges"]:
         edge = (int(start), int(end))
