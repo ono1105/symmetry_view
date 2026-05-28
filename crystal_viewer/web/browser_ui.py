@@ -337,7 +337,8 @@ HTML = """<!doctype html>
       padding: 5px;
     }
     .atom-row {
-      display: flex;
+      display: grid;
+      grid-template-columns: auto auto auto auto minmax(0, 1fr);
       gap: 5px;
       align-items: center;
       padding: 2px;
@@ -407,6 +408,16 @@ HTML = """<!doctype html>
       color: #cbd5e1;
       min-width: 0;
     }
+    .atom-label {
+      color: #f1f5f9;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .atom-index {
+      color: #94a3b8;
+      font-weight: 500;
+      margin-right: 2px;
+    }
     .atom-row.unmapped {
       background: rgba(248, 113, 113, 0.14);
       border-radius: 5px;
@@ -418,10 +429,23 @@ HTML = """<!doctype html>
       margin-left: 6px;
     }
     .atom-motion {
+      display: flex;
+      gap: 4px;
+      align-items: baseline;
+      min-width: 0;
       color: #a7b5c8;
       font-size: 11px;
       font-weight: 500;
-      overflow-wrap: anywhere;
+    }
+    .atom-motion-path {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .atom-motion-target {
+      flex: 0 0 auto;
+      color: #d7dee8;
     }
     .hint {
       color: #91a0b3;
@@ -897,11 +921,6 @@ function displayOperationSymbol(operation) {
   return order ? `<span class="overline">${order}</span>` : (operation.display_symbol || operation.symbol || "");
 }
 
-function atomText(atom) {
-  const motion = atomMotionText(atom);
-  return `${atom.index}: ${atomDisplayLabel(atom)}${motion}`;
-}
-
 function atomDisplayLabel(atom) {
   if (atom.asymmetric_index === null || atom.asymmetric_index === undefined) {
     return atom.element;
@@ -909,17 +928,23 @@ function atomDisplayLabel(atom) {
   return `${atom.element}${Number(atom.asymmetric_index) + 1}`;
 }
 
-function atomMotionText(atom) {
+function atomMotionParts(atom) {
   const motion = atomMotionBySource.get(atom.index);
-  if (!motion) return "";
+  if (!motion) return null;
   const target = motion.target_atom === null || motion.target_atom === undefined ? "?" : motion.target_atom;
   if (sourceKind === "crystal" && Array.isArray(motion.start_frac) && Array.isArray(motion.target_frac)) {
-    return ` <span class="atom-motion">${formatVector(motion.start_frac, formatFrac)} → ${formatVector(motion.target_frac, formatFrac)} #${target}</span>`;
+    return {
+      path: `${formatVector(motion.start_frac, formatFrac)} → ${formatVector(motion.target_frac, formatFrac)}`,
+      target,
+    };
   }
   if (Array.isArray(motion.start_cart) && Array.isArray(motion.target_cart)) {
-    return ` <span class="atom-motion">${formatVector(motion.start_cart, formatCoord)} → ${formatVector(motion.target_cart, formatCoord)} #${target}</span>`;
+    return {
+      path: `${formatVector(motion.start_cart, formatCoord)} → ${formatVector(motion.target_cart, formatCoord)}`,
+      target,
+    };
   }
-  return ` <span class="atom-motion">#${target}</span>`;
+  return {path: "", target};
 }
 
 function formatVector(values, formatter) {
@@ -1539,7 +1564,6 @@ function renderAtoms() {
   root.innerHTML = "";
   for (const atom of atoms) {
     if (atomElementFilterValue && atom.element !== atomElementFilterValue) continue;
-    const text = atomText(atom);
     const label = document.createElement("label");
     label.className = "atom-row";
     if (customUnmappedAtoms.has(atom.index)) label.classList.add("unmapped");
@@ -1565,18 +1589,38 @@ function renderAtoms() {
       else delete next[String(atom.index)];
       postState({atom_hidden: next, playing: false, reset: true});
     });
-    const span = document.createElement("span");
-    span.appendChild(renderHtml(text));
+    const atomLabel = document.createElement("span");
+    atomLabel.className = "atom-label";
+    const atomIndex = document.createElement("span");
+    atomIndex.className = "atom-index";
+    atomIndex.textContent = `${atom.index}:`;
+    atomLabel.appendChild(atomIndex);
+    atomLabel.appendChild(document.createTextNode(atomDisplayLabel(atom)));
     if (customUnmappedAtoms.has(atom.index)) {
       const badge = document.createElement("span");
       badge.className = "atom-badge";
       badge.textContent = "do not map";
-      span.appendChild(badge);
+      atomLabel.appendChild(badge);
+    }
+    const motion = atomMotionParts(atom);
+    const motionSpan = document.createElement("span");
+    motionSpan.className = "atom-motion";
+    if (motion) {
+      const pathSpan = document.createElement("span");
+      pathSpan.className = "atom-motion-path";
+      pathSpan.textContent = motion.path;
+      pathSpan.title = motion.path;
+      const targetSpan = document.createElement("span");
+      targetSpan.className = "atom-motion-target";
+      targetSpan.textContent = `#${motion.target}`;
+      motionSpan.appendChild(pathSpan);
+      motionSpan.appendChild(targetSpan);
     }
     label.appendChild(checkbox);
     label.appendChild(colorInput);
     label.appendChild(visibleButton);
-    label.appendChild(span);
+    label.appendChild(atomLabel);
+    label.appendChild(motionSpan);
     root.appendChild(label);
   }
 }
