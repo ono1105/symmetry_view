@@ -443,7 +443,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.plotter.clear()
         if self.debug_timer:
             print(f"[viewer] reload clear {time.monotonic() - debug_start:.3f}s", flush=True)
-        self.plotter.set_background("#101216")
+        self.plotter.set_background("#ffffff")
         self.display_mode = ""
         self.rebuild_display_atoms(display_mode)
         if self.debug_timer:

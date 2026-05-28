@@ -58,7 +58,7 @@ def add_title(
         suffix = operation["label"] if operation else f"operation {operation_index}"
         text = f"{text}  |  {suffix}"
     text = f"{text}\n{json_path}"
-    plotter.add_text(text, position="upper_left", font_size=10, color="#eef2f7")
+    plotter.add_text(text, position="upper_left", font_size=10, color="#111827")
 
 
 def print_elements(render_data: dict, operation_index: int | None) -> None:

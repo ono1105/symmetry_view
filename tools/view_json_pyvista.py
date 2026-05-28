@@ -128,7 +128,7 @@ def main() -> int:
         or args.screenshot is not None
         or args.animation_output is not None
     )
-    plotter.set_background("#101216")
+    plotter.set_background("#ffffff")
 
     animated_atoms = None
     if args.animate and not args.no_atoms:
