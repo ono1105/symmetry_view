@@ -21,6 +21,7 @@ STATE_UPDATE_KEYS = frozenset(
         "background_mode",
         "legend_visible",
         "cell_origin_mode",
+        "cell_setting_mode",
         "improper_mode",
         "display_mode",
         "active_mode",
@@ -29,6 +30,10 @@ STATE_UPDATE_KEYS = frozenset(
         "reset_view_request_id",
         "view_center_request_id",
         "view_center_frac",
+        "view_direction_request_id",
+        "view_direction_frac",
+        "view_plane_request_id",
+        "view_plane_hkl",
         "camera_request_id",
         "camera_direction",
         "camera_angle",
@@ -58,6 +63,7 @@ class RenderStateSnapshot:
     background_mode: str
     legend_visible: bool
     cell_origin_mode: str
+    cell_setting_mode: str
     improper_mode: str
     display_mode: str
     active_mode: str
@@ -65,6 +71,10 @@ class RenderStateSnapshot:
     reset_view_request_id: Any
     view_center_request_id: Any
     view_center_frac: Any
+    view_direction_request_id: Any
+    view_direction_frac: Any
+    view_plane_request_id: Any
+    view_plane_hkl: Any
     camera_request_id: Any
     camera_direction: str
     camera_angle: float
@@ -118,6 +128,7 @@ def initial_render_state(
         "background_mode": preserved.get("background_mode", "dark"),
         "legend_visible": bool(preserved.get("legend_visible", False)),
         "cell_origin_mode": preserved.get("cell_origin_mode", "center"),
+        "cell_setting_mode": preserved.get("cell_setting_mode", "native"),
         "improper_mode": preserved.get("improper_mode", "auto"),
         "display_mode": preserved.get("display_mode", display_mode),
         "active_mode": "standard",
@@ -128,6 +139,10 @@ def initial_render_state(
         "reset_view_request_id": None,
         "view_center_request_id": None,
         "view_center_frac": None,
+        "view_direction_request_id": None,
+        "view_direction_frac": None,
+        "view_plane_request_id": None,
+        "view_plane_hkl": None,
         "camera_request_id": None,
         "camera_direction": "",
         "camera_angle": 90.0,
@@ -167,6 +182,7 @@ def pop_render_state_snapshot(state: dict) -> RenderStateSnapshot:
         background_mode=str(state.get("background_mode", "dark")),
         legend_visible=bool(state.get("legend_visible", False)),
         cell_origin_mode=str(state.get("cell_origin_mode", "center")),
+        cell_setting_mode=str(state.get("cell_setting_mode", "native")),
         improper_mode=str(state.get("improper_mode", "auto")),
         display_mode=str(state.get("display_mode", "")),
         active_mode=str(state.get("active_mode", "standard")),
@@ -174,6 +190,10 @@ def pop_render_state_snapshot(state: dict) -> RenderStateSnapshot:
         reset_view_request_id=state.get("reset_view_request_id"),
         view_center_request_id=state.get("view_center_request_id"),
         view_center_frac=state.get("view_center_frac"),
+        view_direction_request_id=state.get("view_direction_request_id"),
+        view_direction_frac=state.get("view_direction_frac"),
+        view_plane_request_id=state.get("view_plane_request_id"),
+        view_plane_hkl=state.get("view_plane_hkl"),
         camera_request_id=state.get("camera_request_id"),
         camera_direction=str(state.get("camera_direction", "")),
         camera_angle=float(state.get("camera_angle", 90.0)),

@@ -7,6 +7,10 @@ import numpy as np
 from pymatgen.core import Molecule
 from pymatgen.symmetry.analyzer import PointGroupAnalyzer
 
+from .geometry import (
+    plane_basis_from_normal_cart,
+    rotation_angle_deg,
+)
 from .analysis_models import (
     AtomSite,
     MolecularAxisElement,
@@ -384,11 +388,6 @@ def matrix_order(matrix: np.ndarray, max_order: int = 24) -> int | None:
     return None
 
 
-def rotation_angle_deg(rotation: np.ndarray) -> float:
-    cos_theta = np.clip((np.trace(rotation) - 1.0) / 2.0, -1.0, 1.0)
-    return float(np.degrees(np.arccos(cos_theta)))
-
-
 def nullspace(matrix: np.ndarray, tol: float = 1e-8) -> np.ndarray:
     _, singular_values, vh = np.linalg.svd(np.asarray(matrix, dtype=float))
     rank = int(np.sum(singular_values > tol))
@@ -420,12 +419,7 @@ def canonical_plane_basis(basis: np.ndarray) -> np.ndarray:
 
 
 def plane_basis_from_normal(normal: np.ndarray) -> np.ndarray:
-    normal = normalize(normal)
-    helper = np.array([1.0, 0.0, 0.0])
-    if abs(float(np.dot(normal, helper))) > 0.9:
-        helper = np.array([0.0, 1.0, 0.0])
-    v1 = normalize(np.cross(normal, helper))
-    v2 = normalize(np.cross(normal, v1))
+    v1, v2 = plane_basis_from_normal_cart(normal)
     return np.column_stack((canonical_direction(v1), canonical_direction(v2)))
 
 

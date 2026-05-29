@@ -3391,3 +3391,209 @@ color=viewer_text_color(getattr(self, "background_mode", "light"))
 | `atom_legend_entries` で `atom_colors` を無視 | 凡例は要素単位表示なので element_colors のみ使うのが正しい ✓ |
 | `ATOM_MESH_STYLE` の材質パラメータ | `ambient=0.56, diffuse=0.54, specular=0.42, specular_power=42` ← 反射感が出る設定として妥当 ✓ |
 | `view_json_pyvista.py` の `add_atom_legend` 追加 | `background_mode` デフォルト `"dark"` と `setup_viewer_lighting` のデフォルトが一致 ✓ |
+
+---
+
+## spglib / pymatgen 活用機会の精査（Claude）（2026-05-29）
+
+プロジェクト全体で spglib・pymatgen を使っている箇所を精査し、より効率的または保守性の高い方法に改められる点をまとめた。
+
+### 機会 1（高）: `identify_asymmetric_source` → `dataset["equivalent_atoms"]` で代替
+
+**場所:** `crystal_viewer/structure_analysis.py:554-583`
+
+現状は全原子 × 非対称単位原子 × 全操作の O(N × n_asym × n_ops) ループ。Jacobsite だと 56 × 3 × 192 ≈ 32,000 回。
+
+spglib は `get_symmetry_dataset()` ですでにこの情報を計算している:
+
+```python
+dataset["equivalent_atoms"]  # shape (N,): atoms[i] は atoms[equivalent_atoms[i]] が代表
+```
+
+`equivalent_atoms[i]` が「どの代表原子（非対称単位）から来たか」を直接示す。これを使えば探索コストが O(n_ops)（代表原子が分かれば、その原子に全操作を当てるだけ）に削減できる。
+
+---
+
+### 機会 2（高）: `RHOMBOHEDRAL_SETTING_OPS` → `SpaceGroup.symmetry_ops` で廃止可能
+
+**場所:** `crystal_viewer/structure_analysis.py:31-72`
+
+菱面体晶系の 6 SG 番号（146, 148, 155, 160, 161, 166, 167）向けにハードコードされた対称操作文字列が 40 行ある。pymatgen に同等の API が存在する:
+
+```python
+from pymatgen.symmetry.groups import SpaceGroup
+ops = SpaceGroup.from_int_number(space_group_number).symmetry_ops  # SymmOp のリスト
+```
+
+ただし `SpaceGroup.symmetry_ops` が返す操作がどの設定（R設定 vs H設定）かを確認する必要がある。設定が一致すればこの dict を丸ごと削除できる。
+
+---
+
+### 機会 3（高）: CIF を 2 回パースしている
+
+**場所:** `crystal_viewer/structure_analysis.py:99, 451`
+
+1. `load_structure_from_cif()` → pymatgen 内部で `CifParser` を呼ぶ
+2. `read_asymmetric_unit_sites()` → `CifParser(cif_path)` を再度呼ぶ
+
+機会 1 と組み合わせて解決できる。`dataset["equivalent_atoms"]` から代表原子インデックスを取得すれば、CIF を再パースせずに `Structure` のサイトから非対称単位原子を組み立てられる:
+
+```python
+asym_indices = np.unique(dataset["equivalent_atoms"])
+# structure[asym_indices[i]] が非対称単位原子
+```
+
+---
+
+### 機会 4（中）: `plane_basis_from_normal` が 3 箇所に重複実装
+
+アルゴリズムは同一なのに別々に定義されている:
+
+| ファイル | 関数名 | 戻り値型 |
+|---------|--------|---------|
+| `crystal_viewer/geometry.py:82` | `plane_basis_from_normal_cart` | `(v1, v2)` tuple |
+| `crystal_viewer/molecule_analysis.py:422` | `plane_basis_from_normal` | `(3,2)` ndarray |
+| `crystal_viewer/viewer/custom_operation.py:212` | `plane_basis_from_normal` | `(v1, v2)` tuple |
+
+`geometry.py` に統一して他からimportするだけでよい。
+
+---
+
+### 機会 5（中）: `rotation_angle_deg` も重複
+
+- `crystal_viewer/geometry.py:54`
+- `crystal_viewer/molecule_analysis.py:387`
+
+`(trace - 1) / 2` の同一式。`molecule_analysis.py` が `geometry.py` の関数を import すれば解決。
+
+---
+
+### 機会 6（低）: `np.linalg.inv(lattice)` が同関数内で繰り返し計算
+
+**場所:** `crystal_viewer/viewer/operation_labels.py`（複数行）
+
+```python
+frac = direction @ np.linalg.inv(lattice)  # 複数行で同じ inv を計算
+```
+
+`lattice_inv = np.linalg.inv(lattice)` を先頭で一度だけ計算して再利用すればよい。
+
+---
+
+### 機会 7（低）: 原子マッチングの KDTree 化
+
+**場所:** `crystal_viewer/atom_mapping.py:203-220`
+
+`find_matching_crystal_atom()` は O(n) のブルートフォース。構造が大きい場合は `scipy.spatial.KDTree` で O(log n) に改善できる。現状の用途規模ではボトルネックではない可能性が高く優先度は低い。
+
+---
+
+### 修正優先度まとめ
+
+| # | 内容 | 効果 | 優先度 |
+|---|------|------|--------|
+| 1 | `identify_asymmetric_source` → `dataset["equivalent_atoms"]` | 速度・コード削減 | 高 |
+| 2 | `RHOMBOHEDRAL_SETTING_OPS` → `SpaceGroup.symmetry_ops` | 保守性・40行削減 | 高（設定確認要） |
+| 3 | CIF 2重パース → spglib 結果で代替 | I/O 削減 | 高（機会1と連動） |
+| 4 | `plane_basis_from_normal` 3重複 → `geometry.py` に統一 | 保守性 | 中 |
+| 5 | `rotation_angle_deg` 重複 → `geometry.py` から import | 保守性 | 中 |
+| 6 | `linalg.inv(lattice)` 繰り返し → 1回計算して再利用 | 微小速度 | 低 |
+| 7 | 原子マッチング KDTree 化 | 大構造のみ速度 | 低 |
+
+### 対応状況
+
+| # | 状況 |
+|---|------|
+| 1 | 保留。`asymmetric_index` と `generation_operation_index` の意味が UI 表示に影響するため、挙動確認用テストを増やしてから置換する。 |
+| 2 | 保留。`SpaceGroup.symmetry_ops` の R/H 設定が現在の rhombohedral fallback と一致するか未確認のため、現時点ではハードコードを維持する。 |
+| 3 | 保留。#1 と同時に扱うべき内容のため、今回は変更しない。 |
+| 4 | 修正済み。`molecule_analysis.py` と `custom_operation.py` の平面基底生成を `geometry.plane_basis_from_normal_cart` に寄せた。 |
+| 5 | 修正済み。`molecule_analysis.py` の回転角計算を `geometry.rotation_angle_deg` に寄せた。 |
+| 6 | 修正済み。`operation_labels.py` に `lattice_inverse()` を追加し、同じ逆行列計算の記述を集約した。`custom_operation.py` でも関数内の逆行列を再利用するようにした。 |
+| 7 | 保留。現状の構造サイズではボトルネックになっておらず、周期境界込みの最近接探索なので別途テストが必要。 |
+
+---
+
+## セル設定変換コードのレビュー（Claude）（2026-05-29）
+
+対象コミット: 未コミット（作業中）
+変更ファイル: `crystal_viewer/structure_analysis.py`, `crystal_viewer/viewer/cell_settings.py`, `crystal_viewer/viewer/render_state.py`, `crystal_viewer/viewer/session.py`, `crystal_viewer/web/browser_ui.py`, `tools/view_json_server.py`, `tests/test_cell_settings.py`
+
+全テスト通過・32 crystal 構造の primitive/conventional 変換すべて成功を確認。
+
+### バグ 1（高）: `analyze_structure` がサーバープロセス内でタイムアウトなしに実行される
+
+**場所:** `tools/view_json_server.py` `handle_cell_setting`
+
+通常のファイル読み込みは `export_analysis_to_json_worker(timeout_sec=analysis_timeout_sec)` でサブプロセス化・タイムアウト付きで動く。`handle_cell_setting` は `standardized_payload` → `analyze_structure` を **HTTP ハンドラスレッド内で直接呼ぶ**。
+
+```python
+# 通常読み込み（サブプロセス + タイムアウト）
+export_analysis_to_json_worker(..., timeout_sec=analysis_timeout_sec)
+
+# cell_setting（スレッド直実行・タイムアウトなし）
+converted_payload = standardized_payload(base_payload, mode, ...)
+```
+
+重い構造でレガシーコアが詰まると HTTP レスポンスが返らず、ブラウザ側が接続タイムアウトを起こす。「エラーが出ることが多い」の主因として最も疑わしい。
+
+### バグ 2（中）: `applyCellSetting` の `if (!result.ok)` は到達不能コード
+
+**場所:** `crystal_viewer/web/browser_ui.py` `applyCellSetting`
+
+`api()` は 2xx 以外のステータスで `throw new Error(message)` する。そのため `api()` が正常に返した場合 `result` は必ず成功ボディであり、`if (!result.ok)` は**絶対に実行されない**：
+
+```javascript
+const result = await api("/api/cell_setting", {...});
+if (!result.ok) {   // 到達不能 — api() がすでに throw している
+    showLoadError(...);
+    return;
+}
+```
+
+実際のエラー処理は `.catch()` 側のみで動く。`error` は JavaScript `Error` オブジェクトなので `String(error)` が `"Error: <メッセージ>"` になり、UI に `"Error: "` プレフィックスが付く。
+
+### バグ 3（低）: native モードで `display_atom_count` が未設定
+
+**場所:** `crystal_viewer/viewer/cell_settings.py` `standardized_payload` native パス
+
+native パスは `deepcopy` 後に `display_cell_setting` だけ設定して返す。非 native パスは `display_atom_count` と `display_lattice_parameters` を設定する。UI は `metadata.display_atom_count || atoms.length` でフォールバックするため表示は壊れないが、モード間で metadata キーが揃わない。
+
+### バグ 4（低）: `_normalized_cell_setting` が 2 回呼ばれる
+
+`standardized_payload` と `standardized_structure_from_render_data` がそれぞれ `_normalized_cell_setting(cell_setting)` を呼ぶ。冗長だが誤動作はしない。
+
+### バグ 5（低）: `import_in_progress` ガードがない
+
+`handle_open_example` はファイル読み込み中に `import_in_progress = True` を立てる。`handle_cell_setting` はこのフラグをチェックしない。ファイル切り替えと cell setting 変更が競合すると古い `base_payload` で変換が走る可能性がある。
+
+### 修正優先度まとめ
+
+| # | 内容 | 優先度 |
+|---|------|--------|
+| 1 | `handle_cell_setting` にタイムアウト制御（サブプロセス化 or `threading.Timer`） | 高 |
+| 2 | `applyCellSetting` の dead `if (!result.ok)` 削除 | 中 |
+| 3 | native モードに `display_atom_count` を追加 | 低 |
+| 4 | `_normalized_cell_setting` の2重呼び出し整理 | 低 |
+| 5 | `import_in_progress` ガード追加 | 低 |
+
+### 対応状況
+
+| # | 状況 |
+|---|------|
+| 1 | 修正済み。`tools/export_cell_setting_json.py` を追加し、`handle_cell_setting` は `export_cell_setting_json_worker(..., timeout_sec=analysis_timeout_sec)` 経由でサブプロセス実行する。 |
+| 2 | 修正済み。`applyCellSetting` の到達不能な `if (!result.ok)` を削除し、catch 側では `error.message` を表示する。 |
+| 3 | 修正済み。`standardized_payload` と互換用 `standardized_cell_render_data` の native パスに `display_atom_count` / `display_lattice_parameters` を追加した。 |
+| 4 | 修正済み。`standardized_payload` 側で正規化済み mode を使い回すようにした。 |
+| 5 | 修正済み。`handle_cell_setting` は `import_in_progress` 中なら変換を拒否する。 |
+
+### 正常な部分
+
+| 項目 | 評価 |
+|------|------|
+| `base_payload` の設計 | native → primitive → conventional → native の往復で常に元の構造から変換 ✓ |
+| `session.replace_from` の実行順序 | `state_lock` 下で `replace_from` と `shared_state.update` が同一 lock 内で完結 ✓ |
+| `source_kind != crystal` の早期 None 返し | 分子への誤適用なし ✓ |
+| 32 crystal 構造の一括検証 | primitive/conventional ともに成功・None なし ✓ |
+| `cell-setting-controls` の表示制御 | `display-block` 内にあり、分子時は `syncSourceKindControls` で非表示 ✓ |
+| `analyze_structure` の分離 | `analyze_cif` からの抽出により `standardized_payload` が再利用できる設計になっている ✓ |

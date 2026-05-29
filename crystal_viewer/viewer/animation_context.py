@@ -420,6 +420,9 @@ def symmetry_element_shared_shift(
     point = None
     if kind.startswith(("rotation", "screw")) and axis is not None:
         point = np.asarray(axis["point_cart"], dtype=float)
+        shift = axis_preserving_periodic_shift(render_data, operation, axis)
+        if shift is not None:
+            return shift
     elif (kind == "inversion" or "rotoinversion" in kind) and center is not None:
         point = np.asarray(center["point_cart"], dtype=float)
     elif kind == "mirror" and plane is not None:
@@ -436,6 +439,38 @@ def symmetry_element_shared_shift(
     if np.linalg.norm(required - rounded) > 1e-5:
         return None
     return rounded
+
+def axis_preserving_periodic_shift(
+    render_data: dict,
+    operation: dict,
+    axis: dict,
+) -> np.ndarray | None:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None or operation.get("matrix_cart") is None or operation.get("translation_cart") is None:
+        return None
+
+    matrix = np.asarray(operation["matrix_cart"], dtype=float)
+    translation = np.asarray(operation["translation_cart"], dtype=float)
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    point = np.asarray(axis["point_cart"], dtype=float)
+    direction = normalize(np.asarray(axis["direction_cart"], dtype=float))
+    kind = str(operation.get("kind", ""))
+
+    best: tuple[float, float, np.ndarray] | None = None
+    for shift in periodic_shifts(1):
+        displacement = matrix @ point + translation + shift @ lattice - point
+        parallel = float(np.dot(displacement, direction))
+        perpendicular = displacement - parallel * direction
+        perpendicular_norm = float(np.linalg.norm(perpendicular))
+        parallel_penalty = 0.0 if kind.startswith("screw") else abs(parallel)
+        total_norm = float(np.linalg.norm(displacement))
+        score = (perpendicular_norm + parallel_penalty, total_norm, shift)
+        if best is None or score[:2] < best[:2]:
+            best = score
+
+    if best is None or best[0] > 1e-5:
+        return None
+    return np.asarray(best[2], dtype=float)
 
 def shared_rotation_angle(
     render_data: dict,

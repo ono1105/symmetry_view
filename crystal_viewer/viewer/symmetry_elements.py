@@ -3,15 +3,21 @@ from __future__ import annotations
 import numpy as np
 import pyvista as pv
 
-from crystal_viewer.geometry import normalize
+from crystal_viewer.geometry import normalize, reflect_point
 from crystal_viewer.viewer.animation import (
     improper_inversion_center,
     improper_reflection_plane,
     preferred_improper_mode,
     render_source_kind,
     select_animation_context,
+    shared_step_translation,
 )
 from crystal_viewer.viewer.display_atoms import display_point_cart, display_scene_span
+from crystal_viewer.viewer.glide_geometry import (
+    align_fractional_vector_to_reference,
+    centered_fractional_vector,
+    glide_translation_frac,
+)
 from crystal_viewer.viewer.operation_lookup import (
     operation_by_index,
     selected_elements,
@@ -30,6 +36,8 @@ def add_symmetry_elements(
     cell_origin_mode: str = "center",
     improper_mode: str = "auto",
 ) -> list:
+    operation = operation_by_index(render_data["operations"], operation_index)
+    mapping = selected_mapping(atom_mappings, operation_index)
     axes, planes, centers = display_symmetry_elements(
         render_data,
         atom_mappings,
@@ -43,6 +51,8 @@ def add_symmetry_elements(
         axes,
         planes,
         centers,
+        operation=operation,
+        mapping=mapping,
         display_mode=display_mode,
         cell_origin_mode=cell_origin_mode,
     )
@@ -55,6 +65,8 @@ def add_symmetry_element_actors(
     planes: list[dict],
     centers: list[dict],
     *,
+    operation: dict | None = None,
+    mapping: dict | None = None,
     display_mode: str = "source",
     cell_origin_mode: str = "center",
 ) -> list:
@@ -92,6 +104,18 @@ def add_symmetry_element_actors(
                 edge_color="#aed6f1",
             )
         )
+        if operation is not None and "glide" in str(operation.get("kind", "")):
+            actor = add_glide_direction_actor(
+                plotter,
+                render_data,
+                operation,
+                mapping,
+                plane,
+                point,
+                axis_length,
+            )
+            if actor is not None:
+                actors.append(actor)
 
     for center in centers:
         point = display_point_cart(render_data, center["point_cart"], display_mode, cell_origin_mode)
@@ -104,6 +128,151 @@ def add_symmetry_element_actors(
         actors.append(plotter.add_mesh(cube, color="#ff5f57", opacity=0.8, show_edges=True))
 
     return actors
+
+
+def add_glide_direction_actor(
+    plotter: pv.Plotter,
+    render_data: dict,
+    operation: dict,
+    mapping: dict | None,
+    plane: dict,
+    displayed_point: np.ndarray,
+    line_length: float,
+):
+    glide_cart = glide_translation_cart(render_data, operation, plane, mapping=mapping)
+    if glide_cart is None:
+        return None
+    norm = float(np.linalg.norm(glide_cart))
+    if norm < 1e-10:
+        return None
+    direction = glide_cart / norm
+    center = np.asarray(displayed_point, dtype=float)
+    line = pv.Line(center - 0.5 * line_length * direction, center + 0.5 * line_length * direction)
+    return plotter.add_mesh(line, color="#f7dc6f", line_width=3, opacity=0.55)
+
+
+def glide_translation_cart(
+    render_data: dict,
+    operation: dict,
+    plane: dict,
+    *,
+    mapping: dict | None = None,
+) -> np.ndarray | None:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return None
+
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    glide_frac = glide_translation_frac(render_data, operation, plane)
+    if glide_frac is None:
+        return None
+    glide_frac = centered_fractional_vector(glide_frac)
+    reference_frac = representative_animation_translation_frac(render_data, operation, plane, mapping)
+    if reference_frac is not None:
+        glide_frac = align_fractional_vector_to_reference(glide_frac, reference_frac, lattice)
+    return glide_frac @ lattice
+
+
+def representative_animation_translation_frac(
+    render_data: dict,
+    operation: dict,
+    plane: dict,
+    mapping: dict | None,
+) -> np.ndarray | None:
+    if mapping is None:
+        return None
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return None
+    atoms_by_index = {atom["index"]: atom for atom in render_data.get("atoms", [])}
+    axis, selected_plane, center, reference_entry, shared_shift, shared_angle = select_animation_context(
+        render_data,
+        operation,
+        mapping,
+        atoms_by_index,
+        element_index=None,
+        representative_atom=None,
+    )
+    if selected_plane is not None:
+        if same_periodic_plane(render_data, selected_plane, plane):
+            translation = shared_step_translation(
+                render_data,
+                operation,
+                atoms_by_index,
+                reference_entry,
+                axis,
+                selected_plane,
+                shared_shift,
+                shared_angle,
+            )
+            if translation is not None:
+                return translation @ np.linalg.inv(np.asarray(unit_cell["lattice"], dtype=float))
+    reference_entry = next(
+        (entry for entry in mapping.get("entries", []) if atoms_by_index.get(entry.get("source_atom")) is not None),
+        None,
+    )
+    if reference_entry is None:
+        return None
+    atom = atoms_by_index[reference_entry["source_atom"]]
+    start = np.asarray(atom["cart"], dtype=float)
+    mirrored = reflect_point(
+        start,
+        np.asarray(plane["point_cart"], dtype=float),
+        normalize(np.asarray(plane["normal_cart"], dtype=float)),
+    )
+    target = np.asarray(reference_entry["transformed_cart"], dtype=float)
+    translation = target - mirrored
+    return translation @ np.linalg.inv(np.asarray(unit_cell["lattice"], dtype=float))
+
+
+def same_periodic_plane(render_data: dict, first: dict, second: dict) -> bool:
+    first_normal = normalize(np.asarray(first["normal_cart"], dtype=float))
+    second_normal = normalize(np.asarray(second["normal_cart"], dtype=float))
+    if np.linalg.norm(np.cross(first_normal, second_normal)) >= 1e-6:
+        return False
+
+    first_point = np.asarray(first["point_cart"], dtype=float)
+    second_point = np.asarray(second["point_cart"], dtype=float)
+    direct_distance = abs(float(np.dot(first_point - second_point, second_normal)))
+    if direct_distance < 1e-5:
+        return True
+
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return False
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    hkl = lattice @ second_normal
+    int_hkl = integer_index_vector(hkl)
+    if int_hkl is None:
+        return False
+    delta_frac = (first_point - second_point) @ np.linalg.inv(lattice)
+    offset_delta = float(np.dot(int_hkl, delta_frac))
+    return abs(offset_delta - round(offset_delta)) < 1e-5
+
+
+def integer_index_vector(values: np.ndarray) -> np.ndarray | None:
+    values = np.asarray(values, dtype=float)
+    max_abs = float(np.max(np.abs(values)))
+    if max_abs < 1e-10:
+        return None
+    scaled = values / max_abs
+    best: np.ndarray | None = None
+    best_error = float("inf")
+    for limit in range(1, 13):
+        candidate = np.rint(scaled * limit).astype(int)
+        if not np.any(candidate):
+            continue
+        normalized = candidate / max(float(np.max(np.abs(candidate))), 1.0)
+        error = float(np.linalg.norm(normalized - scaled))
+        if error < best_error:
+            best = candidate
+            best_error = error
+    if best is None or best_error > 1e-5:
+        return None
+    gcd = int(np.gcd.reduce(np.abs(best[np.nonzero(best)])))
+    if gcd > 1:
+        best = best // gcd
+    return best
 
 
 def display_symmetry_elements(

@@ -236,6 +236,10 @@ HTML = """<!doctype html>
       grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
       gap: 6px 8px;
     }
+    .summary-grid.cell-setting {
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 6px 8px;
+    }
     .summary-item {
       display: grid;
       gap: 2px;
@@ -303,26 +307,53 @@ HTML = """<!doctype html>
     .camera-block:last-of-type {
       margin-bottom: 0;
     }
+    .cell-block {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .cell-block:last-child {
+      margin-bottom: 0;
+    }
     .camera-grid {
       display: grid;
-      grid-template-columns: 1fr auto 1fr;
+      grid-template-columns: repeat(3, 52px);
       gap: 8px;
       align-items: center;
       justify-items: center;
+      justify-content: center;
     }
     .camera-grid button {
-      min-width: 48px;
-      padding: 8px 12px;
+      width: 52px;
+      height: 40px;
+      padding: 0;
+      font-size: 18px;
+      line-height: 1;
     }
     .angle-control {
-      width: 88px;
+      box-sizing: border-box;
+      width: 52px;
+      height: 40px;
+      padding: 0 2px;
       text-align: center;
+      font-size: 13px;
     }
     .view-center-row {
       display: grid;
       grid-template-columns: repeat(3, minmax(62px, 1fr));
       gap: 6px;
       margin-top: 8px;
+    }
+    .view-direction-row {
+      display: grid;
+      grid-template-columns: repeat(3, 52px) minmax(86px, 1fr);
+      gap: 6px;
+      align-items: center;
+    }
+    .view-direction-row input {
+      text-align: center;
+      padding-left: 4px;
+      padding-right: 4px;
     }
     .view-center-row input {
       width: 100%;
@@ -582,6 +613,13 @@ HTML = """<!doctype html>
             <option value="direction">Direction only</option>
           </select>
         </div>
+        <div id="operation-label-mode-block">
+          <label for="operation-label-mode">Notation</label>
+          <select id="operation-label-mode">
+            <option value="standard">Element</option>
+            <option value="itc_like">ITC-like</option>
+          </select>
+        </div>
         <div>
           <label id="operation-filter-label">Direction</label>
           <div class="direction-filter-list" id="direction-filter"></div>
@@ -589,7 +627,7 @@ HTML = """<!doctype html>
       </div>
       <label for="operations">Operation list</label>
       <div class="operation-list" id="operations" role="listbox"></div>
-      <p class="hint">The selected operation controls the axis/plane/center shown in PyVista.</p>
+      <p class="hint" id="operation-notation-hint">The selected operation controls the axis/plane/center shown in PyVista.</p>
     </section>
     <section class="panel" id="custom-panel" hidden>
       <h2 class="section-title">Custom Operation</h2>
@@ -776,19 +814,51 @@ HTML = """<!doctype html>
           </select>
         </div>
         <p class="hint">Start or stop the selected operation and save the current view as a GIF.</p>
-        <h2 class="section-title">Camera</h2>
+      </section>
+      <section class="panel">
+        <h2 class="section-title">View</h2>
         <div class="camera-block">
           <label for="camera-angle">Rotate current view</label>
           <div class="camera-grid">
-            <span></span>
-            <button id="camera-up" class="secondary">Up</button>
-            <span></span>
-            <button id="camera-left" class="secondary">Left</button>
+            <button id="camera-roll-left" class="secondary" title="Roll left" aria-label="Roll left">↶</button>
+            <button id="camera-up" class="secondary" title="Tilt up" aria-label="Tilt up">↑</button>
+            <button id="camera-roll-right" class="secondary" title="Roll right" aria-label="Roll right">↷</button>
+            <button id="camera-left" class="secondary" title="Rotate left" aria-label="Rotate left">←</button>
             <input id="camera-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1">
-            <button id="camera-right" class="secondary">Right</button>
+            <button id="camera-right" class="secondary" title="Rotate right" aria-label="Rotate right">→</button>
             <span></span>
-            <button id="camera-down" class="secondary">Down</button>
+            <button id="camera-down" class="secondary" title="Tilt down" aria-label="Tilt down">↓</button>
             <span></span>
+          </div>
+        </div>
+        <div class="camera-block" id="view-direction-index-block">
+          <label>View along [h k l]</label>
+          <div class="view-direction-row">
+            <input type="number" id="view-dir-h" value="0" step="any" placeholder="h">
+            <input type="number" id="view-dir-k" value="0" step="any" placeholder="k">
+            <input type="number" id="view-dir-l" value="1" step="any" placeholder="l">
+            <button id="view-direction-index" class="secondary">Apply</button>
+          </div>
+        </div>
+        <div class="camera-block" id="view-plane-index-block">
+          <label>View plane (h k l)</label>
+          <div class="view-direction-row">
+            <input type="number" id="view-plane-h" value="0" step="any" placeholder="h">
+            <input type="number" id="view-plane-k" value="0" step="any" placeholder="k">
+            <input type="number" id="view-plane-l" value="1" step="any" placeholder="l">
+            <button id="view-plane-index" class="secondary">Apply</button>
+          </div>
+        </div>
+        <div class="camera-block">
+          <label id="view-center-label">View center [x y z] — fractional</label>
+          <div class="view-center-row">
+            <input type="number" id="view-center-x" value="0" step="any" placeholder="x">
+            <input type="number" id="view-center-y" value="0" step="any" placeholder="y">
+            <input type="number" id="view-center-z" value="0" step="any" placeholder="z">
+          </div>
+          <div class="button-row flush">
+            <button id="apply-view-center" class="secondary">Apply center</button>
+            <button id="reset-view" class="secondary">Reset center</button>
           </div>
         </div>
         <div class="camera-block">
@@ -815,20 +885,12 @@ HTML = """<!doctype html>
         <div class="camera-block">
           <div class="button-row flush">
             <button id="view-direction" class="secondary">View along direction</button>
-            <button id="reset-view" class="secondary">Reset view center</button>
-          </div>
-          <label id="view-center-label">View center [x y z] — fractional</label>
-          <div class="view-center-row">
-            <input type="number" id="view-center-x" value="0" step="any" placeholder="x">
-            <input type="number" id="view-center-y" value="0" step="any" placeholder="y">
-            <input type="number" id="view-center-z" value="0" step="any" placeholder="z">
-          </div>
-          <div class="button-row flush">
-            <button id="apply-view-center" class="secondary">Apply center</button>
           </div>
         </div>
-        <div id="display-block">
-          <h2 class="section-title">Display</h2>
+      </section>
+      <section class="panel" id="display-block">
+        <h2 class="section-title">Cell</h2>
+        <div class="cell-block">
           <label>Range</label>
           <div class="button-row flush" id="display-controls">
             <button class="secondary display-button selected" data-display-mode="source">Unit cell</button>
@@ -837,10 +899,19 @@ HTML = """<!doctype html>
             <button class="secondary display-button" data-display-mode="expanded_0_75">±3/4</button>
             <button class="secondary display-button" data-display-mode="expanded_1_0">±1</button>
           </div>
+        </div>
+        <div class="cell-block">
           <label>Unit cell origin</label>
           <div class="button-row flush" id="cell-origin-controls">
             <button class="secondary cell-origin-button selected" data-cell-origin-mode="center">Center</button>
             <button class="secondary cell-origin-button" data-cell-origin-mode="corner">Corner</button>
+          </div>
+        </div>
+        <div class="cell-block">
+          <label>Cell basis</label>
+          <div class="button-row flush" id="cell-setting-controls">
+            <button class="secondary cell-setting-button" data-cell-setting-mode="primitive">Primitive cell</button>
+            <button class="secondary cell-setting-button" data-cell-setting-mode="conventional">Bravais cell</button>
           </div>
         </div>
       </section>
@@ -871,6 +942,7 @@ let lastAtomRenderSignature = "";
 let state = {};
 let directionFilterValue = "";
 let atomElementFilterValue = "";
+let operationLabelMode = "standard";
 let summariesReady = false;
 let activeMode = "standard";
 let customUnmappedAtoms = new Set();
@@ -906,8 +978,16 @@ function optionText(operation) {
   if (sourceKind === "molecule") {
     return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
   }
-  const element = operation.element_summary ? ` | ${operation.element_summary}` : "";
+  const summary = operationSummaryText(operation);
+  const element = summary ? ` | ${summary}` : "";
   return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}${element}`;
+}
+
+function operationSummaryText(operation) {
+  if (operationLabelMode === "itc_like") {
+    return operation.itc_like_summary || operation.element_summary || "";
+  }
+  return operation.element_summary || "";
 }
 
 function renderHtml(text) {
@@ -1077,6 +1157,18 @@ function renderDirectionFilter() {
   }
 }
 
+function syncOperationLabelModeControls() {
+  const block = document.getElementById("operation-label-mode-block");
+  if (block) block.hidden = sourceKind !== "crystal";
+  const select = document.getElementById("operation-label-mode");
+  if (select) select.value = operationLabelMode;
+  const hint = document.getElementById("operation-notation-hint");
+  if (!hint) return;
+  hint.textContent = operationLabelMode === "itc_like"
+    ? "ITC-like notation is a readable approximation; exact ITC row matching is not guaranteed."
+    : "The selected operation controls the axis/plane/center shown in PyVista.";
+}
+
 function sortedOperations() {
   const mode = document.getElementById("operation-sort").value;
   return [...operations].sort((a, b) => {
@@ -1229,6 +1321,14 @@ function renderStructureInfo() {
 
   appendSummaryGrid(root, summaryItems, "primary");
 
+  if (sourceKind === "crystal") {
+    appendSummaryGrid(root, [
+      ["Cell", formatCellSettingLabel(state.cell_setting_mode || metadata.display_cell_setting || "native")],
+      ["Atoms", metadata.display_atom_count || atoms.length || "-"],
+      ["Operations", metadata.operation_count || operations.length || "-"],
+    ], "cell-setting");
+  }
+
   const lattice = metadata.lattice_parameters;
   if (sourceKind === "crystal" && lattice) {
     appendSummaryGrid(root, [
@@ -1241,6 +1341,15 @@ function renderStructureInfo() {
     ], "compact");
   }
   panel.hidden = false;
+}
+
+function formatCellSettingLabel(value) {
+  const mode = String(value || "native").toLowerCase();
+  if (mode === "primitive") return "Primitive cell";
+  if (mode === "conventional") return "Bravais cell";
+  if (mode === "refined") return "Refined";
+  if (mode === "hexagonal_conventional") return "Hexagonal conventional";
+  return "As loaded";
 }
 
 function symmetryLabelWithGenerators(label, generators, options = {}) {
@@ -1398,6 +1507,12 @@ function predictedLoadFailureReason(errorText, context = {}) {
   if (lower.includes("analysis timed out")) {
     return `Analysis did not finish within the timeout${name}. The file may be too large, malformed, or triggering a slow symmetry analysis path.`;
   }
+  if (lower.includes("already represented as a primitive cell")) {
+    return `This structure is already represented as a primitive cell${name}.`;
+  }
+  if (lower.includes("already represented as a bravais cell")) {
+    return `This structure is already represented as a Bravais cell${name}.`;
+  }
   if (lower.includes("invalid json")) {
     return `The browser request was malformed before the file could be analyzed${name}. Try reopening the file.`;
   }
@@ -1484,6 +1599,9 @@ function renderOperationDetails() {
 
   let lines = [];
   lines.push(`${stripHtml(optionText(op))}`);
+  if (operationLabelMode === "itc_like") {
+    lines.push("notation: ITC-like approximation");
+  }
   if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
   lines.push("W (frac):");
   for (const row of W) lines.push(`  [${row.map(fmtMatVal).join("  ")}]`);
@@ -1699,6 +1817,23 @@ function syncCellOriginButtons() {
   }
 }
 
+function syncCellSettingButtons() {
+  const cellSettingMode = state.cell_setting_mode || "native";
+  for (const button of document.querySelectorAll(".cell-setting-button")) {
+    button.classList.toggle("selected", button.dataset.cellSettingMode === cellSettingMode);
+  }
+}
+
+function setCellSettingBusy(busy, mode = "") {
+  for (const button of document.querySelectorAll(".cell-setting-button")) {
+    button.disabled = busy;
+  }
+  if (busy) {
+    document.getElementById("status").textContent =
+      `Converting cell setting to ${formatCellSettingLabel(mode)}...`;
+  }
+}
+
 function syncProjectionButtons() {
   const projectionMode = state.projection_mode || "perspective";
   for (const button of document.querySelectorAll(".projection-button")) {
@@ -1790,6 +1925,7 @@ function renderStatus() {
     `operation: ${activeMode === "custom" ? (copMatrix ? "custom " + copMatrix.op_type : "custom unchecked") : (operation ? stripHtml(optionText(operation)) : state.operation_index)}\\n` +
     `speed: ${state.speed || 1.0}x\\n` +
     `projection: ${state.projection_mode || "perspective"}\\n` +
+    `cell: ${state.cell_setting_mode || "native"}\\n` +
     `display: ${state.display_mode || "source"}\\n` +
     `scope: ${scopeLabel}\\n` +
     `selected atoms: ${selected}\\n` +
@@ -1799,6 +1935,11 @@ function renderStatus() {
 }
 
 function viewCenterValue(id, fallback = 0) {
+  const value = Number(document.getElementById(id).value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function viewDirectionValue(id, fallback = 0) {
   const value = Number(document.getElementById(id).value);
   return Number.isFinite(value) ? value : fallback;
 }
@@ -1814,6 +1955,30 @@ function applyViewCenter() {
   });
 }
 
+function applyViewDirectionIndex() {
+  postState({
+    view_direction_request_id: Date.now(),
+    view_direction_frac: [
+      viewDirectionValue("view-dir-h"),
+      viewDirectionValue("view-dir-k"),
+      viewDirectionValue("view-dir-l", 1),
+    ],
+    playing: false,
+  });
+}
+
+function applyViewPlaneIndex() {
+  postState({
+    view_plane_request_id: Date.now(),
+    view_plane_hkl: [
+      viewDirectionValue("view-plane-h"),
+      viewDirectionValue("view-plane-k"),
+      viewDirectionValue("view-plane-l", 1),
+    ],
+    playing: false,
+  });
+}
+
 function syncSourceKindControls() {
   sourceKind = state.source_kind || "crystal";
   syncStructureKindButtons();
@@ -1825,7 +1990,10 @@ function syncSourceKindControls() {
   renderExampleOptions();
   document.getElementById("mode-controls").hidden = !loadedForSelected || sourceKind !== "crystal";
   document.getElementById("display-block").hidden = !loadedForSelected || sourceKind !== "crystal";
+  document.getElementById("view-direction-index-block").hidden = !loadedForSelected || sourceKind !== "crystal";
+  document.getElementById("view-plane-index-block").hidden = !loadedForSelected || sourceKind !== "crystal";
   document.getElementById("unit-cell-atoms").hidden = sourceKind !== "crystal";
+  syncOperationLabelModeControls();
   const config = sourceKindConfig(sourceKind);
   document.querySelector("#standard-panel .section-title").textContent =
     config.operationPanelTitle;
@@ -1854,10 +2022,12 @@ async function postState(update) {
   syncSpeedButtons();
   syncDisplayButtons();
   syncCellOriginButtons();
+  syncCellSettingButtons();
   syncProjectionButtons();
   syncBackgroundButtons();
   syncLegendButtons();
   syncImproperModeControl();
+  syncOperationLabelModeControls();
   syncAtomModeButtons();
   syncPlayToggleButton();
   syncGifSavingControls();
@@ -1868,6 +2038,53 @@ async function postState(update) {
   renderStructureInfo();
   renderStatus();
   renderOperationDetails();
+}
+
+async function applyCellSetting(mode) {
+  setCellSettingBusy(true, mode);
+  try {
+    const result = await api("/api/cell_setting", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({cell_setting_mode: mode}),
+    });
+    hideLoadError();
+    operations = result.operations || [];
+    atoms = result.atoms || [];
+    state = result.state || {};
+    directionFilterValue = "";
+    atomElementFilterValue = "";
+    summariesReady = Boolean(state.summaries_ready);
+    customUnmappedAtoms = new Set();
+    copMatrix = null;
+    activeMode = "standard";
+    document.getElementById("cop-result").hidden = true;
+    syncActiveModeControls();
+    syncSourceKindControls();
+    renderDirectionFilter();
+    renderAtomElementFilter();
+    renderElementColorControls();
+    syncOperationSelection();
+    syncSpeedButtons();
+    syncDisplayButtons();
+    syncCellOriginButtons();
+    syncCellSettingButtons();
+    syncProjectionButtons();
+    syncBackgroundButtons();
+    syncLegendButtons();
+    syncImproperModeControl();
+    syncAtomModeButtons();
+    syncPlayToggleButton();
+    syncGifSavingControls();
+    renderOperations();
+    await refreshAtomMotion();
+    renderAtoms();
+    renderStructureInfo();
+    renderStatus();
+    renderOperationDetails();
+  } finally {
+    setCellSettingBusy(false);
+  }
 }
 
 async function refreshAtomMotion() {
@@ -2012,6 +2229,7 @@ async function applyLoadedStructure(result, fallbackError, examplePath = "", con
   syncSpeedButtons();
   syncDisplayButtons();
   syncCellOriginButtons();
+  syncCellSettingButtons();
   syncProjectionButtons();
   syncBackgroundButtons();
   syncLegendButtons();
@@ -2059,6 +2277,7 @@ async function refreshState() {
     syncSpeedButtons();
     syncDisplayButtons();
     syncCellOriginButtons();
+    syncCellSettingButtons();
     syncProjectionButtons();
     syncBackgroundButtons();
     syncLegendButtons();
@@ -2085,6 +2304,13 @@ document.getElementById("operation-sort").addEventListener("change", () => {
   directionFilterValue = "";
   renderDirectionFilter();
   renderOperations();
+});
+document.getElementById("operation-label-mode").addEventListener("change", event => {
+  operationLabelMode = event.target.value === "itc_like" ? "itc_like" : "standard";
+  syncOperationLabelModeControls();
+  renderOperations();
+  renderOperationDetails();
+  renderStatus();
 });
 for (const button of document.querySelectorAll(".structure-kind-button")) {
   button.addEventListener("click", () => setStructureKind(button.dataset.kind));
@@ -2153,6 +2379,15 @@ for (const button of document.querySelectorAll(".cell-origin-button")) {
     reset: true,
   }));
 }
+for (const button of document.querySelectorAll(".cell-setting-button")) {
+  button.addEventListener("click", () => {
+    const mode = button.dataset.cellSettingMode;
+    if (mode === (state.cell_setting_mode || "native")) return;
+    applyCellSetting(mode).catch(error => {
+      showLoadError("Cell setting failed", error && error.message ? error.message : error, {kind: "crystal"});
+    });
+  });
+}
 for (const button of document.querySelectorAll(".projection-button")) {
   button.addEventListener("click", () => postState({
     projection_mode: button.dataset.projectionMode,
@@ -2185,6 +2420,8 @@ document.getElementById("reset-view").addEventListener("click", () => {
   postState({reset_view_request_id: Date.now()});
 });
 document.getElementById("apply-view-center").addEventListener("click", applyViewCenter);
+document.getElementById("view-direction-index").addEventListener("click", applyViewDirectionIndex);
+document.getElementById("view-plane-index").addEventListener("click", applyViewPlaneIndex);
 document.getElementById("save-gif").addEventListener("click", () => {
   state.gif_status = "writing GIF...";
   syncGifSavingControls();
@@ -2223,6 +2460,8 @@ document.getElementById("camera-left").addEventListener("click", () => rotateCam
 document.getElementById("camera-right").addEventListener("click", () => rotateCamera("right"));
 document.getElementById("camera-up").addEventListener("click", () => rotateCamera("up"));
 document.getElementById("camera-down").addEventListener("click", () => rotateCamera("down"));
+document.getElementById("camera-roll-left").addEventListener("click", () => rotateCamera("roll-left"));
+document.getElementById("camera-roll-right").addEventListener("click", () => rotateCamera("roll-right"));
 document.getElementById("displayed-atoms").addEventListener("click", () => {
   postState({selected_atoms: atoms.map(atom => atom.index), scope: "displayed", playing: false, reset: true});
 });
@@ -2464,6 +2703,7 @@ async function boot() {
   syncSpeedButtons();
   syncDisplayButtons();
   syncCellOriginButtons();
+  syncCellSettingButtons();
   syncProjectionButtons();
   syncBackgroundButtons();
   syncLegendButtons();

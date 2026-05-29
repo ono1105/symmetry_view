@@ -5,6 +5,7 @@ import numpy as np
 from crystal_viewer.viewer.animation_context import (
     animation_paths,
     select_animation_context,
+    shared_step_translation,
 )
 from crystal_viewer.viewer.animation_path import (
     build_operation_path,

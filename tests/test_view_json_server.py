@@ -9,6 +9,7 @@ from tools.view_json_server import (
     atom_motion_api_items,
     cached_export_json_path,
     example_catalog,
+    export_cell_setting_json_worker,
     resolve_example_path,
 )
 
@@ -121,6 +122,97 @@ class CachedExportJsonPathTest(unittest.TestCase):
         output_mtime = input_path.stat().st_mtime + 10
         os.utime(output_path, (output_mtime, output_mtime))
         return input_path, output_path
+
+
+class CellSettingWorkerTest(unittest.TestCase):
+    def test_worker_converts_batio3_to_conventional_cell(self):
+        payload = json.loads(Path("exports/json/batio3.json").read_text(encoding="utf-8"))
+
+        converted = export_cell_setting_json_worker(
+            payload,
+            cell_setting="conventional",
+            tolerance_cart=1e-2,
+            indent=2,
+            timeout_sec=30,
+            require_distinct=True,
+        )
+
+        render_data = converted["render_data"]
+        self.assertEqual(render_data["metadata"]["display_cell_setting"], "conventional")
+        self.assertEqual(len(render_data["atoms"]), 15)
+        self.assertTrue(converted["atom_mappings"]["complete"])
+
+    def test_worker_can_require_distinct_primitive_cell(self):
+        payload = json.loads(Path("exports/json/agcl.json").read_text(encoding="utf-8"))
+
+        with self.assertRaises(RuntimeError):
+            export_cell_setting_json_worker(
+                payload,
+                cell_setting="primitive",
+                tolerance_cart=1e-2,
+                indent=2,
+                timeout_sec=30,
+                require_distinct=True,
+            )
+
+    def test_worker_can_require_distinct_bravais_cell(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+
+        with self.assertRaises(RuntimeError):
+            export_cell_setting_json_worker(
+                payload,
+                cell_setting="conventional",
+                tolerance_cart=1e-2,
+                indent=2,
+                timeout_sec=30,
+                require_distinct=True,
+            )
+
+    def test_worker_can_round_trip_halite_primitive_to_bravais(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+        primitive = export_cell_setting_json_worker(
+            payload,
+            cell_setting="primitive",
+            tolerance_cart=1e-2,
+            indent=2,
+            timeout_sec=30,
+            require_distinct=True,
+        )
+
+        bravais = export_cell_setting_json_worker(
+            primitive,
+            cell_setting="conventional",
+            tolerance_cart=1e-2,
+            indent=2,
+            timeout_sec=30,
+            require_distinct=True,
+        )
+
+        self.assertEqual(bravais["render_data"]["metadata"]["display_cell_setting"], "conventional")
+        self.assertEqual(len(bravais["render_data"]["atoms"]), 8)
+
+    def test_worker_can_round_trip_batio3_bravais_to_primitive(self):
+        payload = json.loads(Path("exports/json/batio3.json").read_text(encoding="utf-8"))
+        bravais = export_cell_setting_json_worker(
+            payload,
+            cell_setting="conventional",
+            tolerance_cart=1e-2,
+            indent=2,
+            timeout_sec=30,
+            require_distinct=True,
+        )
+
+        primitive = export_cell_setting_json_worker(
+            bravais,
+            cell_setting="primitive",
+            tolerance_cart=1e-2,
+            indent=2,
+            timeout_sec=30,
+            require_distinct=True,
+        )
+
+        self.assertEqual(primitive["render_data"]["metadata"]["display_cell_setting"], "primitive")
+        self.assertEqual(len(primitive["render_data"]["atoms"]), 5)
 
 
 class ExampleCatalogAndPathTest(unittest.TestCase):

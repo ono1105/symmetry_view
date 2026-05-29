@@ -380,6 +380,10 @@ def make_handler(
                 self.handle_open_example(payload)
                 return
 
+            if path == "/api/cell_setting":
+                self.handle_cell_setting(payload)
+                return
+
             if path != "/api/state":
                 self.send_error(404)
                 return
@@ -499,6 +503,63 @@ def make_handler(
                     body = {"ok": False, "error": str(exc), "state": dict(shared_state)}
                 self.send_json(body)
 
+        def handle_cell_setting(self, payload: dict) -> None:
+            mode = str(payload.get("cell_setting_mode") or payload.get("mode") or "native")
+            try:
+                with state_lock:
+                    if shared_state.get("import_in_progress"):
+                        raise RuntimeError("A structure is still loading. Wait for it to finish before changing cell setting.")
+                    base_payload = session.base_payload
+                    current_payload = session.payload
+                    current_json_path = session.json_path
+                    preserved_status = shared_state.get("import_status", "")
+                source_payload = base_payload if mode == "native" else current_payload
+                converted_payload = export_cell_setting_json_worker(
+                    source_payload,
+                    cell_setting=mode,
+                    tolerance_cart=tolerance_cart,
+                    indent=indent,
+                    timeout_sec=analysis_timeout_sec,
+                    require_distinct=mode in ("primitive", "conventional"),
+                )
+                new_session = ViewerSession(current_json_path, converted_payload, base_payload=base_payload)
+                with state_lock:
+                    preserved = {
+                        "speed": shared_state.get("speed", 1.0),
+                        "projection_mode": shared_state.get("projection_mode", "perspective"),
+                        "background_mode": shared_state.get("background_mode", "dark"),
+                        "legend_visible": shared_state.get("legend_visible", False),
+                        "cell_origin_mode": shared_state.get("cell_origin_mode", "center"),
+                        "cell_setting_mode": mode,
+                        "improper_mode": shared_state.get("improper_mode", "auto"),
+                        "display_mode": shared_state.get("display_mode", default_display_mode),
+                        "reload_request_id": shared_state.get("reload_request_id"),
+                        "import_status": preserved_status,
+                        "json_path": shared_state.get("json_path", str(current_json_path)),
+                    }
+                    session.replace_from(new_session)
+                    next_state = initial_render_state(
+                        converted_payload,
+                        initial_operation=None,
+                        display_mode=default_display_mode,
+                        preserved=preserved,
+                    )
+                    next_state["reload_request_id"] = int(shared_state.get("reload_request_id") or 0) + 1
+                    next_state["structure_loaded"] = True
+                    next_state["import_status"] = preserved_status
+                    next_state["json_path"] = str(current_json_path)
+                    shared_state.clear()
+                    shared_state.update(next_state)
+                    body = {
+                        "ok": True,
+                        "operations": session.operation_summary_items,
+                        "atoms": atom_api_items(session.atoms),
+                        "state": dict(shared_state),
+                    }
+                self.send_json(body)
+            except Exception as exc:
+                self.send_json_error(str(exc), status=400)
+
         def load_payload(
             self,
             json_path: Path,
@@ -521,6 +582,7 @@ def make_handler(
                     "background_mode": shared_state.get("background_mode", "dark"),
                     "legend_visible": shared_state.get("legend_visible", False),
                     "cell_origin_mode": shared_state.get("cell_origin_mode", "center"),
+                    "cell_setting_mode": "native",
                     "improper_mode": shared_state.get("improper_mode", "auto"),
                     "display_mode": shared_state.get("display_mode", default_display_mode),
                     "reload_request_id": shared_state.get("reload_request_id"),
@@ -705,6 +767,66 @@ def export_analysis_to_json_worker_cached(
         timeout_sec=timeout_sec,
     )
     return exported_path, None
+
+
+def export_cell_setting_json_worker(
+    base_payload: dict,
+    *,
+    cell_setting: str,
+    tolerance_cart: float,
+    indent: int,
+    timeout_sec: float | None = None,
+    require_distinct: bool = False,
+) -> dict:
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".json",
+        prefix="symmetry_view_cell_base_",
+        dir=tempfile.gettempdir(),
+        encoding="utf-8",
+        delete=False,
+    ) as base_file:
+        json.dump(base_payload, base_file, ensure_ascii=False)
+        base_path = Path(base_file.name)
+    output_path = Path(tempfile.gettempdir()) / f"symmetry_view_cell_setting_{time.monotonic_ns()}.json"
+    command = [
+        sys.executable,
+        str(Path(__file__).with_name("export_cell_setting_json.py")),
+        str(base_path),
+        "--cell-setting",
+        cell_setting,
+        "--output",
+        str(output_path),
+        "--tolerance-cart",
+        str(tolerance_cart),
+        "--indent",
+        str(indent),
+    ]
+    if require_distinct:
+        command.append("--require-distinct")
+    try:
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"cell setting conversion timed out after {timeout_sec:g} seconds"
+            ) from exc
+        if result.returncode != 0:
+            message = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(message or f"cell setting worker failed with exit code {result.returncode}")
+        return json.loads(output_path.read_text(encoding="utf-8"))
+    finally:
+        for path in (base_path, output_path):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def import_status_with_warnings(import_status: str, payload: dict) -> str:

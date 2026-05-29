@@ -8,6 +8,7 @@ from crystal_viewer.geometry import normalize
 from crystal_viewer.viewer.animation import animation_paths
 from crystal_viewer.viewer.animation_path import effective_rotation_axis
 from crystal_viewer.viewer.display_atoms import display_point_cart, display_scene_center
+from crystal_viewer.viewer.glide_geometry import centered_fractional_vector, glide_translation_frac
 from crystal_viewer.viewer.operation_lookup import selected_elements, selected_mapping
 from crystal_viewer.viewer.symmetry_elements import visual_improper_elements
 
@@ -26,16 +27,32 @@ def operation_summaries(
             render_data,
             summary_operation,
         )
+        display_symbol = display_operation_symbol(render_data, summary_operation, axes, planes)
         summaries.append(
             {
                 "index": operation["index"],
                 "label": operation["label"],
                 "symbol": operation.get("symbol") or operation["label"],
-                "display_symbol": display_operation_symbol(render_data, summary_operation, axes),
+                "display_symbol": display_symbol,
                 "kind": operation["kind"],
                 "order": operation.get("order"),
                 "angle_deg": operation.get("angle_deg"),
-                "element_summary": operation_element_summary(render_data, summary_operation, axes, planes, centers),
+                "element_summary": operation_element_summary(
+                    render_data,
+                    summary_operation,
+                    axes,
+                    planes,
+                    centers,
+                    display_symbol=display_symbol,
+                ),
+                "itc_like_summary": operation_itc_like_summary(
+                    render_data,
+                    summary_operation,
+                    axes,
+                    planes,
+                    centers,
+                    display_symbol=display_symbol,
+                ),
                 "element_sort_key": operation_element_sort_key(render_data, summary_operation, axes, planes, centers),
                 "direction_sort_key": operation_direction_sort_key(render_data, summary_operation, axes, planes, centers),
                 "direction_label": operation_direction_label(render_data, summary_operation, axes, planes, centers),
@@ -69,10 +86,14 @@ def operation_summary_elements(
     )
 
 
-def display_operation_symbol(render_data: dict, operation: dict, axes: list[dict]) -> str:
+def display_operation_symbol(render_data: dict, operation: dict, axes: list[dict], planes: list[dict]) -> str:
     symbol = operation.get("symbol") or operation["label"]
     if is_pure_translation_operation(operation):
         return "t"
+    if str(operation["kind"]).find("glide") >= 0 and str(symbol) == "g" and planes:
+        inferred = infer_standard_glide_symbol_for_planes(render_data, operation, planes)
+        if inferred is not None:
+            return inferred
     if "?" not in str(symbol):
         return str(symbol)
     if not str(operation["kind"]).startswith("screw") or not axes:
@@ -96,7 +117,7 @@ def infer_screw_symbol(render_data: dict, operation: dict, axis: dict) -> str | 
     projected = float(np.dot(displacement, direction))
 
     lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    frac_direction = direction @ np.linalg.inv(lattice)
+    frac_direction = direction @ lattice_inverse(unit_cell)
     primitive_frac = integer_index_vector(frac_direction)
     if primitive_frac is None:
         return None
@@ -120,12 +141,131 @@ def infer_screw_symbol(render_data: dict, operation: dict, axis: dict) -> str | 
     return f"{order_int}_{screw}"
 
 
+def plane_hkl_vector(render_data: dict, plane: dict) -> np.ndarray | None:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return None
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    normal = np.asarray(plane["normal_cart"], dtype=float)
+    return lattice @ normal
+
+
+def infer_standard_glide_symbol(render_data: dict, operation: dict, plane: dict) -> str | None:
+    glide_frac = glide_translation_frac(render_data, operation, plane)
+    if glide_frac is None:
+        return None
+
+    magnitudes = np.abs(centered_fractional_vector(glide_frac))
+    half_axes = [index for index, value in enumerate(magnitudes) if abs(float(value) - 0.5) < 1e-5]
+    quarter_axes = [
+        index
+        for index, value in enumerate(magnitudes)
+        if min(abs(float(value) - 0.25), abs(float(value) - 0.75)) < 1e-5
+    ]
+    other_axes = [
+        index
+        for index, value in enumerate(magnitudes)
+        if value > 1e-5 and index not in half_axes and index not in quarter_axes
+    ]
+    if other_axes:
+        return None
+    if len(quarter_axes) >= 2 and not half_axes:
+        return "d"
+    if len(half_axes) >= 2 and not quarter_axes:
+        return "n"
+    if len(half_axes) == 1 and not quarter_axes:
+        return ("a", "b", "c")[half_axes[0]]
+    return None
+
+
+def infer_standard_glide_symbol_for_planes(render_data: dict, operation: dict, planes: list[dict]) -> str | None:
+    candidates = []
+    for plane in planes:
+        symbol = infer_standard_glide_symbol(render_data, operation, plane)
+        glide_frac = glide_translation_frac(render_data, operation, plane)
+        if symbol is None or glide_frac is None:
+            continue
+        centered = centered_fractional_vector(glide_frac)
+        candidates.append((glide_vector_cart_norm(render_data, centered), symbol))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    best_norm = candidates[0][0]
+    symbols = {symbol for norm, symbol in candidates if abs(norm - best_norm) < 1e-5}
+    if len(symbols) != 1:
+        return None
+    return next(iter(symbols))
+
+
+def readable_glide_representative(
+    render_data: dict,
+    operation: dict,
+    planes: list[dict],
+) -> tuple[dict, np.ndarray] | None:
+    candidates = []
+    for index, plane in enumerate(planes):
+        glide_frac = glide_translation_frac(render_data, operation, plane)
+        if glide_frac is None:
+            continue
+        centered = centered_fractional_vector(glide_frac)
+        cart_norm = glide_vector_cart_norm(render_data, centered)
+        fraction_score = fractional_vector_complexity(centered)
+        offset_score = plane_offset_complexity(render_data, plane)
+        candidates.append((cart_norm, fraction_score, offset_score, index, plane, centered))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[:4])
+    _, _, _, _, plane, glide_frac = candidates[0]
+    return plane, glide_frac
+
+
+def glide_vector_cart_norm(render_data: dict, glide_frac: np.ndarray) -> float:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return float(np.linalg.norm(glide_frac))
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    return float(np.linalg.norm(np.asarray(glide_frac, dtype=float) @ lattice))
+
+
+def fractional_vector_complexity(values: np.ndarray) -> int:
+    return sum(fraction_denominator(value) for value in np.asarray(values, dtype=float))
+
+
+def plane_offset_complexity(render_data: dict, plane: dict) -> int:
+    hkl = plane_hkl_vector(render_data, plane)
+    if hkl is None:
+        return 999
+    ints = integer_index_vector(hkl)
+    if ints is None:
+        return 999
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return 999
+    frac = np.asarray(plane["point_cart"], dtype=float) @ lattice_inverse(unit_cell)
+    offset = float(np.dot(ints, frac))
+    offset -= np.floor(offset)
+    return fraction_denominator(offset)
+
+
+def fraction_denominator(value: float) -> int:
+    value = float(abs(value))
+    value -= np.floor(value)
+    if value > 0.5:
+        value = 1.0 - value
+    fraction = Fraction(value).limit_denominator(24)
+    if abs(value - float(fraction)) < 2e-3:
+        return fraction.denominator
+    return 999
+
+
 def operation_element_summary(
     render_data: dict,
     operation: dict,
     axes: list[dict],
     planes: list[dict],
     centers: list[dict],
+    *,
+    display_symbol: str | None = None,
 ) -> str:
     parts = []
     effective_axis = axes[0] if axes else effective_axis_from_operation(operation, centers)
@@ -137,10 +277,15 @@ def operation_element_summary(
         )
     if planes:
         plane = planes[0]
-        parts.append(
+        summary = (
             f"{plane_normal_label(render_data, plane)} "
             f"@ {point_label(render_data, plane['point_cart'])}"
         )
+        if "glide" in str(operation["kind"]) and display_symbol == "g":
+            glide_frac = glide_translation_frac(render_data, operation, plane)
+            if glide_frac is not None:
+                summary += f"; glide {fractional_vector_label(centered_fractional_vector(glide_frac))}"
+        parts.append(summary)
     if centers and effective_axis is None:
         center = centers[0]
         parts.append(f"@ {point_label(render_data, center['point_cart'])}")
@@ -148,6 +293,33 @@ def operation_element_summary(
     if translation_direction is not None and not parts:
         parts.append(translation_direction)
     return "; ".join(parts)
+
+
+def operation_itc_like_summary(
+    render_data: dict,
+    operation: dict,
+    axes: list[dict],
+    planes: list[dict],
+    centers: list[dict],
+    *,
+    display_symbol: str | None = None,
+) -> str:
+    if "glide" in str(operation["kind"]) and planes:
+        representative = readable_glide_representative(render_data, operation, planes)
+        if representative is not None:
+            plane, glide_frac = representative
+            return (
+                f"g{fractional_vector_label(glide_frac)} "
+                f"{plane_equation_label(render_data, plane)}"
+            )
+    return operation_element_summary(
+        render_data,
+        operation,
+        axes,
+        planes,
+        centers,
+        display_symbol=display_symbol,
+    )
 
 
 def operation_element_sort_key(
@@ -321,8 +493,7 @@ def translation_direction_label(render_data: dict, operation: dict) -> str | Non
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         return vector_label(direction, bracket=("[", "]"))
-    lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    frac_direction = direction @ np.linalg.inv(lattice)
+    frac_direction = direction @ lattice_inverse(unit_cell)
     return integer_index_label(frac_direction, bracket=("[", "]"), orient_positive=False)
 
 
@@ -333,8 +504,7 @@ def translation_direction_label_text(render_data: dict, operation: dict) -> str 
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         return vector_label(direction, bracket=("[", "]"))
-    lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    frac_direction = direction @ np.linalg.inv(lattice)
+    frac_direction = direction @ lattice_inverse(unit_cell)
     return integer_index_label_text(frac_direction, bracket=("[", "]"), orient_positive=False)
 
 
@@ -371,8 +541,7 @@ def point_sort_key(render_data: dict, point_cart: list[float]) -> str:
     if unit_cell is None:
         values = point
     else:
-        lattice = np.asarray(unit_cell["lattice"], dtype=float)
-        values = point @ np.linalg.inv(lattice)
+        values = point @ lattice_inverse(unit_cell)
         values = values - np.floor(values + 1e-9)
     return ",".join(f"{float(value):.6f}" for value in values)
 
@@ -404,8 +573,7 @@ def axis_direction_label(render_data: dict, axis: dict) -> str:
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         return vector_label(vector, bracket=("[", "]"))
-    lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    frac_direction = vector @ np.linalg.inv(lattice)
+    frac_direction = vector @ lattice_inverse(unit_cell)
     return integer_index_label(frac_direction, bracket=("[", "]"))
 
 
@@ -414,31 +582,58 @@ def axis_direction_label_text(render_data: dict, axis: dict) -> str:
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         return vector_label(vector, bracket=("[", "]"))
-    lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    frac_direction = vector @ np.linalg.inv(lattice)
+    frac_direction = vector @ lattice_inverse(unit_cell)
     return integer_index_label_text(frac_direction, bracket=("[", "]"))
 
 
 def plane_normal_label(render_data: dict, plane: dict) -> str:
-    normal = np.asarray(plane["normal_cart"], dtype=float)
-    unit_cell = render_data.get("unit_cell")
-    if unit_cell is None:
+    hkl = plane_hkl_vector(render_data, plane)
+    if hkl is None:
+        normal = np.asarray(plane["normal_cart"], dtype=float)
         return vector_label(normal, bracket=("(", ")"))
-    lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    # frac @ lattice is the Cartesian point.  Plane coefficients in fractional
-    # coordinates are therefore proportional to lattice @ normal_cart.
-    hkl = lattice @ normal
     return integer_index_label(hkl, bracket=("(", ")"))
 
 
 def plane_normal_label_text(render_data: dict, plane: dict) -> str:
-    normal = np.asarray(plane["normal_cart"], dtype=float)
-    unit_cell = render_data.get("unit_cell")
-    if unit_cell is None:
+    hkl = plane_hkl_vector(render_data, plane)
+    if hkl is None:
+        normal = np.asarray(plane["normal_cart"], dtype=float)
         return vector_label(normal, bracket=("(", ")"))
-    lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    hkl = lattice @ normal
     return integer_index_label_text(hkl, bracket=("(", ")"))
+
+
+def plane_equation_label(render_data: dict, plane: dict) -> str:
+    hkl = plane_hkl_vector(render_data, plane)
+    unit_cell = render_data.get("unit_cell")
+    if hkl is None or unit_cell is None:
+        return (
+            f"{plane_normal_label_text(render_data, plane)} "
+            f"@ {point_label(render_data, plane['point_cart'])}"
+        )
+    ints = integer_index_vector(hkl)
+    if ints is None:
+        return (
+            f"{plane_normal_label_text(render_data, plane)} "
+            f"@ {point_label(render_data, plane['point_cart'])}"
+        )
+    frac = np.asarray(plane["point_cart"], dtype=float) @ lattice_inverse(unit_cell)
+    offset = float(np.dot(ints, frac))
+    offset -= np.floor(offset)
+    terms = []
+    variables = ("x", "y", "z")
+    for coefficient, variable in zip(ints, variables):
+        coefficient = int(coefficient)
+        if coefficient == 0:
+            continue
+        if coefficient == 1:
+            term = variable
+        elif coefficient == -1:
+            term = f"-{variable}"
+        else:
+            term = f"{coefficient}{variable}"
+        terms.append(term)
+    left = " + ".join(terms).replace("+ -", "- ")
+    return f"plane {left}={format_fraction(offset)}"
 
 
 def point_label(render_data: dict, point_cart: list[float]) -> str:
@@ -446,10 +641,17 @@ def point_label(render_data: dict, point_cart: list[float]) -> str:
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
         return vector_label(point, bracket=("(", ")"))
-    lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    frac = point @ np.linalg.inv(lattice)
+    frac = point @ lattice_inverse(unit_cell)
     wrapped = frac - np.floor(frac + 1e-9)
     return "(" + ", ".join(format_fraction(value) for value in wrapped) + ")"
+
+
+def fractional_vector_label(values: np.ndarray) -> str:
+    return "(" + ",".join(format_fraction(float(value)) for value in values) + ")"
+
+
+def lattice_inverse(unit_cell: dict) -> np.ndarray:
+    return np.linalg.inv(np.asarray(unit_cell["lattice"], dtype=float))
 
 
 def atom_frac_label(atom: dict) -> str | None:

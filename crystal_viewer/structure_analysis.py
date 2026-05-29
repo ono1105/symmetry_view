@@ -91,13 +91,41 @@ def analyze_cif(
     search_range: int = 2,
     legacy_core_path: str | Path = DEFAULT_LEGACY_CORE,
 ) -> StructureAnalysisResult:
-    core = load_legacy_core(legacy_core_path)
     cif_path = Path(cif_path)
     if not cif_path.exists():
         raise AnalysisError(f"CIF file not found: {cif_path}")
 
     loaded = load_structure_from_cif(cif_path)
-    structure = loaded.structure
+    asymmetric_atoms = (
+        loaded.asymmetric_atoms
+        if loaded.asymmetric_atoms is not None
+        else read_asymmetric_unit_sites(cif_path, np.asarray(loaded.structure.lattice.matrix, dtype=float))
+    )
+    return analyze_structure(
+        loaded.structure,
+        source_file=cif_path,
+        asymmetric_atoms=asymmetric_atoms,
+        warnings=loaded.warnings,
+        symprec=symprec,
+        angle_tolerance=angle_tolerance,
+        search_range=search_range,
+        legacy_core_path=legacy_core_path,
+    )
+
+
+def analyze_structure(
+    structure: Structure,
+    *,
+    source_file: str | Path,
+    asymmetric_atoms: tuple[AsymmetricUnitSite, ...] = (),
+    warnings: tuple[str, ...] = (),
+    symprec: float = 1e-3,
+    angle_tolerance: float = 5.0,
+    search_range: int = 2,
+    legacy_core_path: str | Path = DEFAULT_LEGACY_CORE,
+) -> StructureAnalysisResult:
+    core = load_legacy_core(legacy_core_path)
+    source_file = Path(source_file)
     cell = structure_to_spglib_cell(structure)
     dataset = spglib.get_symmetry_dataset(
         cell,
@@ -121,15 +149,9 @@ def analyze_cif(
         for index, (W, t) in enumerate(zip(rotations, translations))
     )
 
-    asymmetric_atoms = (
-        loaded.asymmetric_atoms
-        if loaded.asymmetric_atoms is not None
-        else read_asymmetric_unit_sites(cif_path, np.asarray(structure.lattice.matrix, dtype=float))
-    )
-
     return StructureAnalysisResult(
         structure=convert_structure(
-            cif_path,
+            source_file,
             structure,
             asymmetric_atoms=asymmetric_atoms,
             rotations=rotations,
@@ -143,7 +165,7 @@ def analyze_cif(
         geometry_groups=geometry_groups,
         raw_merged=merged,
         raw_per_operation=per_operation,
-        warnings=loaded.warnings,
+        warnings=warnings,
     )
 
 

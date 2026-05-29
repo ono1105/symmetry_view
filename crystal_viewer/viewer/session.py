@@ -7,11 +7,12 @@ from crystal_viewer.viewer.operation_labels import operation_summaries
 
 
 class ViewerSession:
-    def __init__(self, json_path: Path, payload: dict) -> None:
-        self.load(json_path, payload)
+    def __init__(self, json_path: Path, payload: dict, *, base_payload: dict | None = None) -> None:
+        self.load(json_path, payload, base_payload=base_payload)
 
-    def load(self, json_path: Path, payload: dict) -> None:
+    def load(self, json_path: Path, payload: dict, *, base_payload: dict | None = None) -> None:
         self.json_path = json_path
+        self.base_payload = base_payload or payload
         self.payload = payload
         self.render_data = payload["render_data"]
         self.atoms = self.render_data["atoms"]
@@ -23,6 +24,7 @@ class ViewerSession:
 
     def replace_from(self, other: "ViewerSession") -> None:
         self.json_path = other.json_path
+        self.base_payload = other.base_payload
         self.payload = other.payload
         self.render_data = other.render_data
         self.atoms = other.atoms

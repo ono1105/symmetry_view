@@ -107,19 +107,27 @@ def add_atom_legend(
     labels = atom_legend_entries(render_data, element_colors=element_colors)
     if not labels:
         return None
-    height = min(max(0.06, 0.035 * len(labels) + 0.035), 0.42)
+    height = min(max(0.08, 0.045 * len(labels) + 0.04), 0.50)
     try:
         actor = plotter.add_legend(
             labels=labels,
             bcolor=viewer_background_color(background_mode),
             border=True,
-            size=(0.15, height),
+            size=(0.22, height),
             loc="upper right",
             face="circle",
         )
-        actor.GetEntryTextProperty().SetColor(
+        text_property = actor.GetEntryTextProperty()
+        text_property.SetColor(
             (0.93, 0.95, 0.97) if background_mode == "dark" else (0.07, 0.09, 0.13)
         )
+        text_property.SetFontSize(18)
+        text_property.BoldOn()
+        try:
+            text_property.SetFontFamilyToArial()
+            text_property.ShadowOff()
+        except Exception:
+            pass
         return actor
     except Exception:
         return None

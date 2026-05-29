@@ -88,6 +88,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_view_request_id: int | None = None
         self.last_reset_view_request_id: int | None = None
         self.last_view_center_request_id: int | None = None
+        self.last_view_direction_request_id: int | None = None
+        self.last_view_plane_request_id: int | None = None
         self.last_camera_request_id: int | None = None
         self.last_gif_request_id: int | None = None
         self.last_gif_3view_request_id: int | None = None
@@ -298,6 +300,27 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 self.set_gif_status(f"view center failed: {exc}")
                 should_update_status = True
             self.last_view_center_request_id = snapshot.view_center_request_id
+            should_render = True
+
+        if (
+            snapshot.view_direction_request_id is not None
+            and snapshot.view_direction_request_id != self.last_view_direction_request_id
+        ):
+            try:
+                self.view_along_fractional_direction(snapshot.view_direction_frac)
+            except Exception as exc:
+                self.set_gif_status(f"view direction failed: {exc}")
+                should_update_status = True
+            self.last_view_direction_request_id = snapshot.view_direction_request_id
+            should_render = True
+
+        if snapshot.view_plane_request_id is not None and snapshot.view_plane_request_id != self.last_view_plane_request_id:
+            try:
+                self.view_along_plane_normal(snapshot.view_plane_hkl)
+            except Exception as exc:
+                self.set_gif_status(f"view plane failed: {exc}")
+                should_update_status = True
+            self.last_view_plane_request_id = snapshot.view_plane_request_id
             should_render = True
 
         if snapshot.camera_request_id is not None and snapshot.camera_request_id != self.last_camera_request_id:
@@ -592,6 +615,44 @@ class BrowserControlledViewer(NativePyVistaViewer):
         center, direction, up, distance = basis
         self.set_camera_view(center, direction, up, distance)
 
+    def view_along_fractional_direction(self, direction_frac: list[float] | tuple[float, ...] | None) -> None:
+        if direction_frac is None or len(direction_frac) != 3:
+            raise ValueError("enter three direction indices")
+        unit_cell = self.render_data.get("unit_cell")
+        if unit_cell is None:
+            raise ValueError("direction indices require a crystal unit cell")
+        direction_frac_array = np.asarray(direction_frac, dtype=float)
+        if not np.all(np.isfinite(direction_frac_array)):
+            raise ValueError("direction indices must contain finite numbers")
+        lattice = np.asarray(unit_cell["lattice"], dtype=float)
+        direction = direction_frac_array @ lattice
+        if np.linalg.norm(direction) < 1e-10:
+            raise ValueError("direction must not be zero")
+        direction = normalize(direction)
+        center = self.display_center()
+        distance = self.camera_distance_for_view(center, direction)
+        up = camera_up_vector(direction)
+        self.set_camera_view(center, direction, up, distance)
+
+    def view_along_plane_normal(self, hkl: list[float] | tuple[float, ...] | None) -> None:
+        if hkl is None or len(hkl) != 3:
+            raise ValueError("enter three Miller indices")
+        unit_cell = self.render_data.get("unit_cell")
+        if unit_cell is None:
+            raise ValueError("Miller indices require a crystal unit cell")
+        hkl_array = np.asarray(hkl, dtype=float)
+        if not np.all(np.isfinite(hkl_array)):
+            raise ValueError("Miller indices must contain finite numbers")
+        lattice = np.asarray(unit_cell["lattice"], dtype=float)
+        normal = np.linalg.inv(lattice) @ hkl_array
+        if np.linalg.norm(normal) < 1e-10:
+            raise ValueError("plane normal must not be zero")
+        direction = normalize(normal)
+        center = self.display_center()
+        distance = self.camera_distance_for_view(center, direction)
+        up = camera_up_vector(direction)
+        self.set_camera_view(center, direction, up, distance)
+
     def operation_camera_basis(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
         if self.custom_view_direction_cart is not None:
             direction = self.custom_view_direction_cart
@@ -740,11 +801,20 @@ class BrowserControlledViewer(NativePyVistaViewer):
         elif direction == "down":
             axis = screen_right
             signed_angle = angle
+        elif direction == "roll-left":
+            axis = view_direction
+            signed_angle = -angle
+        elif direction == "roll-right":
+            axis = view_direction
+            signed_angle = angle
         else:
             return
 
-        rotated_radius = rotate_vector(radius_vector, axis, np.deg2rad(signed_angle))
         rotated_up = rotate_vector(up, axis, np.deg2rad(signed_angle))
+        if direction.startswith("roll-"):
+            rotated_radius = radius_vector
+        else:
+            rotated_radius = rotate_vector(radius_vector, axis, np.deg2rad(signed_angle))
         self.plotter.camera_position = [
             tuple(focal_point + rotated_radius),
             tuple(focal_point),

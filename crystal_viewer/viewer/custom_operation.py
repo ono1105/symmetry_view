@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from crystal_viewer.geometry import normalize
+from crystal_viewer.geometry import normalize, plane_basis_from_normal_cart
 
 
 def rotation_matrix_from_axis_angle(axis: np.ndarray, angle: float) -> np.ndarray:
@@ -29,6 +29,7 @@ def build_custom_operation_frac(
     Returns error string on bad input.
     """
     try:
+        inv_lattice = np.linalg.inv(lattice)
         inv_lt = np.linalg.inv(lattice.T)
         lt = lattice.T
 
@@ -57,7 +58,7 @@ def build_custom_operation_frac(
         if op_type == "mirror":
             hkl = np.asarray(params["normal"], dtype=float)
             # hkl = L @ n_cart  →  n_cart = inv(L) @ hkl
-            n_cart = np.linalg.inv(lattice) @ hkl
+            n_cart = inv_lattice @ hkl
             if np.linalg.norm(n_cart) < 1e-10:
                 return "Plane normal is zero vector"
             n_hat = n_cart / np.linalg.norm(n_cart)
@@ -86,7 +87,7 @@ def build_custom_operation_frac(
 
         if op_type == "glide":
             hkl = np.asarray(params["normal"], dtype=float)
-            n_cart = np.linalg.inv(lattice) @ hkl
+            n_cart = inv_lattice @ hkl
             if np.linalg.norm(n_cart) < 1e-10:
                 return "Plane normal is zero vector"
             n_hat = n_cart / np.linalg.norm(n_cart)
@@ -133,6 +134,7 @@ def custom_operation_visuals(
     view_direction: np.ndarray | None = None
 
     try:
+        inv_lattice = np.linalg.inv(lattice)
         if op_type in ("rotation", "screw"):
             uvw = np.asarray(params.get("axis", [0, 0, 1]), dtype=float)
             direction = uvw @ lattice
@@ -150,7 +152,7 @@ def custom_operation_visuals(
 
         elif op_type in ("mirror", "glide"):
             hkl = np.asarray(params.get("normal", [0, 0, 1]), dtype=float)
-            normal = np.linalg.inv(lattice) @ hkl
+            normal = inv_lattice @ hkl
             if np.linalg.norm(normal) >= 1e-10:
                 point = np.asarray(params.get("point", [0, 0, 0]), dtype=float) @ lattice
                 normal = normalize(normal)
@@ -210,13 +212,7 @@ def custom_operation_visuals(
 
 
 def plane_basis_from_normal(normal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    normal = normalize(np.asarray(normal, dtype=float))
-    trial = np.array([1.0, 0.0, 0.0])
-    if abs(float(np.dot(trial, normal))) > 0.85:
-        trial = np.array([0.0, 1.0, 0.0])
-    basis1 = normalize(np.cross(normal, trial))
-    basis2 = normalize(np.cross(normal, basis1))
-    return basis1, basis2
+    return plane_basis_from_normal_cart(normal)
 
 
 def check_custom_operation(
