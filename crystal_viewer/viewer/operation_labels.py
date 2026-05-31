@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from fractions import Fraction
+from functools import lru_cache
+from math import gcd
 
 import numpy as np
 
-from crystal_viewer.geometry import normalize
+from crystal_viewer.geometry import integer_index_vector, normalize
 from crystal_viewer.viewer.animation import animation_paths
 from crystal_viewer.viewer.animation_path import effective_rotation_axis
 from crystal_viewer.viewer.display_atoms import display_point_cart, display_scene_center
@@ -150,11 +152,7 @@ def plane_hkl_vector(render_data: dict, plane: dict) -> np.ndarray | None:
     return lattice @ normal
 
 
-def infer_standard_glide_symbol(render_data: dict, operation: dict, plane: dict) -> str | None:
-    glide_frac = glide_translation_frac(render_data, operation, plane)
-    if glide_frac is None:
-        return None
-
+def classify_standard_glide_vector(glide_frac: np.ndarray) -> str | None:
     magnitudes = np.abs(centered_fractional_vector(glide_frac))
     half_axes = [index for index, value in enumerate(magnitudes) if abs(float(value) - 0.5) < 1e-5]
     quarter_axes = [
@@ -181,9 +179,11 @@ def infer_standard_glide_symbol(render_data: dict, operation: dict, plane: dict)
 def infer_standard_glide_symbol_for_planes(render_data: dict, operation: dict, planes: list[dict]) -> str | None:
     candidates = []
     for plane in planes:
-        symbol = infer_standard_glide_symbol(render_data, operation, plane)
         glide_frac = glide_translation_frac(render_data, operation, plane)
-        if symbol is None or glide_frac is None:
+        if glide_frac is None:
+            continue
+        symbol = classify_standard_glide_vector(glide_frac)
+        if symbol is None:
             continue
         centered = centered_fractional_vector(glide_frac)
         candidates.append((glide_vector_cart_norm(render_data, centered), symbol))
@@ -197,28 +197,6 @@ def infer_standard_glide_symbol_for_planes(render_data: dict, operation: dict, p
     return next(iter(symbols))
 
 
-def readable_glide_representative(
-    render_data: dict,
-    operation: dict,
-    planes: list[dict],
-) -> tuple[dict, np.ndarray] | None:
-    candidates = []
-    for index, plane in enumerate(planes):
-        glide_frac = glide_translation_frac(render_data, operation, plane)
-        if glide_frac is None:
-            continue
-        centered = centered_fractional_vector(glide_frac)
-        cart_norm = glide_vector_cart_norm(render_data, centered)
-        fraction_score = fractional_vector_complexity(centered)
-        offset_score = plane_offset_complexity(render_data, plane)
-        candidates.append((cart_norm, fraction_score, offset_score, index, plane, centered))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: item[:4])
-    _, _, _, _, plane, glide_frac = candidates[0]
-    return plane, glide_frac
-
-
 def glide_vector_cart_norm(render_data: dict, glide_frac: np.ndarray) -> float:
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
@@ -227,35 +205,202 @@ def glide_vector_cart_norm(render_data: dict, glide_frac: np.ndarray) -> float:
     return float(np.linalg.norm(np.asarray(glide_frac, dtype=float) @ lattice))
 
 
-def fractional_vector_complexity(values: np.ndarray) -> int:
-    return sum(fraction_denominator(value) for value in np.asarray(values, dtype=float))
+def glide_intrinsic_translation_frac(operation: dict) -> np.ndarray | None:
+    """Intrinsic translation of a glide/reflection: (I + W_frac) / 2 @ t_frac.
+
+    This is the canonical ITC glide vector, which equals the projection of t_frac
+    onto the eigenspace of W_frac with eigenvalue +1 (the mirror plane).
+    """
+    W_frac = operation.get("matrix_frac")
+    t_frac = operation.get("translation_frac")
+    if W_frac is None or t_frac is None:
+        return None
+    W = np.asarray(W_frac, dtype=float)
+    t = np.asarray(t_frac, dtype=float)
+    return (np.eye(3) + W) @ t / 2
 
 
-def plane_offset_complexity(render_data: dict, plane: dict) -> int:
-    hkl = plane_hkl_vector(render_data, plane)
-    if hkl is None:
-        return 999
-    ints = integer_index_vector(hkl)
-    if ints is None:
-        return 999
-    unit_cell = render_data.get("unit_cell")
-    if unit_cell is None:
-        return 999
-    frac = np.asarray(plane["point_cart"], dtype=float) @ lattice_inverse(unit_cell)
-    offset = float(np.dot(ints, frac))
-    offset -= np.floor(offset)
-    return fraction_denominator(offset)
+def _itc_t_intrinsic(W: np.ndarray, t: np.ndarray, order: int) -> np.ndarray:
+    """Intrinsic translation: (1/n) * sum_{k=0}^{n-1} W^k @ t."""
+    acc = np.zeros(3)
+    Wk = np.eye(3)
+    for _ in range(order):
+        acc += Wk @ t
+        Wk = Wk @ W
+    return acc / order
 
 
-def fraction_denominator(value: float) -> int:
-    value = float(abs(value))
-    value -= np.floor(value)
-    if value > 0.5:
-        value = 1.0 - value
-    fraction = Fraction(value).limit_denominator(24)
-    if abs(value - float(fraction)) < 2e-3:
-        return fraction.denominator
-    return 999
+def _itc_null_space(A: np.ndarray, tol: float = 1e-7) -> list[np.ndarray]:
+    """Rational null space basis vectors of integer matrix A via SVD."""
+    _, s, vh = np.linalg.svd(A)
+    rank = int(np.sum(s > tol))
+    result = []
+    for row in vh[rank:]:
+        v = _itc_rationalize(row)
+        if np.linalg.norm(v) > 1e-8:
+            result.append(v)
+    return result
+
+
+def _itc_rationalize(v: np.ndarray) -> np.ndarray:
+    """Round a unit float vector to primitive integer form."""
+    v = np.asarray(v, dtype=float)
+    max_abs = float(np.max(np.abs(v)))
+    if max_abs < 1e-10:
+        return np.zeros(3)
+    v = v / max_abs
+    fracs = [Fraction(float(x)).limit_denominator(12) for x in v]
+    lcm_d = 1
+    for f in fracs:
+        lcm_d = lcm_d * f.denominator // gcd(lcm_d, f.denominator)
+    ints = [round(float(f) * lcm_d) for f in fracs]
+    g = 1
+    for x in ints:
+        if x != 0:
+            g = gcd(g, abs(x))
+    return np.array([x / g for x in ints], dtype=float)
+
+
+def _itc_param_names(null_vecs: list[np.ndarray]) -> list[str]:
+    """Assign 'x', 'y', 'z' to null space vectors by dominant component."""
+    avail = ["x", "y", "z"]
+    used: set[str] = set()
+    names = []
+    for v in null_vecs:
+        order = list(np.argsort(-np.abs(v)))
+        name = next((avail[i] for i in order if avail[i] not in used), None)
+        if name is None:
+            name = next(n for n in avail if n not in used)
+        used.add(name)
+        names.append(name)
+    return names
+
+
+def _itc_coord_str(const: float, terms: list[tuple[float, str]]) -> str:
+    """Format one coordinate: 'x+1/2', '-x', '1/4', '0', etc."""
+    parts: list[str] = []
+    for coeff, name in terms:
+        c = Fraction(float(coeff)).limit_denominator(12)
+        if abs(float(c)) < 1e-8:
+            continue
+        if c == 1:
+            parts.append(name)
+        elif c == -1:
+            parts.append(f"-{name}")
+        elif c.denominator == 1:
+            parts.append(f"{c.numerator}{name}")
+        else:
+            parts.append(f"({c}){name}")
+
+    c_val = float(const)
+    c_frac = Fraction(c_val).limit_denominator(24)
+    has_const = abs(float(c_frac)) > 1e-8
+
+    if not parts:
+        return format_fraction(float(c_frac)) if has_const else "0"
+
+    result = parts[0]
+    for p in parts[1:]:
+        result += p if p.startswith("-") else "+" + p
+    if has_const:
+        c_str = format_fraction(float(c_frac))
+        result += "+" + c_str if float(c_frac) > 0 else c_str
+    return result
+
+
+def _itc_normalize(
+    x0: np.ndarray, null_vecs: list[np.ndarray]
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Normalize parametric position toward ITC canonical form.
+
+    Rules applied in order for each null vector:
+    1. Flip sign so the first non-zero component is positive.
+    2a. (negative coeff) Shift to zero the constant at the first coordinate
+        with a rounded negative integer coefficient ('-x' style).
+    2b. (all-positive coeff) Shift to zero the constant at the LAST non-zero
+        coordinate, placing any remainder on earlier coordinates.
+        Example: [1,1,0] → zeroes coord 1, leaves constant on coord 0.
+    3. Center each x0 component in (-1/2, 1/2] to match ITC convention.
+
+    Known limitations — see REVIEW_NOTES for details:
+    - Null vecs with multiple negative integer components (e.g. [2,-1,-1]):
+      only the first negative coordinate's constant is zeroed.
+    - Ambiguous tie-breaking when equally valid shifts exist.
+    """
+    x0 = x0.copy()
+    out_vecs = []
+    for v in null_vecs:
+        v = v.copy()
+        # Rule 1: flip sign so first non-zero component is positive
+        for comp in v:
+            if abs(comp) > 1e-8:
+                if comp < 0:
+                    v = -v
+                break
+        # Rule 2a: shift to zero constant at first coord with rounded coeff < 0
+        zeroed = False
+        for j in range(3):
+            r = round(float(v[j]))
+            if r < 0 and abs(float(v[j]) - r) < 1e-8:
+                c = -float(x0[j]) / float(v[j])
+                x0 = x0 + c * v
+                zeroed = True
+                break
+        # Rule 2b: for all-positive vecs, zero the last non-zero component
+        if not zeroed:
+            for j in range(2, -1, -1):
+                r = round(float(v[j]))
+                if abs(r) > 0 and abs(float(v[j]) - r) < 1e-8 and abs(float(x0[j])) > 1e-8:
+                    c = -float(x0[j]) / float(v[j])
+                    x0 = x0 + c * v
+                    break
+        out_vecs.append(v)
+    # Rule 3: center each x0 component in (-1/2, 1/2] (ITC convention)
+    for i in range(3):
+        xi = float(x0[i]) % 1.0
+        if xi > 0.5 + 1e-8:
+            xi -= 1.0
+        x0[i] = 0.0 if abs(xi) < 1e-8 else xi
+    return x0, out_vecs
+
+
+def operation_itc_position(operation: dict) -> str | None:
+    """Parametric position of the symmetry element, e.g. 'x+1/4, -x+1/4, z'.
+
+    Solves (W - I) x = -t_loc where t_loc = t - t_int.
+    Free variables in the null space become parameters (x, y, z) assigned
+    by dominant component.  Parameter normalization to canonical ITC form
+    is NOT applied here; this can be added as a post-processing step later.
+    """
+    W_frac = operation.get("matrix_frac")
+    t_frac = operation.get("translation_frac")
+    order = operation.get("order")
+    kind = str(operation.get("kind", ""))
+    if W_frac is None or t_frac is None or order is None or order < 1:
+        return None
+    if "identity" in kind or is_pure_translation_operation(operation):
+        return None
+
+    W = np.asarray(W_frac, dtype=float)
+    t = np.asarray(t_frac, dtype=float)
+
+    t_int = _itc_t_intrinsic(W, t, order)
+    t_loc = t - t_int
+
+    A = W - np.eye(3)
+    b = -t_loc
+
+    null_vecs = _itc_null_space(A)
+    x0, *_ = np.linalg.lstsq(A, b, rcond=None)
+    x0, null_vecs = _itc_normalize(x0, null_vecs)
+
+    param_names = _itc_param_names(null_vecs)
+
+    coords = []
+    for i in range(3):
+        terms = [(float(v[i]), p) for v, p in zip(null_vecs, param_names)]
+        coords.append(_itc_coord_str(float(x0[i]), terms))
+    return ", ".join(coords)
 
 
 def operation_element_summary(
@@ -282,16 +427,25 @@ def operation_element_summary(
             f"@ {point_label(render_data, plane['point_cart'])}"
         )
         if "glide" in str(operation["kind"]) and display_symbol == "g":
-            glide_frac = glide_translation_frac(render_data, operation, plane)
+            glide_frac = glide_intrinsic_translation_frac(operation)
+            if glide_frac is None:
+                glide_frac_geo = glide_translation_frac(render_data, operation, plane)
+                if glide_frac_geo is not None:
+                    glide_frac = centered_fractional_vector(glide_frac_geo)
             if glide_frac is not None:
-                summary += f"; glide {fractional_vector_label(centered_fractional_vector(glide_frac))}"
+                summary += f"; glide {fractional_vector_label(glide_frac)}"
         parts.append(summary)
     if centers and effective_axis is None:
         center = centers[0]
         parts.append(f"@ {point_label(render_data, center['point_cart'])}")
-    translation_direction = translation_direction_label(render_data, operation)
-    if translation_direction is not None and not parts:
-        parts.append(translation_direction)
+    if is_pure_translation_operation(operation) and not parts:
+        t_frac = operation.get("translation_frac")
+        if t_frac is not None:
+            parts.append(fractional_vector_label(np.asarray(t_frac, dtype=float)))
+        else:
+            direction = translation_direction_label(render_data, operation)
+            if direction is not None:
+                parts.append(direction)
     return "; ".join(parts)
 
 
@@ -304,14 +458,30 @@ def operation_itc_like_summary(
     *,
     display_symbol: str | None = None,
 ) -> str:
-    if "glide" in str(operation["kind"]) and planes:
-        representative = readable_glide_representative(render_data, operation, planes)
-        if representative is not None:
-            plane, glide_frac = representative
-            return (
-                f"g{fractional_vector_label(glide_frac)} "
-                f"{plane_equation_label(render_data, plane)}"
+    # Pure translations: t|(p/q,r/s,u/v)
+    if is_pure_translation_operation(operation):
+        t_label = translation_frac_label(operation)
+        if t_label is not None:
+            return t_label
+
+    # All other operations: symbol(t_int) position_expression
+    position = operation_itc_position(operation)
+    if position is not None:
+        symbol = display_symbol or str(operation.get("symbol") or operation.get("label", "?"))
+        order = operation.get("order")
+        W_frac = operation.get("matrix_frac")
+        t_frac = operation.get("translation_frac")
+        if order and W_frac is not None and t_frac is not None:
+            t_int = _itc_t_intrinsic(
+                np.asarray(W_frac, dtype=float),
+                np.asarray(t_frac, dtype=float),
+                order,
             )
+            if np.linalg.norm(t_int) > 1e-8:
+                return f"{symbol}{fractional_vector_label(t_int)} {position}"
+        return f"{symbol} {position}"
+
+    # Fallback to element summary
     return operation_element_summary(
         render_data,
         operation,
@@ -486,6 +656,13 @@ def visual_translation_direction_cart(
     return displacement
 
 
+def translation_frac_label(operation: dict) -> str | None:
+    t_frac = operation.get("translation_frac")
+    if t_frac is None:
+        return None
+    return "t|" + fractional_vector_label(np.asarray(t_frac, dtype=float))
+
+
 def translation_direction_label(render_data: dict, operation: dict) -> str | None:
     direction = translation_direction_cart(operation)
     if direction is None:
@@ -602,40 +779,6 @@ def plane_normal_label_text(render_data: dict, plane: dict) -> str:
     return integer_index_label_text(hkl, bracket=("(", ")"))
 
 
-def plane_equation_label(render_data: dict, plane: dict) -> str:
-    hkl = plane_hkl_vector(render_data, plane)
-    unit_cell = render_data.get("unit_cell")
-    if hkl is None or unit_cell is None:
-        return (
-            f"{plane_normal_label_text(render_data, plane)} "
-            f"@ {point_label(render_data, plane['point_cart'])}"
-        )
-    ints = integer_index_vector(hkl)
-    if ints is None:
-        return (
-            f"{plane_normal_label_text(render_data, plane)} "
-            f"@ {point_label(render_data, plane['point_cart'])}"
-        )
-    frac = np.asarray(plane["point_cart"], dtype=float) @ lattice_inverse(unit_cell)
-    offset = float(np.dot(ints, frac))
-    offset -= np.floor(offset)
-    terms = []
-    variables = ("x", "y", "z")
-    for coefficient, variable in zip(ints, variables):
-        coefficient = int(coefficient)
-        if coefficient == 0:
-            continue
-        if coefficient == 1:
-            term = variable
-        elif coefficient == -1:
-            term = f"-{variable}"
-        else:
-            term = f"{coefficient}{variable}"
-        terms.append(term)
-    left = " + ".join(terms).replace("+ -", "- ")
-    return f"plane {left}={format_fraction(offset)}"
-
-
 def point_label(render_data: dict, point_cart: list[float]) -> str:
     point = np.asarray(point_cart, dtype=float)
     unit_cell = render_data.get("unit_cell")
@@ -651,7 +794,16 @@ def fractional_vector_label(values: np.ndarray) -> str:
 
 
 def lattice_inverse(unit_cell: dict) -> np.ndarray:
-    return np.linalg.inv(np.asarray(unit_cell["lattice"], dtype=float))
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    return cached_lattice_inverse(tuple(float(value) for value in lattice.ravel()))
+
+
+@lru_cache(maxsize=64)
+def cached_lattice_inverse(flat_lattice: tuple[float, ...]) -> np.ndarray:
+    lattice = np.asarray(flat_lattice, dtype=float).reshape((3, 3))
+    inverse = np.linalg.inv(lattice)
+    inverse.flags.writeable = False
+    return inverse
 
 
 def atom_frac_label(atom: dict) -> str | None:
@@ -673,30 +825,6 @@ def integer_index_label_text(values: np.ndarray, *, bracket: tuple[str, str], or
     if ints is None:
         return f"{bracket[0]}0 0 0{bracket[1]}"
     return bracket[0] + " ".join(format_index_text(int(value)) for value in ints) + bracket[1]
-
-
-def integer_index_vector(values: np.ndarray, *, orient_positive: bool = True) -> np.ndarray | None:
-    values = np.asarray(values, dtype=float)
-    if np.linalg.norm(values) < 1e-10:
-        return None
-    normalized = values / np.max(np.abs(values))
-    best = None
-    for scale in range(1, 13):
-        candidate = np.rint(normalized * scale).astype(int)
-        if not np.any(candidate):
-            continue
-        error = np.linalg.norm(normalized - candidate / max(np.max(np.abs(candidate)), 1))
-        if best is None or error < best[0]:
-            best = (error, candidate)
-        if error < 1e-5:
-            break
-    ints = best[1] if best is not None else np.rint(normalized).astype(int)
-    gcd = int(np.gcd.reduce(np.abs(ints[np.nonzero(ints)]))) if np.any(ints) else 1
-    ints = ints // max(gcd, 1)
-    first = next((value for value in ints if value != 0), 0)
-    if orient_positive and first < 0:
-        ints = -ints
-    return ints
 
 
 def format_index(value: int) -> str:
@@ -721,15 +849,6 @@ def format_fraction(value: float) -> str:
 
 def vector_label(values: np.ndarray, *, bracket: tuple[str, str]) -> str:
     return bracket[0] + ", ".join(f"{float(value):.3f}" for value in values) + bracket[1]
-
-
-def scene_center(render_data: dict) -> np.ndarray:
-    atoms = render_data.get("atoms", [])
-    if atoms:
-        points = np.asarray([atom["cart"] for atom in atoms], dtype=float)
-        return np.mean(points, axis=0)
-    unit_cell = render_data.get("unit_cell")
-    return np.zeros(3)
 
 
 def camera_up_vector(direction: np.ndarray) -> np.ndarray:

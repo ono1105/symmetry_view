@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from functools import lru_cache
+from itertools import product
+
 import numpy as np
 
 
@@ -87,3 +90,46 @@ def plane_basis_from_normal_cart(normal: np.ndarray) -> tuple[np.ndarray, np.nda
     basis1 = normalize(np.cross(normal, helper))
     basis2 = normalize(np.cross(normal, basis1))
     return basis1, basis2
+
+
+def integer_index_vector(values: np.ndarray, *, orient_positive: bool = True) -> np.ndarray | None:
+    values = np.asarray(values, dtype=float)
+    max_abs = float(np.max(np.abs(values)))
+    if max_abs < 1e-10:
+        return None
+    scaled = values / max_abs
+    best: np.ndarray | None = None
+    best_error = float("inf")
+    for limit in range(1, 13):
+        candidate = np.rint(scaled * limit).astype(int)
+        if not np.any(candidate):
+            continue
+        normalized = candidate / max(float(np.max(np.abs(candidate))), 1.0)
+        error = float(np.linalg.norm(normalized - scaled))
+        if error < best_error:
+            best = candidate
+            best_error = error
+    if best is None or best_error > 1e-5:
+        return None
+    gcd = int(np.gcd.reduce(np.abs(best[np.nonzero(best)])))
+    if gcd > 1:
+        best = best // gcd
+    if orient_positive:
+        for value in best:
+            if value < 0:
+                best = -best
+                break
+            if value > 0:
+                break
+    return best
+
+
+@lru_cache(maxsize=None)
+def periodic_shifts(limit: int = 1) -> np.ndarray:
+    limit = max(int(limit), 0)
+    shifts = np.asarray(
+        list(product(range(-limit, limit + 1), repeat=3)),
+        dtype=float,
+    )
+    shifts.flags.writeable = False
+    return shifts

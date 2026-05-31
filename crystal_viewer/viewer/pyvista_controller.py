@@ -93,6 +93,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_camera_request_id: int | None = None
         self.last_gif_request_id: int | None = None
         self.last_gif_3view_request_id: int | None = None
+        self.last_gif_3view_current_request_id: int | None = None
         self.last_custom_op_check_id: object = None
         self.custom_check_actors: list = []
         self.legend_actor = None
@@ -342,6 +343,13 @@ class BrowserControlledViewer(NativePyVistaViewer):
             should_update_status = True
             should_render = True
 
+        if snapshot.gif_3view_current_request_id is not None and snapshot.gif_3view_current_request_id != self.last_gif_3view_current_request_id:
+            self.playing = False
+            self.save_three_view_gifs_from_current_view()
+            self.last_gif_3view_current_request_id = snapshot.gif_3view_current_request_id
+            should_update_status = True
+            should_render = True
+
         if snapshot.clear_custom_check:
             self.clear_custom_check_actors()
             self.using_custom_paths = False
@@ -390,12 +398,12 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 reset = True
                 should_render = True
 
+        if requested_playing and not self.playing and self.frame_position >= self.frame_count - 1:
+            self.frame_position = 0.0
         if requested_playing != self.playing:
             should_update_status = True
         self.playing = requested_playing
         if self.playing and self.paths:
-            if self.frame_position >= self.frame_count - 1:
-                self.frame_position = 0.0
             multiplier = self.custom_speed_multiplier if self.using_custom_paths else operation_speed_multiplier(self.current_operation())
             frame_step = self.speed * multiplier * (self.timer_interval_ms / 33.0)
             self.frame_position = min(self.frame_position + frame_step, self.frame_count - 1)
@@ -521,7 +529,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             print(f"[viewer] reload atoms {time.monotonic() - debug_start:.3f}s", flush=True)
         if self.render_data.get("unit_cell"):
             add_unit_cell(self.plotter, self.render_data["unit_cell"], cell_origin_mode=self.cell_origin_mode)
-        add_orientation_axes(self.plotter, unit_cell=bool(self.render_data.get("unit_cell")))
+        add_orientation_axes(self.plotter, unit_cell=self.render_data.get("unit_cell"))
         self.update_atom_legend(visible=bool(self.shared_state.get("legend_visible", False)))
         if self.debug_timer:
             print(f"[viewer] reload axes {time.monotonic() - debug_start:.3f}s", flush=True)
@@ -951,6 +959,56 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 self.set_gif_status(f"3-view GIF incomplete; failed: {', '.join(failed_labels)}")
             else:
                 self.set_gif_status(f"saved 3-view GIFs ({timestamp})")
+        finally:
+            self.plotter.camera_position = original_camera_position
+            self.plotter.reset_camera_clipping_range()
+
+    def save_three_view_gifs_from_current_view(self) -> None:
+        if not self.paths:
+            self.set_gif_status("skipped: no animation path")
+            return
+
+        camera = self.plotter.camera
+        focal_point = np.asarray(camera.GetFocalPoint(), dtype=float)
+        position = np.asarray(camera.GetPosition(), dtype=float)
+        raw_up = normalize(np.asarray(camera.GetViewUp(), dtype=float))
+
+        front_direction = focal_point - position
+        if np.linalg.norm(front_direction) < 1e-10:
+            self.set_gif_status("skipped: cannot determine view direction")
+            return
+        front_direction = normalize(front_direction)
+
+        center = focal_point
+        distance = self.camera_distance_for_view(center, front_direction)
+
+        front_up = raw_up - np.dot(raw_up, front_direction) * front_direction
+        if np.linalg.norm(front_up) < 1e-10:
+            front_up = camera_up_vector(front_direction)
+        else:
+            front_up = normalize(front_up)
+
+        right_direction = normalize(np.cross(front_direction, front_up))
+        top_direction = front_up
+        top_up = normalize(-front_direction)
+
+        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        original_camera_position = self.plotter.camera_position
+        views = [
+            ("front", front_direction, front_up),
+            ("right", right_direction, front_up),
+            ("top", top_direction, top_up),
+        ]
+        failed_labels = []
+        try:
+            for label, direction, up in views:
+                self.set_camera_view(center, direction, up, distance)
+                if not self.save_current_gif(suffix=label, timestamp=timestamp, label_text=label):
+                    failed_labels.append(label)
+            if failed_labels:
+                self.set_gif_status(f"3-view GIF incomplete; failed: {', '.join(failed_labels)}")
+            else:
+                self.set_gif_status(f"saved 3-view GIFs (current view, {timestamp})")
         finally:
             self.plotter.camera_position = original_camera_position
             self.plotter.reset_camera_clipping_range()

@@ -73,16 +73,58 @@ def setup_viewer_lighting(plotter: pv.Plotter, *, background_mode: str = "dark")
         pass
 
 
-def add_orientation_axes(plotter: pv.Plotter, *, unit_cell: bool = False) -> None:
-    labels = ("a", "b", "c") if unit_cell else ("X", "Y", "Z")
-    plotter.add_axes(
+def add_orientation_axes(plotter: pv.Plotter, *, unit_cell: "dict | bool | None" = False) -> None:
+    if isinstance(unit_cell, dict):
+        _add_crystal_orientation_widget(plotter, unit_cell)
+    else:
+        labels = ("a", "b", "c") if unit_cell else ("X", "Y", "Z")
+        plotter.add_axes(
+            x_color=AXIS_A_COLOR,
+            y_color=AXIS_B_COLOR,
+            z_color=AXIS_C_COLOR,
+            xlabel=labels[0],
+            ylabel=labels[1],
+            zlabel=labels[2],
+        )
+
+
+def _add_crystal_orientation_widget(plotter: pv.Plotter, unit_cell: dict) -> None:
+    """Add the corner orientation widget with axes aligned to the crystal lattice vectors.
+
+    Uses plotter.add_axes() (vtkOrientationMarkerWidget) and then applies a user
+    transform to the vtkAxesActor so that its X/Y/Z arrows point along the actual
+    crystal a/b/c directions instead of world X/Y/Z.
+    """
+    import vtk
+
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    norms = np.linalg.norm(lattice, axis=1)
+    safe_norms = np.where(norms < 1e-10, 1.0, norms)
+    a_n, b_n, c_n = lattice / safe_norms[:, np.newaxis]
+
+    actor = plotter.add_axes(
         x_color=AXIS_A_COLOR,
         y_color=AXIS_B_COLOR,
         z_color=AXIS_C_COLOR,
-        xlabel=labels[0],
-        ylabel=labels[1],
-        zlabel=labels[2],
+        xlabel="a",
+        ylabel="b",
+        zlabel="c",
     )
+
+    # Build a 4×4 transform whose columns are the normalized lattice vectors.
+    # vtkAxesActor local X→world a, local Y→world b, local Z→world c.
+    vtk_matrix = vtk.vtkMatrix4x4()
+    for row in range(3):
+        vtk_matrix.SetElement(row, 0, a_n[row])
+        vtk_matrix.SetElement(row, 1, b_n[row])
+        vtk_matrix.SetElement(row, 2, c_n[row])
+        vtk_matrix.SetElement(row, 3, 0.0)
+    for col in range(4):
+        vtk_matrix.SetElement(3, col, 1.0 if col == 3 else 0.0)
+
+    transform = vtk.vtkTransform()
+    transform.SetMatrix(vtk_matrix)
+    actor.SetUserTransform(transform)
 
 
 def atom_legend_entries(render_data: dict, *, element_colors: dict | None = None) -> list[list[str]]:

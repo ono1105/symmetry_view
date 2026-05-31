@@ -111,6 +111,7 @@ def crystal_operation_mapping(
 ) -> OperationAtomMapping:
     lattice = np.asarray(result.structure.lattice, dtype=float)
     atoms = result.structure.atoms
+    atoms_by_atomic_number = atoms_grouped_by_atomic_number(atoms)
     entries = []
     unmatched = []
 
@@ -124,7 +125,7 @@ def crystal_operation_mapping(
         target_atom, distance = find_matching_crystal_atom(
             wrapped_frac,
             atom.atomic_number,
-            atoms,
+            atoms_by_atomic_number,
             lattice,
         )
         if target_atom is None or distance > tolerance_cart:
@@ -203,13 +204,13 @@ def molecule_operation_mapping(
 def find_matching_crystal_atom(
     wrapped_frac: np.ndarray,
     atomic_number: int,
-    atoms,
+    atoms_by_atomic_number,
     lattice: np.ndarray,
 ):
     best_atom = None
     best_distance = float("inf")
-    for candidate in atoms:
-        if candidate.atomic_number != atomic_number or candidate.frac is None:
+    for candidate in atoms_by_atomic_number.get(atomic_number, ()):
+        if candidate.frac is None:
             continue
         delta_frac = wrapped_frac - np.asarray(candidate.frac, dtype=float)
         delta_frac = delta_frac - np.round(delta_frac)

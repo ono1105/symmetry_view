@@ -2974,7 +2974,7 @@ Jacobsite ±1 表示: 元素種 3 (Mn/Fe/O) → 3 actor = 3 ドローコール /
 - `673d89b` で `crystal_viewer/viewer/atom_instances.py` を追加し、`display_atom_instances()` の結果を元素ごとのバッチにまとめる `element_instance_batches()` を実装済み。
 - Halite / Jacobsite の `source`, `expanded_quarter`, `expanded_half`, `expanded_1_0` で、個別インスタンス数とバッチ内 item 数が一致することを確認済み。
 
-未対応: PyVista 側の glyph actor 置き換え。これは原子色変更・ハイライト・アニメーション更新に影響するため、次は本体描画へ直接入らず、range ごとの原子数と元素バッチ数を確認できる検査ツールを追加してから段階的に進める。
+保留: PyVista 側の glyph actor 置き換え。今後は Web 側で描画する方針のため、PyVista 固有の actor 高速化は優先度を下げる。WebGL/Three.js 等へ移行する場合はこの実装を流用せず、`display_atom_instances()` / `element_instance_batches()` のデータ層だけを描画バックエンド非依存の入力として使う。
 
 ---
 
@@ -3504,13 +3504,13 @@ frac = direction @ np.linalg.inv(lattice)  # 複数行で同じ inv を計算
 
 | # | 状況 |
 |---|------|
-| 1 | 保留。`asymmetric_index` と `generation_operation_index` の意味が UI 表示に影響するため、挙動確認用テストを増やしてから置換する。 |
-| 2 | 保留。`SpaceGroup.symmetry_ops` の R/H 設定が現在の rhombohedral fallback と一致するか未確認のため、現時点ではハードコードを維持する。 |
-| 3 | 保留。#1 と同時に扱うべき内容のため、今回は変更しない。 |
+| 1 | 修正済み。通常CIFでは `dataset["equivalent_atoms"]` から非対称単位代表を作り、各原子の `generation_operation_index` は代表原子から該当操作だけを探索するようにした。Halite / Cadmoselite の回帰テストを追加済み。 |
+| 2 | 検証済みで保留。`SpaceGroup.from_int_number(...).symmetry_ops` は現在の R-setting fallback より操作数が多く、同じ補完用途にはそのまま使えないことをテストで固定した。現時点では `RHOMBOHEDRAL_SETTING_OPS` を維持する。 |
+| 3 | 修正済み。通常CIFでは `read_asymmetric_unit_sites()` の再パースを行わず、spglib の `equivalent_atoms` から `asymmetric_atoms` を構築するようにした。R系フォールバックなど loader が明示的に `asymmetric_atoms` を返す場合は既存経路を維持する。 |
 | 4 | 修正済み。`molecule_analysis.py` と `custom_operation.py` の平面基底生成を `geometry.plane_basis_from_normal_cart` に寄せた。 |
 | 5 | 修正済み。`molecule_analysis.py` の回転角計算を `geometry.rotation_angle_deg` に寄せた。 |
 | 6 | 修正済み。`operation_labels.py` に `lattice_inverse()` を追加し、同じ逆行列計算の記述を集約した。`custom_operation.py` でも関数内の逆行列を再利用するようにした。 |
-| 7 | 保留。現状の構造サイズではボトルネックになっておらず、周期境界込みの最近接探索なので別途テストが必要。 |
+| 7 | 部分修正済み。KDTree 化は `scipy` 依存追加と周期境界テストが必要なため保留し、まず atomic number ごとに候補原子を事前グループ化して全原子スキャンを避けるようにした。Halite の mapping 回帰テストを追加済み。 |
 
 ---
 
@@ -3597,3 +3597,435 @@ native パスは `deepcopy` 後に `display_cell_setting` だけ設定して返�
 | 32 crystal 構造の一括検証 | primitive/conventional ともに成功・None なし ✓ |
 | `cell-setting-controls` の表示制御 | `display-block` 内にあり、分子時は `syncSourceKindControls` で非表示 ✓ |
 | `analyze_structure` の分離 | `analyze_cif` からの抽出により `standardized_payload` が再利用できる設計になっている ✓ |
+
+---
+
+## glide 表記・セル変換コードのレビュー（Claude）（2026-05-29）
+
+対象コミット: `be33482 Improve symmetry operation display`
+変更ファイル: `crystal_viewer/viewer/glide_geometry.py`（新規）, `crystal_viewer/viewer/operation_labels.py`, `crystal_viewer/viewer/symmetry_elements.py`, `crystal_viewer/viewer/animation_context.py`, `crystal_viewer/viewer/cell_settings.py`, `tools/view_json_server.py`, `crystal_viewer/web/browser_ui.py` ほか
+
+7 角度（A: 行読み, B: 削除挙動, C: 呼び出し元, Reuse, Simplification, Efficiency, Altitude）で並列 Finder → 3 並列 Verifier を実施。
+
+### バグ 1（効率・中）: `glide_translation_frac` を同一 plane に 2 回呼び出している
+
+**場所:** `crystal_viewer/viewer/operation_labels.py` `infer_standard_glide_symbol_for_planes` 付近
+
+```python
+for plane in planes:
+    symbol = infer_standard_glide_symbol(render_data, operation, plane)  # 内部で 1 回
+    glide_frac = glide_translation_frac(render_data, operation, plane)   # さらに直接 1 回
+```
+
+`infer_standard_glide_symbol` が内部で `glide_translation_frac` を呼ぶため、同一 plane に対して計算が 2 回走る。`glide_translation_frac` は 27 周期シフトの全探索を含むため、plane 数が多い空間群では無視できないコストになる。
+
+**修正案:** `infer_standard_glide_symbol` が glide_frac を返すよう変更する（`(symbol, glide_frac)` のタプル返し）か、呼び出し側で一度計算した結果を両方に渡す。
+
+---
+
+### バグ 2（保守性・中）: `integer_index_vector` が 2 モジュールで重複実装・挙動が異なる
+
+**場所:**
+- `crystal_viewer/viewer/operation_labels.py`（既存）: `orient_positive` パラメータあり、`error < 1e-5` で早期 break、非整数入力にもベスト候補を返す
+- `crystal_viewer/viewer/symmetry_elements.py`（今回追加）: `orient_positive` なし、早期 break なし、`best_error > 1e-5` なら None 返し
+
+同一入力に対して一方は結果を返し他方が None を返すケースが存在する。将来どちらかを修正しても他方に反映されない。
+
+**修正案:** 実装を `crystal_viewer/geometry.py` または共通ユーティリティに移し、両ファイルからインポートする。
+
+---
+
+### バグ 3（設計・低）: `lru_cache` で可変 ndarray を返している
+
+**場所:** `crystal_viewer/viewer/glide_geometry.py:68` `periodic_shift_vectors`
+
+```python
+@lru_cache(maxsize=None)
+def periodic_shift_vectors(radius: int) -> np.ndarray:
+    ...
+    return np.asarray([...], dtype=float)
+```
+
+キャッシュされた配列はミュータブルなため、呼び出し元が行を書き換えると以後の全呼び出しが壊れたシフト集合を返す。現在の呼び出し元は書き換えていないが、追加コードで踏む可能性がある。
+
+**修正案:** 返す配列を `arr.flags.writeable = False` で読み取り専用にするか、毎回コピーを返す。
+
+---
+
+### バグ 4（重複・低）: `periodic_shift_vectors` と `periodic_shifts` が同一ロジックの重複実装
+
+**場所:**
+- `crystal_viewer/viewer/glide_geometry.py:68` `periodic_shift_vectors` — `@lru_cache` あり
+- `crystal_viewer/viewer/display_atoms.py` `periodic_shifts` — キャッシュなし
+
+どちらも [-r, r]³ の整数シフト全列挙。`animation_context.py` は `periodic_shifts` を使うためキャッシュの恩恵を受けず、修正も片方にしか伝播しない。
+
+**修正案:** `geometry.py` に統一してキャッシュ付きで定義し、両ファイルからインポートする。
+
+---
+
+### バグ 5（競合・低）: `handle_cell_setting` で import_in_progress を再チェックせずにセッションを上書きする
+
+**場所:** `tools/view_json_server.py` `handle_cell_setting`
+
+```python
+with state_lock:
+    if shared_state.get("import_in_progress"):  # ← チェックはここだけ
+        raise RuntimeError(...)
+    base_payload = session.base_payload
+# lock 解放 → 低速変換実行
+with state_lock:
+    session.replace_from(new_session)  # ← import_in_progress を再チェックしない
+```
+
+変換中に別ファイルがロードされ完了すると `import_in_progress` は False に戻り、再取得時にガードが機能しない。古いペイロードの変換結果が新セッションを黙って上書きする。シングルユーザーのローカルツールなので実害は限定的だが、設計上の穴。
+
+**修正案:** 2 度目の lock 取得後に再度 `import_in_progress` または `session.json_path` の一致を確認する。
+
+---
+
+### バグ 6（効率・低）: `lattice_inverse` が 1 回の operation summary 生成で複数回 np.linalg.inv を再計算している
+
+**場所:** `crystal_viewer/viewer/operation_labels.py` `lattice_inverse`
+
+`plane_equation_label`, `point_label`, `axis_direction_label` などがそれぞれ独立して `lattice_inverse(unit_cell)` を呼ぶ。operation list の全操作を再描画する際に N 操作 × 複数回の inv が積み重なる。
+
+**修正案:** `operation_element_summary` / `operation_itc_like_summary` の先頭で逆行列を一度計算して子関数に渡すか、`unit_cell` をキーにした簡易キャッシュを導入する。
+
+---
+
+### 修正優先度まとめ
+
+| # | 内容 | 優先度 |
+|---|------|--------|
+| 1 | `glide_translation_frac` 2重呼び出し → タプル返しに統一 | 中 |
+| 2 | `integer_index_vector` 重複実装 → `geometry.py` に統一 | 中 |
+| 3 | `lru_cache` + 可変 ndarray → writeable=False | 低 |
+| 4 | `periodic_shift_vectors` / `periodic_shifts` 重複 → 統一 | 低 |
+| 5 | `handle_cell_setting` 競合ガード → 再チェック追加 | 低 |
+| 6 | `lattice_inverse` 繰り返し inv → 上位で一度計算 | 低 |
+
+### 対応状況
+
+| # | 状況 |
+|---|------|
+| 1 | 修正済み。`classify_standard_glide_vector()` を追加し、`infer_standard_glide_symbol_for_planes()` では plane ごとに `glide_translation_frac` を 1 回だけ呼ぶようにした。 |
+| 2 | 修正済み。`integer_index_vector()` を `crystal_viewer/geometry.py` に移し、`operation_labels.py` と `symmetry_elements.py` から共通利用するようにした。 |
+| 3 | 修正済み。`geometry.periodic_shifts()` がキャッシュ済み ndarray を読み取り専用で返すようにした。 |
+| 4 | 修正済み。周期シフト列挙を `geometry.periodic_shifts()` に統一し、既存の `display_atoms.periodic_shifts()` と `glide_geometry.periodic_shift_vectors()` は互換ラッパーにした。 |
+| 5 | 修正済み。`handle_cell_setting` の変換完了後、lock 再取得時に `import_in_progress` と `session` の変化を再チェックするようにした。 |
+| 6 | 修正済み。`lattice_inverse()` が lattice 値をキーにした `lru_cache` 経由で逆行列を返すようにし、同一セルでの `np.linalg.inv` 再計算を避けるようにした。 |
+
+### 正常な部分
+
+| 項目 | 評価 |
+|------|------|
+| `display_operation_symbol` シグネチャ変更 | 全呼び出し元を追跡確認済み。呼び出し元は 1 箇所のみで正しく更新されている ✓ |
+| `representative_animation_translation_frac` fallback | `same_periodic_plane` が True を返す場合のみ animation 面を使い、False の場合はフォールバックが走る設計。周期像の同一性チェックで切り分けているため fallback が誤った plane を使うケースは起きない ✓ |
+| `axis_preserving_periodic_shift` の score 比較 | `score[:2] < best[:2]` で float 2-tuple を比較しており ndarray が比較に巻き込まれない ✓ |
+| サブプロセスのエラーメッセージ | stderr の traceback テキストに部分文字列マッチするため、`predictedLoadFailureReason` が正しく friendly メッセージを返す ✓ |
+
+---
+
+## 連続レンダリング・対称要素非表示バグの根本原因調査と修正（Claude）（2026-05-30）
+
+### 症状
+
+BaTiO3.cif 等の構造を読み込んだ後、PyVista ウィンドウが単位格子を描画し続けて止まらなくなり、operation list から操作を選択しても PyVista 上に対称要素が表示されなかった。再生ボタンを押すとさらに CPU 負荷が上昇し、Windows が強制シャットダウンする場合があった。
+
+### バグ 1（致命的）: `from itertools import product` の削除によるタイマー例外ループ
+
+**場所:** `crystal_viewer/viewer/display_atoms.py`
+
+**原因:**
+Codex による `periodic_shifts` のリファクタ時に `from itertools import product` の import 行が削除された。しかし同ファイルの `display_scene_span()` が引き続き `product` を直接使用していたため、`add_symmetry_element_actors()` 内の最初の行 `span = display_scene_span(...)` で `NameError: name 'product' is not defined` が発生していた。
+
+**波及:**
+```
+add_symmetry_elements()
+  → add_symmetry_element_actors()
+      → display_scene_span()         # ← NameError 発生
+```
+
+PyVista のタイマーコールバック (`_on_timer_inner`) は VTK によって例外が黙殺されるため、エラーは画面に表示されない。そしてタイマー内の `set_operation_index()` が失敗した場合、直後の `self.last_operation_index = operation_index` が実行されない。これにより毎 tick `operation_index != self.last_operation_index` が成立し、100ms ごとに同じ例外が無限に繰り返される。VTK は自身のイベントループで定期的にシーンをレンダリングするため、連続レンダリングとして見える。
+
+**修正:**
+`display_atoms.py` の先頭に `from itertools import product` を再追加。
+
+---
+
+### バグ 2（高）: アニメーション終了判定の欠陥によるアニメーション無限ループ
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py` `_on_timer_inner()`
+
+**原因:**
+`BrowserControlledViewer` のタイマーに、アニメーション終了判定と競合する reset 処理が存在していた:
+
+```python
+# 問題のあったコード
+if self.playing and self.paths:
+    if self.frame_position >= self.frame_count - 1:
+        self.frame_position = 0.0   # ← reset して frame を 0 に戻す
+    frame_step = ...
+    self.frame_position = min(self.frame_position + frame_step, self.frame_count - 1)
+    ...
+    if self.frame_position >= self.frame_count - 1:
+        self.playing = False          # ← この条件は reset 後には成立しない
+```
+
+最終フレームに達すると先頭の `if` が `frame_position` を 0 にリセットし、直後に `frame_step` 分進んで例えば 3.03 になる。末尾の stop 条件 `3.03 >= 95` は False なので `self.playing = False` が発火しない。これが毎 tick 繰り返され、アニメーションが永遠に止まらない。
+
+`native_gui.py` の同等コードにはこの reset 行がなく、正常に 1 回再生で停止する。
+
+**WSL2 での致命的な影響:** WSL2 では PyVista/VTK がソフトウェアレンダリングのため、10fps の連続 render が CPU を高負荷にし、Windows の強制シャットダウンを引き起こす場合がある。
+
+**修正:** `frame_position = 0.0` への reset 行（2行）を削除し、`native_gui.py` と同様に 1 回再生して末尾で停止する動作に統一した。
+
+---
+
+### デバッグ手順のメモ
+
+- `CRYSTAL_VIEWER_DEBUG_TIMER=1` 環境変数を設定すると、タイマーが 5 秒ごとに `ticks=X renders=X playing=Y` を標準出力に表示する。アイドル時 `renders=0`、アニメーション中 `renders≒50` が正常値。連続レンダリング中は `renders=50` が続く。
+- VTK はタイマーコールバック内の Python 例外を黙殺するため、例外ループは画面に出ない。タイマー内の処理をテストする際は `python3 -c` で直接関数を呼び出して例外を確認するのが効果的。
+
+---
+
+## 前回コミット以降の変更まとめ（Claude）（2026-05-31）
+
+### 変更ファイル一覧
+
+| ファイル | 主な変更内容 |
+|---|---|
+| `viewer/operation_labels.py` | 並進・グライドのラベル生成を ITC 準拠に変更 |
+| `viewer/symmetry_elements.py` | 純並進の方向線表示を追加 |
+| `viewer/scene_rendering.py` | orientation widget を格子ベクトルに合わせて回転 |
+| `viewer/pyvista_controller.py` | アニメーション再開バグ修正・現在視点 3-view GIF 追加 |
+| `viewer/render_state.py` | `gif_3view_current_request_id` フィールド追加 |
+| `viewer/native_gui.py` | `add_orientation_axes` 呼び出し引数修正 |
+| `web/browser_ui.py` | 「Save 3-view GIFs (current view)」ボタン追加 |
+
+---
+
+### 変更 1: 並進操作のラベルを `t|(p/q,r/s,u/v)` 形式に変更
+
+**場所:** `crystal_viewer/viewer/operation_labels.py`
+
+**変更前:** 純並進の `element_summary` / `itc_like_summary` に方向ベクトル `[u v w]` だけが表示されていた（大きさの情報なし）。
+
+**変更後:**
+- `translation_frac_label(operation)` を追加。`operation["translation_frac"]`（spglib の t 値）をそのまま `t|(1/3,2/3,2/3)` 形式で文字列化する。
+- `operation_element_summary` と `operation_itc_like_summary` の両方で、純並進の場合に `translation_frac_label` を優先使用。`translation_frac` が None の場合のみ従来の方向ラベルにフォールバック。
+- 純並進の判定: `is_pure_translation_operation()` 既存関数を流用。
+
+**注意:** `translation_frac` は spglib が返す raw の t 値をそのまま使用。`centered_fractional_vector` による正規化は行わない（ITC の t(2/3,1/3,1/3) 表記に合わせるため）。
+
+---
+
+### 変更 2: グライドの g(…) ベクトルを ITC 固有並進に修正
+
+**場所:** `crystal_viewer/viewer/operation_labels.py`
+
+**変更前:** `glide_translation_frac(render_data, operation, plane)` による幾何的計算（最短ノルムの格子等価ベクトルを探索）を使用。これが ITC の標準値と一致しない場合があった。
+
+**変更後:**
+- `glide_intrinsic_translation_frac(operation)` を追加。`(I + W_frac) / 2 @ t_frac` で固有並進を計算。
+  - 数学的根拠: order=2 の操作（鏡映）の固有並進は `(I + W) / 2 @ t`。これは t の鏡映面への射影に等しく、ITC の g(…) の引数と一致する。
+  - 既存の `glide_translation_frac()` が最短ノルムの格子等価ベクトルを選ぶのに対し、ITC は固有並進の canonical 値を使うため、非等価な空間群（例: R3m の centering 操作含む glide）で差異が出ていた。
+- `operation_itc_like_summary` の glide ブランチで `glide_intrinsic_translation_frac` を優先使用。None の場合のみ `readable_glide_representative` の返す従来値にフォールバック。
+- `operation_element_summary` の `; glide (...)` 表示も同様に修正。`centered_fractional_vector` の適用を廃止（ITC の値が centered でないケースがあるため）。
+
+**検証:** BaTiO3 Bravais cell（R3m 六方晶設定、18 操作）で全 glide ベクトルが ITC Vol. A の表と一致することを確認済み。
+
+```
+(2/3,1/3,1/3)+ set op4: g(1/6,-1/6,1/3)  ✓
+(2/3,1/3,1/3)+ set op5: g(1/6,1/3,1/3)   ✓
+(2/3,1/3,1/3)+ set op6: g(2/3,1/3,1/3)   ✓
+(1/3,2/3,2/3)+ set op4: g(-1/6,1/6,2/3)  ✓
+(1/3,2/3,2/3)+ set op5: g(1/3,2/3,2/3)   ✓
+(1/3,2/3,2/3)+ set op6: g(1/3,1/6,2/3)   ✓
+```
+
+**互換性:** `glide_translation_frac()` 自体は削除せず保持。アニメーション経路計算（`symmetry_elements.py` の `glide_translation_cart()`）は引き続き幾何的計算を使用しており変更なし。ラベル生成のみを変更。
+
+---
+
+### 変更 3: 純並進の方向線を PyVista に表示
+
+**場所:** `crystal_viewer/viewer/symmetry_elements.py`
+
+**変更内容:**
+- `_is_pure_translation(operation)`: kind に "translation" を含み "glide" "screw" を含まない場合に True。
+- `add_translation_direction_actor(...)`: シーン中心 (`display_scene_center`) を通り、並進ベクトル方向（`centered_fractional_vector` で最短格子等価ベクトルに変換後 Cartesian に変換）の直線を黄色 (`#f7dc6f`、グライドと同色) で描画。
+- `add_symmetry_element_actors()` の末尾で純並進の場合に呼び出し。axes/planes/centers ループの後。
+
+---
+
+### 変更 4: Bravais cell 変換後の orientation widget の向き修正
+
+**場所:** `crystal_viewer/viewer/scene_rendering.py`、`pyvista_controller.py`、`native_gui.py`
+
+**問題:** BaTiO3 を Bravais cell（六方晶）に変換すると、PyVista 左下の orientation widget（axes indicator）が変換前の向きのままになっていた。
+
+**原因:** `plotter.clear()` は `RemoveAllViewProps()` を呼ぶが、これは VTK prop（メッシュ等）のみを除去し、`vtkOrientationMarkerWidget`（`vtkInteractorObserver` のサブクラス）は除去しない。そのため旧 widget が残留し、新たに追加した widget と二重になっていた。
+
+**修正:**
+- `add_orientation_axes(plotter, *, unit_cell)` のシグネチャを `unit_cell: "dict | bool | None" = False` に変更。
+- `unit_cell` が dict の場合、`_add_crystal_orientation_widget(plotter, unit_cell)` を呼ぶ。
+- `_add_crystal_orientation_widget()`: `plotter.add_axes()` で widget を追加後、返された `vtkAxesActor` に `SetUserTransform(vtkTransform)` を適用。変換行列の列ベクトル = 正規化した格子ベクトル (a_n, b_n, c_n)。これにより widget の X/Y/Z 矢印が crystal の a/b/c 方向を向く。
+- 呼び出し元 (`pyvista_controller.py`, `native_gui.py`) で `bool(render_data.get("unit_cell"))` → `render_data.get("unit_cell")` に変更（dict をそのまま渡す）。
+
+---
+
+### 変更 5: アニメーション再開バグの修正
+
+**場所:** `crystal_viewer/viewer/pyvista_controller.py` `_on_timer_inner()`
+
+**問題:** アニメーションを 1 回再生して終了した後、Start ボタンを連打しても再生が始まらなかった。
+
+**原因:** `frame_position` が終端 (`frame_count - 1`) で止まっている状態で `requested_playing = True` になると、タイマーの 1 tick で:
+1. `self.playing = True` にセット
+2. `frame_position` が終端なので `frame_step` を足しても依然終端
+3. 終端判定 → `self.playing = False`
+
+というループになり、即座に停止していた。
+
+**修正:** `self.playing = requested_playing` の直前に以下を追加:
+```python
+if requested_playing and not self.playing and self.frame_position >= self.frame_count - 1:
+    self.frame_position = 0.0
+```
+再生開始時（stopped → playing 遷移）かつ終端にいる場合のみ先頭に戻す。
+
+---
+
+### 変更 6: 現在の視点から 3-view GIFs を保存する機能の追加
+
+**場所:** `pyvista_controller.py`、`render_state.py`、`web/browser_ui.py`
+
+**追加内容:**
+- `save_three_view_gifs_from_current_view()`: 現在のカメラの focal point・視線方向・up ベクトルを取得し、それを "front" として right（= front × up）と top（= up、top_up = -front）を派生させて 3 方向の GIF を保存。距離は `camera_distance_for_view()` で一定に揃える。
+- `render_state.py` に `gif_3view_current_request_id` フィールドを追加（`STATE_UPDATE_KEYS`、`RenderStateSnapshot`、初期値、`pop_render_state_snapshot` のすべてに追加）。
+- `browser_ui.py` に「Save 3-view GIFs (current view)」ボタンを追加（既存の「Save 3-view GIFs」の隣）。保存中のグレーアウト・テキスト変更も対応。
+
+既存の「Save 3-view GIFs」は operation の canonical view を front とする動作を維持。新ボタンはユーザーが PyVista で向いている方向を front とする。
+
+---
+
+### ITC 位置表現の正規化実装（2026-05-31）
+
+`operation_labels.py` に `_itc_normalize(x0, null_vecs)` を追加し、`operation_itc_position()` で呼び出すようにした。
+
+**実装済みのルール（`_itc_normalize`）:**
+
+| ルール | 内容 |
+|---|---|
+| 1. 符号 | null ベクトルの最初の非ゼロ成分が正になるよう符号を反転 |
+| 2. オフセット | 各 null ベクトルに対し、丸め値が負整数になる最初の座標の定数をゼロにする方向へパラメータをシフト（`-x` の形にする） |
+| 3. ラップ | シフト後に x0 の各成分を `[0, 1)` に収める |
+
+**検証済みケース（全て ITC と一致）:**
+
+```
+3+ rotation at (0,0,0)          → 3+ 0, 0, z
+2_1 screw along y at (0,0,1/4)  → 2_1(0,1/2,0) 0, y, 1/4
+inversion at (1/4,1/4,1/4)      → -1 1/4, 1/4, 1/4
+mirror at y=0                   → m x, 0, z
+R3m glide (1/3,2/3,2/3)+ op4    → g(-1/6,1/6,2/3) x+1/2, -x, z
+```
+
+---
+
+**未対応の既知問題（今後の課題）:**
+
+**問題 A: null ベクトルに負の整数成分が複数ある場合**
+
+対象例: [2, -1, -1] 型（三方・六方系の特定の軸方向）
+
+現状: 最初の負成分（index 1 の `-1`）の定数だけゼロにする。index 2 の定数が残る。
+
+例:
+```
+null vec [2,-1,-1], x0 = (c0, c1, c2)
+現状出力: 2x+c0', -x, -x+c2'   (index 1 は 0 になるが index 2 は残る)
+ITC期待:  不明（空間群依存）
+```
+
+対応案:
+- 「最も多くの定数をゼロにできるシフトを探索する」ルールを追加
+- 全オフセット候補 `{0, 1/6, 1/4, 1/3, 1/2, 2/3, 3/4, 5/6}` を試して最小コスト（残る定数の数）のものを選ぶ
+
+---
+
+**問題 B: 2 パラメータの面で両 null ベクトルが対角的な場合**
+
+対象例: 両方の null ベクトルが `[1,-1,0]` と `[1,1,0]` のような非軸平行構造を持つ場合（斜方系・単斜系の特定面）
+
+現状: 各 null ベクトルを独立して正規化するため、2 本目のオフセット計算時には 1 本目のシフトで x0 が変わっている。組み合わせによっては ITC の選択と異なる可能性がある。
+
+対応案:
+- 2 本の null ベクトルに対してシフトの全組み合わせを評価し、合計ゼロ定数数を最大化するものを選ぶ
+
+---
+
+**問題 C: アルゴリズムでは一意に決まらないケース（空間群ルックアップが必要）**
+
+現状のアルゴリズムは ITC の選択と「等価だが異なる表現」を出力する可能性がある。
+
+例: `x+1/4, -x+1/4, z`（等価）vs `x+1/2, -x, z`（ITC）— これは問題 A/B のルールで解決済みだが、より複雑なケースでは解決できない可能性がある。
+
+対応案:
+- gemmi ライブラリの `SpaceGroup` から対称操作の xyz 文字列を取得し、それをベースに position 表現を導出する
+- Bilbao Crystallographic Server のデータを参照テーブルとして使用する
+- `crystal_viewer.structure_analysis` がすでに spglib の `international` 空間群番号を持っているため、`render_data["space_group"]["number"]` → gemmi の空間群 → 操作の canonical 文字列、というパイプラインが作れる
+
+**優先度:** 問題 A は較的少数の空間群（三方・菱面体系）にのみ影響。問題 B・C は実用上ほぼ発生しない。BaTiO3（R3m）・PdF2（P2₁3）・Jacobsite（Fd-3m）では現アルゴリズムで正確な ITC 表記が得られることを確認済み。
+
+---
+
+### 全操作の ITC 風表記（実装済み、2026-05-31）
+
+`operation_itc_like_summary()` を全面書き換えし、全操作で ITC 形式を出力するようにした。
+
+**実装済み内容:**
+
+1. `_itc_t_intrinsic(W, t, order)`: `(1/n) * sum_{k=0}^{n-1} W^k @ t` で固有並進を計算
+2. `_itc_null_space(A)`: SVD で null 空間基底を求め `_itc_rationalize()` で有理数近似
+3. `_itc_normalize(x0, null_vecs)`: ITC 正準形への正規化（符号・オフセット・ラップ）
+4. `_itc_param_names(null_vecs)`: 支配成分から x/y/z を割り当て
+5. `_itc_coord_str(const, terms)`: 座標成分の文字列化
+6. `operation_itc_position(operation)`: 上記を組み合わせて位置文字列を生成
+7. `operation_itc_like_summary()`: `t|(...)` （純並進）または `symbol(t_int) position`（その他全操作）を返す
+
+`operation_element_summary()` は従来形式（軸・面の方向と位置）のまま維持。
+
+**正規化の既知限界と今後の課題は「ITC 位置表現の正規化実装」セクションを参照。**
+
+---
+
+### Dead code 削除（2026-05-31）
+
+`operation_itc_like_summary()` の全面書き換えにより不要になった関数を `operation_labels.py` から削除した。
+
+**削除した関数:**
+
+| 関数 | 理由 |
+|---|---|
+| `readable_glide_representative()` | `operation_itc_like_summary()` が `operation_itc_position()` に切り替わり呼び出し元がなくなった |
+| `plane_equation_label()` | 同上（`readable_glide_representative` 経由でのみ使用されていた） |
+| `fractional_vector_complexity()` | `readable_glide_representative` からのみ呼び出されていた |
+| `plane_offset_complexity()` | 同上 |
+| `fraction_denominator()` | 上記 2 関数からのみ呼び出されていた |
+| `infer_standard_glide_symbol()` | `infer_standard_glide_symbol_for_planes()` が直接 `glide_translation_frac + classify_standard_glide_vector` を呼ぶよう変更され、ラッパーが不要になった |
+| `scene_center()` | 変更前から呼び出し元がなかった（`display_atoms.display_scene_center` が全ての用途を担う） |
+
+**残した関数:**
+
+| 関数 | 残した理由 |
+|---|---|
+| `glide_vector_cart_norm()` | `infer_standard_glide_symbol_for_planes()` が引き続き使用（同一グライド面の複数候補を距離でソートするため） |
+| `glide_intrinsic_translation_frac()` | `operation_element_summary()` でグライドの "; glide (...)" 表示に使用 |
+| `classify_standard_glide_vector()` | `infer_standard_glide_symbol_for_planes()` が使用（グライドシンボル a/b/c/n/d の判定） |
+
+**影響確認:**
+
+カメラ操作（`view_along_current_operation()`、`operation_camera_basis()`、`set_camera_view()`）は `operation_summaries` や `itc_like_summary` に依存せず、raw の operation dict と対称要素（axes/planes/centers）を直接使用するため影響なし。`pyvista_controller.py` が `operation_labels` からインポートするのは `camera_up_vector`・`custom_focus_point_cart`・`is_pure_translation_operation`・`operation_focus_point_cart`・`operation_view_direction_cart`・`rotate_vector`・`visual_translation_direction_cart` のみで、いずれも変更なし。

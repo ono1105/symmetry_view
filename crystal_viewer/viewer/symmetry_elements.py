@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pyvista as pv
 
-from crystal_viewer.geometry import normalize, reflect_point
+from crystal_viewer.geometry import integer_index_vector, normalize, reflect_point
 from crystal_viewer.viewer.animation import (
     improper_inversion_center,
     improper_reflection_plane,
@@ -12,7 +12,7 @@ from crystal_viewer.viewer.animation import (
     select_animation_context,
     shared_step_translation,
 )
-from crystal_viewer.viewer.display_atoms import display_point_cart, display_scene_span
+from crystal_viewer.viewer.display_atoms import display_point_cart, display_scene_center, display_scene_span
 from crystal_viewer.viewer.glide_geometry import (
     align_fractional_vector_to_reference,
     centered_fractional_vector,
@@ -118,6 +118,7 @@ def add_symmetry_element_actors(
                 actors.append(actor)
 
     for center in centers:
+
         point = display_point_cart(render_data, center["point_cart"], display_mode, cell_origin_mode)
         cube = pv.Cube(
             center=point,
@@ -127,7 +128,48 @@ def add_symmetry_element_actors(
         )
         actors.append(plotter.add_mesh(cube, color="#ff5f57", opacity=0.8, show_edges=True))
 
+    if operation is not None and _is_pure_translation(operation):
+        actor = add_translation_direction_actor(
+            plotter, render_data, operation, axis_length, display_mode, cell_origin_mode
+        )
+        if actor is not None:
+            actors.append(actor)
+
     return actors
+
+
+def _is_pure_translation(operation: dict) -> bool:
+    kind = str(operation.get("kind", ""))
+    return "translation" in kind and "glide" not in kind and "screw" not in kind
+
+
+def add_translation_direction_actor(
+    plotter: pv.Plotter,
+    render_data: dict,
+    operation: dict,
+    line_length: float,
+    display_mode: str,
+    cell_origin_mode: str,
+):
+    unit_cell = render_data.get("unit_cell")
+    translation_cart = operation.get("translation_cart")
+    if translation_cart is None:
+        return None
+
+    translation = np.asarray(translation_cart, dtype=float)
+    if unit_cell is not None:
+        lattice = np.asarray(unit_cell["lattice"], dtype=float)
+        t_frac = centered_fractional_vector(translation @ np.linalg.inv(lattice))
+        translation = t_frac @ lattice
+
+    norm = float(np.linalg.norm(translation))
+    if norm < 1e-10:
+        return None
+    direction = translation / norm
+
+    center = display_scene_center(render_data, display_mode, cell_origin_mode)
+    line = pv.Line(center - 0.5 * line_length * direction, center + 0.5 * line_length * direction)
+    return plotter.add_mesh(line, color="#f7dc6f", line_width=3, opacity=0.55)
 
 
 def add_glide_direction_actor(
@@ -248,31 +290,6 @@ def same_periodic_plane(render_data: dict, first: dict, second: dict) -> bool:
     delta_frac = (first_point - second_point) @ np.linalg.inv(lattice)
     offset_delta = float(np.dot(int_hkl, delta_frac))
     return abs(offset_delta - round(offset_delta)) < 1e-5
-
-
-def integer_index_vector(values: np.ndarray) -> np.ndarray | None:
-    values = np.asarray(values, dtype=float)
-    max_abs = float(np.max(np.abs(values)))
-    if max_abs < 1e-10:
-        return None
-    scaled = values / max_abs
-    best: np.ndarray | None = None
-    best_error = float("inf")
-    for limit in range(1, 13):
-        candidate = np.rint(scaled * limit).astype(int)
-        if not np.any(candidate):
-            continue
-        normalized = candidate / max(float(np.max(np.abs(candidate))), 1.0)
-        error = float(np.linalg.norm(normalized - scaled))
-        if error < best_error:
-            best = candidate
-            best_error = error
-    if best is None or best_error > 1e-5:
-        return None
-    gcd = int(np.gcd.reduce(np.abs(best[np.nonzero(best)])))
-    if gcd > 1:
-        best = best // gcd
-    return best
 
 
 def display_symmetry_elements(

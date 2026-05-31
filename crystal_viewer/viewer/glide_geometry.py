@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from functools import lru_cache
-
 import numpy as np
 
-from crystal_viewer.geometry import normalize
+from crystal_viewer.geometry import normalize, periodic_shifts
 
 
 def glide_translation_frac(render_data: dict, operation: dict, plane: dict) -> np.ndarray | None:
@@ -21,7 +19,7 @@ def glide_translation_frac(render_data: dict, operation: dict, plane: dict) -> n
     normal = normalize(np.asarray(plane["normal_cart"], dtype=float))
 
     best: tuple[float, float, np.ndarray] | None = None
-    for shift in periodic_shift_vectors(1):
+    for shift in periodic_shifts(1):
         displacement = matrix @ point + translation + shift @ lattice - point
         normal_distance = abs(float(np.dot(displacement, normal)))
         displacement_norm = float(np.linalg.norm(displacement))
@@ -52,7 +50,7 @@ def align_fractional_vector_to_reference(
         return vector_frac
 
     best: tuple[float, float, np.ndarray] | None = None
-    for shift in periodic_shift_vectors(1):
+    for shift in periodic_shifts(1):
         candidate = np.asarray(vector_frac, dtype=float) + shift
         candidate_cart = candidate @ lattice
         candidate_norm = float(np.linalg.norm(candidate_cart))
@@ -64,8 +62,5 @@ def align_fractional_vector_to_reference(
             best = score
     return vector_frac if best is None else best[2]
 
-
-@lru_cache(maxsize=None)
 def periodic_shift_vectors(radius: int) -> np.ndarray:
-    values = range(-radius, radius + 1)
-    return np.asarray([(i, j, k) for i in values for j in values for k in values], dtype=float)
+    return periodic_shifts(radius)

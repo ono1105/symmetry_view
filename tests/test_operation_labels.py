@@ -57,7 +57,7 @@ class OperationLabelsTest(unittest.TestCase):
         summaries = operation_summaries(converted["render_data"], converted["atom_mappings"])
         glide = next(summary for summary in summaries if summary["index"] == 9)
 
-        self.assertEqual(glide["itc_like_summary"], "g(1/6,-1/6,1/3) plane x + y=1/2")
+        self.assertEqual(glide["itc_like_summary"], "g(1/6,-1/6,1/3) x+1/2, -x, z")
 
     def test_glide_direction_vector_uses_centered_periodic_image(self):
         payload = json.loads(Path("exports/json/cadmoselite.json").read_text(encoding="utf-8"))

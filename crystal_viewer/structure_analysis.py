@@ -96,15 +96,10 @@ def analyze_cif(
         raise AnalysisError(f"CIF file not found: {cif_path}")
 
     loaded = load_structure_from_cif(cif_path)
-    asymmetric_atoms = (
-        loaded.asymmetric_atoms
-        if loaded.asymmetric_atoms is not None
-        else read_asymmetric_unit_sites(cif_path, np.asarray(loaded.structure.lattice.matrix, dtype=float))
-    )
     return analyze_structure(
         loaded.structure,
         source_file=cif_path,
-        asymmetric_atoms=asymmetric_atoms,
+        asymmetric_atoms=loaded.asymmetric_atoms or (),
         warnings=loaded.warnings,
         symprec=symprec,
         angle_tolerance=angle_tolerance,
@@ -137,6 +132,7 @@ def analyze_structure(
 
     rotations = np.asarray(dataset_value(dataset, "rotations"), dtype=int)
     translations = np.asarray(dataset_value(dataset, "translations"), dtype=float)
+    equivalent_atoms = np.asarray(dataset_value(dataset, "equivalent_atoms"), dtype=int)
     merged, per_operation = core.collect_merged_elements(
         rotations,
         translations,
@@ -156,6 +152,7 @@ def analyze_structure(
             asymmetric_atoms=asymmetric_atoms,
             rotations=rotations,
             translations=translations,
+            equivalent_atoms=equivalent_atoms,
         ),
         space_group=convert_space_group(dataset),
         operations=operations,
@@ -436,23 +433,34 @@ def convert_structure(
     asymmetric_atoms: tuple[AsymmetricUnitSite, ...] = (),
     rotations: np.ndarray | None = None,
     translations: np.ndarray | None = None,
+    equivalent_atoms: np.ndarray | None = None,
 ) -> StructureSummary:
+    derived_asymmetric_indices: list[int] | None = None
+    if not asymmetric_atoms and equivalent_atoms is not None:
+        asymmetric_atoms, derived_asymmetric_indices = asymmetric_unit_from_equivalent_atoms(structure, equivalent_atoms)
+
     atoms = []
     for index, site in enumerate(structure):
         element, atomic_number = primary_site_element(site)
-        asymmetric_index, generation_operation_index = identify_asymmetric_source(
-            np.asarray(site.frac_coords, dtype=float),
-            element,
-            asymmetric_atoms,
-            rotations,
-            translations,
-        )
+        frac = np.asarray(site.frac_coords, dtype=float)
+        if derived_asymmetric_indices is not None:
+            asymmetric_index = derived_asymmetric_indices[index]
+            source_frac = np.asarray(asymmetric_atoms[asymmetric_index].frac, dtype=float)
+            generation_operation_index = identify_generation_operation(frac, source_frac, rotations, translations)
+        else:
+            asymmetric_index, generation_operation_index = identify_asymmetric_source(
+                frac,
+                element,
+                asymmetric_atoms,
+                rotations,
+                translations,
+            )
         atoms.append(
             AtomSite(
                 index=index,
                 element=element,
                 atomic_number=atomic_number,
-                frac=np.asarray(site.frac_coords, dtype=float),
+                frac=frac,
                 cart=np.asarray(site.coords, dtype=float),
                 asymmetric_index=asymmetric_index,
                 generation_operation_index=generation_operation_index,
@@ -467,6 +475,43 @@ def convert_structure(
         atoms=tuple(atoms),
         asymmetric_atoms=asymmetric_atoms,
     )
+
+
+def asymmetric_unit_from_equivalent_atoms(
+    structure: Structure,
+    equivalent_atoms: np.ndarray,
+) -> tuple[tuple[AsymmetricUnitSite, ...], list[int]]:
+    lattice = np.asarray(structure.lattice.matrix, dtype=float)
+    rep_to_asymmetric_index: dict[int, int] = {}
+    asymmetric_atoms: list[AsymmetricUnitSite] = []
+    atom_asymmetric_indices: list[int] = []
+    for atom_index, representative_index in enumerate(np.asarray(equivalent_atoms, dtype=int)):
+        representative_index = int(representative_index)
+        if representative_index not in rep_to_asymmetric_index:
+            representative_site = structure[representative_index]
+            element, atomic_number = primary_site_element(representative_site)
+            asymmetric_index = len(asymmetric_atoms)
+            rep_to_asymmetric_index[representative_index] = asymmetric_index
+            frac = np.asarray(representative_site.frac_coords, dtype=float)
+            asymmetric_atoms.append(
+                AsymmetricUnitSite(
+                    index=asymmetric_index,
+                    label=site_label(representative_site, element, asymmetric_index),
+                    element=element,
+                    atomic_number=atomic_number,
+                    frac=frac,
+                    cart=frac @ lattice,
+                )
+            )
+        atom_asymmetric_indices.append(rep_to_asymmetric_index[representative_index])
+    return tuple(asymmetric_atoms), atom_asymmetric_indices
+
+
+def site_label(site, element: str, index: int) -> str:
+    label = getattr(site, "label", None)
+    if label:
+        return str(label)
+    return f"{element}{index + 1}"
 
 
 def read_asymmetric_unit_sites(cif_path: Path, lattice: np.ndarray) -> tuple[AsymmetricUnitSite, ...]:
@@ -603,6 +648,29 @@ def identify_asymmetric_source(
     if best_distance > 1e-5:
         return None, None
     return best_asymmetric_index, best_operation_index
+
+
+def identify_generation_operation(
+    frac: np.ndarray,
+    source_frac: np.ndarray,
+    rotations: np.ndarray | None,
+    translations: np.ndarray | None,
+) -> int | None:
+    if rotations is None or translations is None:
+        return None
+    best_distance = float("inf")
+    best_operation_index = None
+    for operation_index, (rotation, translation) in enumerate(zip(rotations, translations)):
+        generated = wrap_frac(rotation @ source_frac + translation)
+        delta = generated - frac
+        delta = delta - np.round(delta)
+        distance = float(np.linalg.norm(delta))
+        if distance < best_distance:
+            best_distance = distance
+            best_operation_index = operation_index
+    if best_distance > 1e-5:
+        return None
+    return best_operation_index
 
 
 def wrap_frac(frac: np.ndarray) -> np.ndarray:

@@ -170,14 +170,15 @@ HTML = """<!doctype html>
       max-height: 180px;
       overflow: auto;
     }
-    .saving-gif button:not(#save-gif):not(#save-gif-3view),
+    .saving-gif button:not(#save-gif):not(#save-gif-3view):not(#save-gif-3view-current),
     .saving-gif input,
     .saving-gif select {
       pointer-events: none;
       opacity: 0.55;
     }
     .saving-gif #save-gif,
-    .saving-gif #save-gif-3view {
+    .saving-gif #save-gif-3view,
+    .saving-gif #save-gif-3view-current {
       background: #f8fafc;
       color: #111418;
       cursor: wait;
@@ -798,6 +799,7 @@ HTML = """<!doctype html>
           <button id="reset" class="secondary">Reset</button>
           <button id="save-gif" class="secondary">Save GIF</button>
           <button id="save-gif-3view" class="secondary">Save 3-view GIFs</button>
+          <button id="save-gif-3view-current" class="secondary">Save 3-view GIFs (current view)</button>
         </div>
         <h3 class="subsection-title">Speed</h3>
         <div class="button-row flush" id="speed-controls">
@@ -978,9 +980,14 @@ function optionText(operation) {
   if (sourceKind === "molecule") {
     return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
   }
-  const summary = operationSummaryText(operation);
-  const element = summary ? ` | ${summary}` : "";
-  return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}${element}`;
+  if (operationLabelMode === "itc_like") {
+    const itc = operation.itc_like_summary;
+    if (itc) return `op ${operation.index}: ${formatSymbol(itc)}`;
+  }
+  const symbol = formatSymbol(displayOperationSymbol(operation));
+  const summary = operation.element_summary || "";
+  const element = summary ? ` | ${formatSymbol(summary)}` : "";
+  return `op ${operation.index}: ${symbol}${element}`;
 }
 
 function operationSummaryText(operation) {
@@ -1879,14 +1886,16 @@ function isGifSaving() {
 function syncGifSavingControls() {
   const saving = isGifSaving();
   document.body.classList.toggle("saving-gif", saving);
-  for (const id of ["save-gif", "save-gif-3view", "play-toggle", "reset"]) {
+  for (const id of ["save-gif", "save-gif-3view", "save-gif-3view-current", "play-toggle", "reset"]) {
     const button = document.getElementById(id);
     if (button) button.disabled = saving;
   }
   const saveGif = document.getElementById("save-gif");
   const save3 = document.getElementById("save-gif-3view");
+  const save3current = document.getElementById("save-gif-3view-current");
   if (saveGif) saveGif.textContent = saving ? "Saving..." : "Save GIF";
   if (save3) save3.textContent = saving ? "Saving..." : "Save 3-view GIFs";
+  if (save3current) save3current.textContent = saving ? "Saving..." : "Save 3-view GIFs (current view)";
 }
 
 function selectedAtomIndices() {
@@ -2443,6 +2452,17 @@ document.getElementById("save-gif-3view").addEventListener("click", () => {
     return;
   }
   postState({gif_3view_request_id: Date.now(), playing: false});
+});
+document.getElementById("save-gif-3view-current").addEventListener("click", () => {
+  state.gif_status = "writing 3-view GIFs...";
+  syncGifSavingControls();
+  renderStatus();
+  if (activeMode === "custom") {
+    sendCurrentCustomAnimation(false);
+    window.setTimeout(() => postState({gif_3view_current_request_id: Date.now(), playing: false}), 120);
+    return;
+  }
+  postState({gif_3view_current_request_id: Date.now(), playing: false});
 });
 function cameraAngle() {
   const value = Number(document.getElementById("camera-angle").value);

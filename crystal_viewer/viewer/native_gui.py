@@ -103,7 +103,7 @@ class NativePyVistaViewer:
         self.rebuild_display_atoms(self.display_mode)
         if self.render_data.get("unit_cell"):
             add_unit_cell(self.plotter, self.render_data["unit_cell"], cell_origin_mode=self.cell_origin_mode)
-        add_orientation_axes(self.plotter, unit_cell=bool(self.render_data.get("unit_cell")))
+        add_orientation_axes(self.plotter, unit_cell=self.render_data.get("unit_cell"))
         self.legend_actor = add_atom_legend(
             self.plotter,
             self.render_data,

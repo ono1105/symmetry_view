@@ -524,6 +524,10 @@ def make_handler(
                 )
                 new_session = ViewerSession(current_json_path, converted_payload, base_payload=base_payload)
                 with state_lock:
+                    if shared_state.get("import_in_progress"):
+                        raise RuntimeError("A structure started loading before cell setting conversion finished.")
+                    if session.json_path != current_json_path or session.payload is not current_payload:
+                        raise RuntimeError("The loaded structure changed before cell setting conversion finished.")
                     preserved = {
                         "speed": shared_state.get("speed", 1.0),
                         "projection_mode": shared_state.get("projection_mode", "perspective"),

@@ -4,6 +4,8 @@ from itertools import product
 
 import numpy as np
 
+from crystal_viewer.geometry import periodic_shifts as cached_periodic_shifts
+
 
 def normalized_cell_origin_mode(cell_origin_mode: str = "center") -> str:
     return "corner" if cell_origin_mode == "corner" else "center"
@@ -94,11 +96,7 @@ def is_primary_display_image(frac: np.ndarray, shift: np.ndarray, *, cell_origin
 
 
 def periodic_shifts(limit: int = 1) -> np.ndarray:
-    limit = max(int(limit), 0)
-    return np.asarray(
-        list(product(range(-limit, limit + 1), repeat=3)),
-        dtype=float,
-    )
+    return cached_periodic_shifts(limit)
 
 
 def display_mode_margin(display_mode: str) -> float:

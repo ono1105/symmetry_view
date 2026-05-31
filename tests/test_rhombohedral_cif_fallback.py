@@ -4,7 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from crystal_viewer.structure_analysis import load_structure_from_cif
+from pymatgen.symmetry.groups import SpaceGroup
+
+from crystal_viewer.structure_analysis import RHOMBOHEDRAL_SETTING_OPS, load_structure_from_cif
 
 
 R_LATTICE = """
@@ -95,6 +97,13 @@ Na1 Na 0.000000 0.000000 0.000000
 
         with self.assertRaises(Exception):
             load_structure_from_cif(self.write_temp_cif(cif_text))
+
+    def test_pymatgen_space_group_ops_are_not_the_r_setting_fallback_ops(self) -> None:
+        for number in RHOMBOHEDRAL_SETTING_OPS:
+            with self.subTest(space_group_number=number):
+                pymatgen_ops = SpaceGroup.from_int_number(number).symmetry_ops
+
+                self.assertNotEqual(len(pymatgen_ops), len(RHOMBOHEDRAL_SETTING_OPS[number]))
 
     def write_temp_cif(self, text: str) -> Path:
         handle = tempfile.NamedTemporaryFile("w", suffix=".cif", encoding="utf-8", delete=False)
