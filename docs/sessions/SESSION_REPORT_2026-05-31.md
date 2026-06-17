@@ -622,6 +622,7 @@ t = W_B @ t_A + t_B
 4. ブラウザ UI に operation sequence editor を追加する
 5. 既存のアニメーション処理を使って、sequence を 1 step ずつ再生できるようにする
 6. 選択済み操作から対象操作を作れるかを BFS などで探索する機能を追加する
+7. ITC-like 表記を空間群ごとの ITC operation table と照合し、標準 setting / origin choice ごとの完全一致を目指す
 
 この順番なら、パズル機能の核になる群演算部分を UI から独立して検証できる。
 

@@ -3,23 +3,47 @@ from __future__ import annotations
 from pathlib import Path
 
 from crystal_viewer.source_kinds import SOURCE_KIND_CRYSTAL, normalize_source_kind
-from crystal_viewer.viewer.operation_labels import operation_summaries
+from crystal_viewer.viewer.operation_labels import minimal_operation_summaries, operation_summaries
 
 
 class ViewerSession:
-    def __init__(self, json_path: Path, payload: dict, *, base_payload: dict | None = None) -> None:
-        self.load(json_path, payload, base_payload=base_payload)
+    def __init__(
+        self,
+        json_path: Path,
+        payload: dict,
+        *,
+        base_payload: dict | None = None,
+        summarize_operations: bool = True,
+    ) -> None:
+        self.load(json_path, payload, base_payload=base_payload, summarize_operations=summarize_operations)
 
-    def load(self, json_path: Path, payload: dict, *, base_payload: dict | None = None) -> None:
+    def load(
+        self,
+        json_path: Path,
+        payload: dict,
+        *,
+        base_payload: dict | None = None,
+        summarize_operations: bool = True,
+    ) -> None:
         self.json_path = json_path
         self.base_payload = base_payload or payload
         self.payload = payload
         self.render_data = payload["render_data"]
         self.atoms = self.render_data["atoms"]
         self.operations = self.render_data["operations"]
-        self.operation_summary_items = operation_summaries(
+        self.operation_summary_items = (
+            operation_summaries(
+                self.render_data,
+                payload.get("atom_mappings"),
+            )
+            if summarize_operations
+            else minimal_operation_summaries(self.render_data)
+        )
+
+    def compute_operation_summaries(self) -> list[dict]:
+        return operation_summaries(
             self.render_data,
-            payload.get("atom_mappings"),
+            self.payload.get("atom_mappings"),
         )
 
     def replace_from(self, other: "ViewerSession") -> None:

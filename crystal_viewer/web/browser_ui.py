@@ -96,6 +96,10 @@ HTML = """<!doctype html>
       background: #7dd3fc;
       color: #081017;
     }
+    .boundary-button.selected {
+      background: #7dd3fc;
+      color: #081017;
+    }
     .structure-kind-button.selected {
       background: #7dd3fc;
       color: #081017;
@@ -553,6 +557,39 @@ HTML = """<!doctype html>
       margin-top: 6px;
       color: #e2e8f0;
     }
+    .sequence-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .sequence-row input, .sequence-row select {
+      width: 100%;
+    }
+    .sequence-list {
+      display: grid;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .sequence-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 8px;
+      border: 1px solid #3a4350;
+      border-radius: 6px;
+      background: #1b2027;
+      color: #d7dee8;
+      font-size: 12px;
+    }
+    .sequence-item span {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .sequence-item button {
+      padding: 5px 8px;
+    }
     @media (max-width: 820px) {
       main {
         padding: 14px;
@@ -634,6 +671,20 @@ HTML = """<!doctype html>
       <h2 class="section-title">Custom Operation</h2>
       <p class="hint">Enter any (W|t) operation and check it against the unit-cell atoms. After checking, the shared animation and atom controls apply to this operation.</p>
       <div class="control-stack">
+        <div>
+          <label for="cop-operation-select">Operation sequence</label>
+          <div class="sequence-row">
+            <select id="cop-operation-select"></select>
+            <button id="btn-add-existing-op" class="secondary">Add</button>
+          </div>
+          <div class="button-row flush">
+            <button id="btn-add-checked-custom" class="secondary">Add checked custom</button>
+            <button id="btn-compose-custom-sequence" class="secondary">Compose sequence</button>
+            <button id="btn-clear-custom-sequence" class="secondary">Clear sequence</button>
+          </div>
+          <div id="custom-sequence-list" class="sequence-list"></div>
+          <p class="hint">Operations are applied from top to bottom. Use Check symmetry before adding a custom operation.</p>
+        </div>
         <div>
           <label for="cop-type">Operation type</label>
           <select id="cop-type">
@@ -815,6 +866,11 @@ HTML = """<!doctype html>
             <option value="rotoinversion">Rotoinversion</option>
           </select>
         </div>
+        <h3 class="subsection-title">Boundary</h3>
+        <div class="button-row flush" id="animation-boundary-controls">
+          <button class="secondary boundary-button selected" data-boundary-mode="continuous">Continuous</button>
+          <button class="secondary boundary-button" data-boundary-mode="wrap">Wrap</button>
+        </div>
         <p class="hint">Start or stop the selected operation and save the current view as a GIF.</p>
       </section>
       <section class="panel">
@@ -945,6 +1001,7 @@ let state = {};
 let directionFilterValue = "";
 let atomElementFilterValue = "";
 let operationLabelMode = "standard";
+let customOperationSequence = [];
 let summariesReady = false;
 let activeMode = "standard";
 let customUnmappedAtoms = new Set();
@@ -1105,8 +1162,9 @@ function visibilityButton(visible, title, onToggle) {
 
 function renderOperations() {
   const root = document.getElementById("operations");
+  const sorted = sortedOperations();
   root.innerHTML = "";
-  for (const operation of sortedOperations()) {
+  for (const operation of sorted) {
     if (directionFilterValue && operationFilterKey(operation) !== directionFilterValue) continue;
     const text = optionText(operation);
     const row = document.createElement("button");
@@ -1122,6 +1180,66 @@ function renderOperations() {
     });
     root.appendChild(row);
   }
+  if (activeMode === "custom") renderCustomSequenceControls(sorted);
+}
+
+function renderCustomSequenceControls(sorted = sortedOperations()) {
+  const select = document.getElementById("cop-operation-select");
+  const list = document.getElementById("custom-sequence-list");
+  if (!select || !list) return;
+  const selectedValue = select.value;
+  select.innerHTML = "";
+  for (const operation of sorted) {
+    const option = document.createElement("option");
+    option.value = String(operation.index);
+    option.textContent = stripHtml(optionText(operation));
+    select.appendChild(option);
+  }
+  if (selectedValue && [...select.options].some(option => option.value === selectedValue)) {
+    select.value = selectedValue;
+  } else if (state.operation_index !== undefined) {
+    select.value = String(state.operation_index);
+  }
+
+  list.innerHTML = "";
+  const operationsByIndex = new Map(operations.map(operation => [operation.index, operation]));
+  if (!customOperationSequence.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = "No operations in sequence.";
+    list.appendChild(empty);
+  } else {
+    customOperationSequence.forEach((sequenceItem, position) => {
+      const operation = sequenceItem.type === "operation" ? operationsByIndex.get(sequenceItem.index) : null;
+      const row = document.createElement("div");
+      row.className = "sequence-item";
+      const label = document.createElement("span");
+      label.textContent = `${position + 1}. ${operation ? stripHtml(optionText(operation)) : customSequenceItemLabel(customOperationSequence[position])}`;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => {
+        customOperationSequence.splice(position, 1);
+        hideCustomSequenceResult();
+        renderCustomSequenceControls();
+      });
+      row.appendChild(label);
+      row.appendChild(remove);
+      list.appendChild(row);
+    });
+  }
+}
+
+function customSequenceItemLabel(item) {
+  if (!item) return "unknown";
+  if (item.type === "operation") return `op ${item.index}`;
+  return item.label || "custom";
+}
+
+function hideCustomSequenceResult() {
+  const div = document.getElementById("cop-result");
+  if (div) div.hidden = true;
 }
 
 function renderDirectionFilter() {
@@ -1810,6 +1928,13 @@ function syncSpeedButtons() {
   }
 }
 
+function syncBoundaryButtons() {
+  const boundaryMode = state.animation_boundary_mode || "continuous";
+  for (const button of document.querySelectorAll(".boundary-button")) {
+    button.classList.toggle("selected", button.dataset.boundaryMode === boundaryMode);
+  }
+}
+
 function syncDisplayButtons() {
   const displayMode = state.display_mode || "source";
   for (const button of document.querySelectorAll(".display-button")) {
@@ -1933,6 +2058,7 @@ function renderStatus() {
     `mode: ${activeMode}\\n` +
     `operation: ${activeMode === "custom" ? (copMatrix ? "custom " + copMatrix.op_type : "custom unchecked") : (operation ? stripHtml(optionText(operation)) : state.operation_index)}\\n` +
     `speed: ${state.speed || 1.0}x\\n` +
+    `boundary: ${state.animation_boundary_mode || "continuous"}\\n` +
     `projection: ${state.projection_mode || "perspective"}\\n` +
     `cell: ${state.cell_setting_mode || "native"}\\n` +
     `display: ${state.display_mode || "source"}\\n` +
@@ -2029,6 +2155,7 @@ async function postState(update) {
   });
   await refreshAtomMotion();
   syncSpeedButtons();
+  syncBoundaryButtons();
   syncDisplayButtons();
   syncCellOriginButtons();
   syncCellSettingButtons();
@@ -2065,9 +2192,11 @@ async function applyCellSetting(mode) {
     atomElementFilterValue = "";
     summariesReady = Boolean(state.summaries_ready);
     customUnmappedAtoms = new Set();
+    customOperationSequence = [];
     copMatrix = null;
     activeMode = "standard";
     document.getElementById("cop-result").hidden = true;
+    hideCustomSequenceResult();
     syncActiveModeControls();
     syncSourceKindControls();
     renderDirectionFilter();
@@ -2075,6 +2204,7 @@ async function applyCellSetting(mode) {
     renderElementColorControls();
     syncOperationSelection();
     syncSpeedButtons();
+    syncBoundaryButtons();
     syncDisplayButtons();
     syncCellOriginButtons();
     syncCellSettingButtons();
@@ -2226,8 +2356,10 @@ async function applyLoadedStructure(result, fallbackError, examplePath = "", con
   atomElementFilterValue = "";
   summariesReady = Boolean(state.summaries_ready);
   customUnmappedAtoms = new Set();
+  customOperationSequence = [];
   copMatrix = null;
   document.getElementById("cop-result").hidden = true;
+  hideCustomSequenceResult();
   activeMode = "standard";
   syncActiveModeControls();
   syncSourceKindControls();
@@ -2236,6 +2368,7 @@ async function applyLoadedStructure(result, fallbackError, examplePath = "", con
   renderElementColorControls();
   syncOperationSelection();
   syncSpeedButtons();
+  syncBoundaryButtons();
   syncDisplayButtons();
   syncCellOriginButtons();
   syncCellSettingButtons();
@@ -2271,6 +2404,7 @@ function setActiveMode(mode) {
     renderAtoms();
     postState({active_mode: "standard", playing: false, reset: true, clear_custom_check: true});
   } else {
+    renderCustomSequenceControls();
     postState({active_mode: "custom", playing: false});
   }
   renderStatus();
@@ -2284,6 +2418,7 @@ async function refreshState() {
     state = await api("/api/state");
     syncOperationSelection();
     syncSpeedButtons();
+    syncBoundaryButtons();
     syncDisplayButtons();
     syncCellOriginButtons();
     syncCellSettingButtons();
@@ -2373,6 +2508,13 @@ document.getElementById("play-toggle").addEventListener("click", () => {
 document.getElementById("reset").addEventListener("click", () => postState({playing: false, reset: true}));
 for (const button of document.querySelectorAll(".speed-button")) {
   button.addEventListener("click", () => postState({speed: Number(button.dataset.speed)}));
+}
+for (const button of document.querySelectorAll(".boundary-button")) {
+  button.addEventListener("click", () => postState({
+    animation_boundary_mode: button.dataset.boundaryMode,
+    playing: false,
+    reset: true,
+  }));
 }
 for (const button of document.querySelectorAll(".display-button")) {
   button.addEventListener("click", () => postState({
@@ -2561,6 +2703,33 @@ function buildCopPayload() {
   return {type, params, tolerance, request_id: Date.now()};
 }
 
+function setCopMatrixInputs(W, t) {
+  const flatW = (W || []).flat();
+  const ids = [
+    "cop-mat-w00", "cop-mat-w01", "cop-mat-w02",
+    "cop-mat-w10", "cop-mat-w11", "cop-mat-w12",
+    "cop-mat-w20", "cop-mat-w21", "cop-mat-w22",
+  ];
+  ids.forEach((id, index) => {
+    const input = document.getElementById(id);
+    if (input && Number.isFinite(Number(flatW[index]))) input.value = formatMatrixNumber(flatW[index]);
+  });
+  ["cop-mat-tx", "cop-mat-ty", "cop-mat-tz"].forEach((id, index) => {
+    const input = document.getElementById(id);
+    if (input && Number.isFinite(Number((t || [])[index]))) input.value = formatMatrixNumber(t[index]);
+  });
+  document.getElementById("cop-type").value = "matrix";
+  document.getElementById("cop-type").dispatchEvent(new Event("change"));
+}
+
+function formatMatrixNumber(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "0";
+  const rounded = Math.round(numeric);
+  if (Math.abs(numeric - rounded) < 1e-10) return String(rounded);
+  return numeric.toFixed(10).replace(/0+$/, "").replace(/\\.$/, "");
+}
+
 let copMatrix = null;        // {W_frac, t_frac, op_type, op_params}
 let copSelectedAtoms = new Set();
 let copAllUnmapped = [];
@@ -2597,9 +2766,28 @@ function displayCopResult(result, opType, opParams) {
   }
   if (result.W_frac && result.t_frac) {
     copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac, op_type: opType || "matrix", op_params: opParams || {}, result};
+    if (opType === "sequence") setCopMatrixInputs(result.W_frac, result.t_frac);
+    if (Number.isInteger(result.matching_operation_index)) {
+      const matched = operations.find(operation => operation.index === result.matching_operation_index);
+      const label = matched ? stripHtml(optionText(matched)) : `op ${result.matching_operation_index}`;
+      html += `<p class="hint">Matches existing ${label}.</p>`;
+      html += `<div class="button-row flush"><button id="btn-select-composed-match" class="secondary" data-index="${result.matching_operation_index}">Select match</button></div>`;
+    } else if (Array.isArray(result.operation_indices) || Array.isArray(result.sequence_items)) {
+      html += `<p class="hint">No existing operation has the same normalized (W|t).</p>`;
+    }
     html += `<p id="cop-anim-msg" class="hint">Use Start with the current Atoms mode: Clear, selected atoms, Unit cell only, or Displayed all.</p>`;
   }
   div.innerHTML = html;
+  const selectMatch = document.getElementById("btn-select-composed-match");
+  if (selectMatch) {
+    selectMatch.addEventListener("click", () => {
+      const index = Number(selectMatch.dataset.index);
+      if (Number.isInteger(index)) {
+        setActiveMode("standard");
+        postState({operation_index: index, playing: false, reset: true});
+      }
+    });
+  }
   div.hidden = false;
   renderAtoms();
   renderOperationDetails();
@@ -2645,6 +2833,7 @@ async function sendCopAnimate(atomIndices, unitCellOnly = false, startPlaying = 
       t_frac: copMatrix.t_frac,
       op_type: copMatrix.op_type,
       op_params: copMatrix.op_params,
+      sequence_items: copMatrix.result && copMatrix.result.sequence_items ? copMatrix.result.sequence_items : null,
       unit_cell_only: Boolean(unitCellOnly),
       animate_id: Date.now(),
     },
@@ -2678,7 +2867,98 @@ async function sendCopCheck() {
   }
 }
 
+function customSequencePayloadItems() {
+  return customOperationSequence.map(item => {
+    if (item.type === "operation") {
+      return {type: "operation", index: item.index};
+    }
+    return {
+      type: "custom",
+      label: item.label,
+      W_frac: item.W_frac,
+      t_frac: item.t_frac,
+      op_type: item.op_type,
+      op_params: item.op_params,
+    };
+  });
+}
+
+async function sendCustomSequenceCompose() {
+  const resultDiv = document.getElementById("cop-result");
+  if (!customOperationSequence.length) {
+    resultDiv.className = "cop-result fail";
+    resultDiv.innerHTML = "<strong>Error:</strong> Add one or more operations first.";
+    resultDiv.hidden = false;
+    return;
+  }
+  const payload = {
+    sequence_items: customSequencePayloadItems(),
+    tolerance: copNum("cop-tol", 0.1),
+    store_custom_result: true,
+    request_id: Date.now(),
+  };
+  resultDiv.className = "cop-result";
+  resultDiv.innerHTML = "Composing…";
+  resultDiv.hidden = false;
+  try {
+    const result = await api("/api/compose_operations", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    displayCopResult(result, "sequence", {sequence_items: payload.sequence_items});
+    if (!result.error) {
+      state = await api("/api/state", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({custom_op_check_id: payload.request_id}),
+      });
+    }
+  } catch (err) {
+    resultDiv.className = "cop-result fail";
+    resultDiv.innerHTML = `<strong>Error:</strong> ${err}`;
+  }
+}
+
 document.getElementById("btn-check-op").addEventListener("click", sendCopCheck);
+document.getElementById("btn-add-existing-op").addEventListener("click", () => {
+  const select = document.getElementById("cop-operation-select");
+  const index = Number(select.value);
+  if (Number.isInteger(index)) {
+    customOperationSequence.push({type: "operation", index});
+    hideCustomSequenceResult();
+    renderCustomSequenceControls();
+  }
+});
+document.getElementById("btn-add-checked-custom").addEventListener("click", () => {
+  addCurrentCustomOperationToSequence();
+});
+
+function addCurrentCustomOperationToSequence() {
+  const resultDiv = document.getElementById("cop-result");
+  if (!copMatrix) {
+    resultDiv.className = "cop-result fail";
+    resultDiv.innerHTML = "<strong>Error:</strong> Check a custom operation first.";
+    resultDiv.hidden = false;
+    return;
+  }
+  customOperationSequence.push({
+    type: "custom",
+    label: `custom ${copMatrix.op_type}`,
+    W_frac: copMatrix.W_frac,
+    t_frac: copMatrix.t_frac,
+    op_type: copMatrix.op_type,
+    op_params: copMatrix.op_params,
+  });
+  hideCustomSequenceResult();
+  renderCustomSequenceControls();
+}
+document.getElementById("btn-compose-custom-sequence").addEventListener("click", sendCustomSequenceCompose);
+document.getElementById("btn-clear-custom-sequence").addEventListener("click", () => {
+  customOperationSequence = [];
+  hideCustomSequenceResult();
+  renderCustomSequenceControls();
+});
 document.getElementById("btn-clear-check").addEventListener("click", async () => {
   document.getElementById("cop-result").hidden = true;
   copMatrix = null;
@@ -2721,6 +3001,7 @@ async function boot() {
   renderAtomElementFilter();
   renderElementColorControls();
   syncSpeedButtons();
+  syncBoundaryButtons();
   syncDisplayButtons();
   syncCellOriginButtons();
   syncCellSettingButtons();

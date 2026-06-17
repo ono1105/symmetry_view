@@ -68,6 +68,33 @@ def operation_summaries(
     return summaries
 
 
+def minimal_operation_summaries(render_data: dict) -> list[dict]:
+    summaries = []
+    for operation in render_data["operations"]:
+        summaries.append(
+            {
+                "index": operation["index"],
+                "label": operation["label"],
+                "symbol": operation.get("symbol") or operation["label"],
+                "display_symbol": operation.get("symbol") or operation["label"],
+                "kind": operation["kind"],
+                "order": operation.get("order"),
+                "angle_deg": operation.get("angle_deg"),
+                "element_summary": "",
+                "itc_like_summary": "",
+                "element_sort_key": "",
+                "direction_sort_key": "",
+                "direction_label": "",
+                "direction_filter_label": "",
+                "matrix_frac": operation.get("matrix_frac"),
+                "translation_frac": operation.get("translation_frac"),
+                "matrix_cart": operation.get("matrix_cart"),
+                "translation_cart": operation.get("translation_cart"),
+            }
+        )
+    return summaries
+
+
 def operation_summary_elements(
     render_data: dict,
     operation: dict,

@@ -34,6 +34,11 @@ from crystal_viewer.source_kinds import (
     SOURCE_KIND_MOLECULE,
     normalize_source_kind,
 )
+from crystal_viewer.symmetry_operations import (
+    compose_operation_sequence,
+    find_matching_operation_index,
+    find_operation_sequence_bfs,
+)
 from crystal_viewer.viewer.atom_style import atom_color
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
@@ -42,7 +47,7 @@ from crystal_viewer.viewer.custom_operation import (
 )
 from crystal_viewer.web.browser_ui import HTML
 from crystal_viewer.viewer.operation_labels import atom_frac_label
-from crystal_viewer.viewer.operation_lookup import selected_mapping
+from crystal_viewer.viewer.operation_lookup import operation_by_index, selected_mapping
 from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 from crystal_viewer.viewer.render_state import (
     apply_render_state_update,
@@ -180,6 +185,136 @@ def atom_motion_api_items(render_data: dict, atom_mappings: dict | None, operati
             "distance": entry.get("distance"),
         })
     return items
+
+
+def compose_operation_indices(
+    render_data: dict,
+    operation_indices: list[int],
+    tolerance_cart: float,
+) -> dict:
+    if not operation_indices:
+        return {"error": "Operation sequence is empty"}
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return {"error": "No unit cell in render_data"}
+    operations = render_data.get("operations", [])
+    selected_operations = []
+    for index in operation_indices:
+        operation = operation_by_index(operations, index)
+        if operation is None:
+            return {"error": f"Operation index not found: {index}"}
+        if operation.get("matrix_frac") is None or operation.get("translation_frac") is None:
+            return {"error": f"Operation {index} does not have fractional matrix data"}
+        selected_operations.append(operation)
+
+    composed = compose_operation_sequence(selected_operations)
+    check_result = check_custom_operation(
+        render_data,
+        composed.W,
+        composed.t,
+        tolerance_cart,
+    )
+    check_result["W_frac"] = composed.W.tolist()
+    check_result["t_frac"] = composed.t.tolist()
+    check_result["operation_indices"] = operation_indices
+    check_result["matching_operation_index"] = find_matching_operation_index(
+        composed.W,
+        composed.t,
+        operations,
+    )
+    return check_result
+
+
+def compose_operation_sequence_items(
+    render_data: dict,
+    sequence_items: list[dict],
+    tolerance_cart: float,
+) -> dict:
+    if not sequence_items:
+        return {"error": "Operation sequence is empty"}
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return {"error": "No unit cell in render_data"}
+    operations = render_data.get("operations", [])
+    selected_operations = []
+    labels = []
+    for item in sequence_items:
+        kind = str(item.get("type") or "operation")
+        if kind == "operation":
+            try:
+                index = int(item["index"])
+            except (KeyError, TypeError, ValueError) as exc:
+                return {"error": f"Operation item requires an integer index: {exc}"}
+            operation = operation_by_index(operations, index)
+            if operation is None:
+                return {"error": f"Operation index not found: {index}"}
+            if operation.get("matrix_frac") is None or operation.get("translation_frac") is None:
+                return {"error": f"Operation {index} does not have fractional matrix data"}
+            selected_operations.append(operation)
+            labels.append(f"op {index}")
+        elif kind == "custom":
+            if item.get("W_frac") is None or item.get("t_frac") is None:
+                return {"error": "Custom operation item requires W_frac and t_frac"}
+            selected_operations.append({
+                "matrix_frac": item["W_frac"],
+                "translation_frac": item["t_frac"],
+            })
+            labels.append(str(item.get("label") or "custom"))
+        else:
+            return {"error": f"Unknown sequence item type: {kind}"}
+
+    composed = compose_operation_sequence(selected_operations)
+    check_result = check_custom_operation(
+        render_data,
+        composed.W,
+        composed.t,
+        tolerance_cart,
+    )
+    check_result["W_frac"] = composed.W.tolist()
+    check_result["t_frac"] = composed.t.tolist()
+    check_result["sequence_items"] = sequence_items
+    check_result["sequence_labels"] = labels
+    check_result["matching_operation_index"] = find_matching_operation_index(
+        composed.W,
+        composed.t,
+        operations,
+    )
+    return check_result
+
+
+def find_operation_sequence_for_target(
+    render_data: dict,
+    target_operation_index: int,
+    generator_indices: list[int],
+    max_depth: int,
+) -> dict:
+    if not generator_indices:
+        return {"error": "Generator sequence is empty"}
+    operations = render_data.get("operations", [])
+    target = operation_by_index(operations, target_operation_index)
+    if target is None:
+        return {"error": f"Target operation index not found: {target_operation_index}"}
+
+    generators = []
+    for index in generator_indices:
+        operation = operation_by_index(operations, index)
+        if operation is None:
+            return {"error": f"Generator operation index not found: {index}"}
+        generators.append(operation)
+
+    sequence = find_operation_sequence_bfs(
+        target,
+        generators,
+        operations,
+        max_depth=max_depth,
+    )
+    return {
+        "target_operation_index": target_operation_index,
+        "generator_indices": generator_indices,
+        "max_depth": max_depth,
+        "sequence": None if sequence is None else list(sequence),
+        "found": sequence is not None,
+    }
 
 
 def example_catalog() -> dict[str, list[dict]]:
@@ -366,6 +501,55 @@ def make_handler(
                 with state_lock:
                     shared_state["custom_op_result"] = check_result
                 self.send_json(check_result)
+                return
+
+            if path == "/api/compose_operations":
+                with state_lock:
+                    render_data = session.render_data
+                try:
+                    operation_indices = [
+                        int(index)
+                        for index in payload.get("operation_indices", [])
+                    ]
+                    tolerance = float(payload.get("tolerance", 0.1))
+                except (TypeError, ValueError) as exc:
+                    self.send_json({"error": f"Parameter error: {exc}"})
+                    return
+                if "sequence_items" in payload:
+                    check_result = compose_operation_sequence_items(
+                        render_data,
+                        payload.get("sequence_items", []),
+                        tolerance,
+                    )
+                else:
+                    check_result = compose_operation_indices(render_data, operation_indices, tolerance)
+                if "error" not in check_result and payload.get("store_custom_result"):
+                    with state_lock:
+                        shared_state["custom_op_result"] = check_result
+                self.send_json(check_result)
+                return
+
+            if path == "/api/find_operation_sequence":
+                with state_lock:
+                    render_data = session.render_data
+                try:
+                    target_operation_index = int(payload.get("target_operation_index"))
+                    generator_indices = [
+                        int(index)
+                        for index in payload.get("generator_indices", [])
+                    ]
+                    max_depth = int(payload.get("max_depth", 4))
+                except (TypeError, ValueError) as exc:
+                    self.send_json({"error": f"Parameter error: {exc}"})
+                    return
+                self.send_json(
+                    find_operation_sequence_for_target(
+                        render_data,
+                        target_operation_index,
+                        generator_indices,
+                        max_depth,
+                    )
+                )
                 return
 
             if path == "/api/import_cif":
@@ -573,8 +757,8 @@ def make_handler(
             request_id: int = 0,
         ) -> None:
             started_at = time.monotonic()
-            new_session = ViewerSession(json_path, new_payload)
-            debug_import_timing("session summaries", started_at)
+            new_session = ViewerSession(json_path, new_payload, summarize_operations=False)
+            debug_import_timing("session minimal summaries", started_at)
             with state_lock:
                 if not self.load_request_is_current(request_id):
                     body = {"ok": False, "stale": True, "state": dict(shared_state)}
@@ -603,6 +787,7 @@ def make_handler(
                 next_state["import_in_progress"] = False
                 next_state["import_status"] = import_status_with_warnings(import_status, new_payload)
                 next_state["json_path"] = str(json_path)
+                next_state["summaries_ready"] = False
                 shared_state.clear()
                 shared_state.update(next_state)
                 body = {
@@ -612,7 +797,33 @@ def make_handler(
                     "atoms": atom_api_items(session.atoms),
                     "state": dict(shared_state),
                 }
+            self.compute_operation_summaries_async(new_session, request_id)
             self.send_json(body)
+
+        def compute_operation_summaries_async(self, loaded_session: ViewerSession, request_id: int) -> None:
+            def worker() -> None:
+                try:
+                    summaries = loaded_session.compute_operation_summaries()
+                except Exception:
+                    with state_lock:
+                        if (
+                            self.load_request_is_current(request_id)
+                            and session.json_path == loaded_session.json_path
+                            and session.payload is loaded_session.payload
+                        ):
+                            shared_state["summaries_ready"] = True
+                    return
+                with state_lock:
+                    if not self.load_request_is_current(request_id):
+                        return
+                    if session.json_path != loaded_session.json_path:
+                        return
+                    if session.payload is not loaded_session.payload:
+                        return
+                    session.operation_summary_items = summaries
+                    shared_state["summaries_ready"] = True
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def send_json(self, body: dict) -> None:
             self.send_bytes(json.dumps(body).encode("utf-8"), content_type="application/json")

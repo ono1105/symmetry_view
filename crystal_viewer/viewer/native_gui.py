@@ -505,7 +505,14 @@ class NativePyVistaViewer:
         self.plotter.render()
 
     def update_atoms(self, s: float) -> None:
-        update_animated_atoms(self.animated_atoms, self.paths, s)
+        update_animated_atoms(
+            self.animated_atoms,
+            self.paths,
+            s,
+            render_data=self.render_data,
+            boundary_mode=getattr(self, "animation_boundary_mode", "continuous"),
+            cell_origin_mode=self.cell_origin_mode,
+        )
         self.update_glyph_atom_groups()
 
     def update_glyph_atom_groups(self) -> None:

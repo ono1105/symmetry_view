@@ -32,6 +32,7 @@ class RenderStateTest(unittest.TestCase):
                 "cell_origin_mode": "corner",
                 "improper_mode": "rotoreflection",
                 "display_mode": "expanded_quarter",
+                "animation_boundary_mode": "wrap",
                 "reload_request_id": 7,
             },
         )
@@ -43,6 +44,7 @@ class RenderStateTest(unittest.TestCase):
         self.assertEqual(state["cell_origin_mode"], "corner")
         self.assertEqual(state["improper_mode"], "rotoreflection")
         self.assertEqual(state["display_mode"], "expanded_quarter")
+        self.assertEqual(state["animation_boundary_mode"], "wrap")
         self.assertEqual(state["reload_request_id"], 7)
 
     def test_initial_render_state_defaults_to_dark_background(self):
@@ -51,6 +53,7 @@ class RenderStateTest(unittest.TestCase):
         self.assertEqual(state["background_mode"], "dark")
         self.assertFalse(state["legend_visible"])
         self.assertEqual(state["cell_origin_mode"], "center")
+        self.assertEqual(state["animation_boundary_mode"], "continuous")
 
     def test_apply_render_state_update_ignores_unknown_keys(self):
         state = initial_render_state(minimal_payload(), initial_operation=None, display_mode="source")
@@ -81,6 +84,7 @@ class RenderStateTest(unittest.TestCase):
 
         self.assertTrue(snapshot.reset)
         self.assertTrue(snapshot.clear_custom_check)
+        self.assertEqual(snapshot.animation_boundary_mode, "continuous")
         self.assertNotIn("reset", state)
         self.assertNotIn("clear_custom_check", state)
 

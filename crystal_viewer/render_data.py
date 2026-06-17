@@ -404,6 +404,7 @@ def operation_generators(
         return ("identity only",)
 
     candidates = [(operation, key) for operation, key in keyed_operations if key != identity]
+    composition_table = generator_composition_table(target, mode=mode)
     selected: list[tuple[RenderOperationData, tuple]] = []
     generated = {identity}
     while generated != target and candidates:
@@ -414,6 +415,8 @@ def operation_generators(
                 [selected_key for _, selected_key in selected] + [key],
                 mode=mode,
                 target=target,
+                identity=identity,
+                composition_table=composition_table,
             )
             if len(candidate_generated) > len(best_generated):
                 best_index = index
@@ -426,6 +429,45 @@ def operation_generators(
     if generated != target:
         return tuple(generator_label(operation, mode=mode) for operation, key in keyed_operations if key != identity)
     return tuple(generator_label(operation, mode=mode) for operation, _ in selected)
+
+
+def generator_composition_table(target: set[tuple], *, mode: Literal["space", "point"]) -> dict[tuple[tuple, tuple], tuple]:
+    components = {key: generator_key_components(key, mode=mode) for key in target}
+    return {
+        (first, second): compose_generator_key_components(
+            components[first],
+            components[second],
+            mode=mode,
+        )
+        for first in target
+        for second in target
+    }
+
+
+def generator_key_components(key: tuple, *, mode: Literal["space", "point"]) -> tuple[np.ndarray, np.ndarray | None]:
+    if mode == "point":
+        return np.asarray(key, dtype=np.int64), None
+    rotation, translation = key
+    return np.asarray(rotation, dtype=np.int64), np.asarray(translation, dtype=np.int64)
+
+
+def compose_generator_key_components(
+    first: tuple[np.ndarray, np.ndarray | None],
+    second: tuple[np.ndarray, np.ndarray | None],
+    *,
+    mode: Literal["space", "point"],
+) -> tuple:
+    first_rotation, first_translation = first
+    second_rotation, second_translation = second
+    rotation = np.rint((first_rotation @ second_rotation) / GENERATOR_ROTATION_SCALE).astype(np.int64)
+    rotation_tuple = tuple(tuple(int(value) for value in row) for row in rotation)
+    if mode == "point":
+        return rotation_tuple
+    if first_translation is None or second_translation is None:
+        raise ValueError("space-group generator keys require translation components")
+    translation = np.rint((first_rotation @ second_translation) / GENERATOR_ROTATION_SCALE).astype(np.int64)
+    translation = np.mod(translation + first_translation, GENERATOR_TRANSLATION_SCALE)
+    return rotation_tuple, tuple(int(value) for value in translation)
 
 
 def generator_operation_keys(
@@ -464,20 +506,24 @@ def generator_closure(
     *,
     mode: Literal["space", "point"],
     target: set[tuple],
+    identity: tuple | None = None,
+    composition_table: dict[tuple[tuple, tuple], tuple] | None = None,
 ) -> set[tuple]:
-    generated = {generator_identity_key(mode)}
-    changed = True
-    while changed:
-        changed = False
-        for existing in tuple(generated):
-            for generator in generators:
-                for composed in (
-                    compose_generator_keys(existing, generator, mode=mode),
-                    compose_generator_keys(generator, existing, mode=mode),
-                ):
-                    if composed in target and composed not in generated:
-                        generated.add(composed)
-                        changed = True
+    generated = {identity if identity is not None else generator_identity_key(mode)}
+    frontier = list(generated)
+    while frontier:
+        existing = frontier.pop()
+        for generator in generators:
+            for first, second in ((existing, generator), (generator, existing)):
+                if composition_table is None:
+                    composed = compose_generator_keys(first, second, mode=mode)
+                else:
+                    composed = composition_table.get((first, second))
+                    if composed is None:
+                        continue
+                if composed in target and composed not in generated:
+                    generated.add(composed)
+                    frontier.append(composed)
     return generated
 
 

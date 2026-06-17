@@ -325,13 +325,24 @@ def translation_path(start: np.ndarray, target: np.ndarray) -> dict:
 def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None) -> np.ndarray:
     s = float(np.clip(s, 0.0, 1.0))
     path_type = path["type"]
-    start = np.asarray(path["start"], dtype=float) if start_override is None else np.asarray(start_override, dtype=float)
     if path_type == "sequential":
         segments = path["segments"]
         segment_count = len(segments)
         index = min(int(s * segment_count), segment_count - 1)
         local_s = (s - index / segment_count) * segment_count
-        return evaluate_path(segments[index], local_s, start_override=start_override if index == 0 else None)
+        segment_start = start_override
+        for segment in segments[:index]:
+            segment_start = evaluate_path(segment, 1.0, start_override=segment_start)
+        return evaluate_path(segments[index], local_s, start_override=segment_start)
+    start = np.asarray(path["start"], dtype=float) if start_override is None else np.asarray(start_override, dtype=float)
+    if path_type == "affine_linear":
+        if start_override is not None:
+            W = np.asarray(path["matrix_cart"], dtype=float)
+            t = np.asarray(path["translation_cart"], dtype=float)
+            target = W @ start + t
+        else:
+            target = np.asarray(path["target"], dtype=float)
+        return interpolate(start, target, s)
     if path_type == "rotation":
         rotated = rotate_about_axis(
             start,

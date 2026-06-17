@@ -8,8 +8,11 @@ from crystal_viewer.json_export import EXPORT_SCHEMA_VERSION
 from tools.view_json_server import (
     atom_motion_api_items,
     cached_export_json_path,
+    compose_operation_indices,
+    compose_operation_sequence_items,
     example_catalog,
     export_cell_setting_json_worker,
+    find_operation_sequence_for_target,
     resolve_example_path,
 )
 
@@ -61,6 +64,131 @@ class AtomMotionApiItemsTest(unittest.TestCase):
 
     def test_returns_empty_list_without_mapping(self):
         self.assertEqual(atom_motion_api_items({"atoms": []}, None, 1), [])
+
+
+class ComposeOperationIndicesTest(unittest.TestCase):
+    def test_composes_in_application_order_and_finds_matching_operation(self):
+        c4 = [
+            [0, -1, 0],
+            [1, 0, 0],
+            [0, 0, 1],
+        ]
+        render_data = {
+            "unit_cell": {"lattice": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+            "atoms": [],
+            "operations": [
+                {"index": 0, "matrix_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "translation_frac": [0, 0, 0]},
+                {"index": 1, "matrix_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "translation_frac": [0.25, 0, 0]},
+                {"index": 2, "matrix_frac": c4, "translation_frac": [0, 0, 0]},
+                {"index": 3, "matrix_frac": c4, "translation_frac": [0, 0.25, 0]},
+            ],
+        }
+
+        result = compose_operation_indices(render_data, [1, 2], 0.01)
+
+        self.assertTrue(result["is_symmetry"])
+        self.assertEqual(result["matching_operation_index"], 3)
+        self.assertEqual(result["operation_indices"], [1, 2])
+        self.assertEqual(result["W_frac"], c4)
+        self.assertEqual(result["t_frac"], [0.0, 0.25, 0.0])
+
+
+class FindOperationSequenceForTargetTest(unittest.TestCase):
+    def test_finds_sequence_from_generators(self):
+        c4 = [
+            [0, -1, 0],
+            [1, 0, 0],
+            [0, 0, 1],
+        ]
+        c2 = [
+            [-1, 0, 0],
+            [0, -1, 0],
+            [0, 0, 1],
+        ]
+        render_data = {
+            "operations": [
+                {"index": 0, "matrix_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "translation_frac": [0, 0, 0]},
+                {"index": 1, "matrix_frac": c4, "translation_frac": [0, 0, 0]},
+                {"index": 2, "matrix_frac": c2, "translation_frac": [0, 0, 0]},
+            ],
+        }
+
+        result = find_operation_sequence_for_target(render_data, 2, [1], 3)
+
+        self.assertEqual(result["sequence"], [1, 1])
+        self.assertTrue(result["found"])
+
+    def test_reports_not_found_with_depth_limit(self):
+        c4 = [
+            [0, -1, 0],
+            [1, 0, 0],
+            [0, 0, 1],
+        ]
+        c2 = [
+            [-1, 0, 0],
+            [0, -1, 0],
+            [0, 0, 1],
+        ]
+        render_data = {
+            "operations": [
+                {"index": 1, "matrix_frac": c4, "translation_frac": [0, 0, 0]},
+                {"index": 2, "matrix_frac": c2, "translation_frac": [0, 0, 0]},
+            ],
+        }
+
+        result = find_operation_sequence_for_target(render_data, 2, [1], 1)
+
+        self.assertIsNone(result["sequence"])
+        self.assertFalse(result["found"])
+
+    def test_returns_error_for_missing_operation_index(self):
+        render_data = {
+            "unit_cell": {"lattice": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+            "atoms": [],
+            "operations": [],
+        }
+
+        result = compose_operation_indices(render_data, [99], 0.01)
+
+        self.assertEqual(result, {"error": "Operation index not found: 99"})
+
+    def test_composes_real_halite_operations(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+
+        result = compose_operation_indices(payload["render_data"], [1, 2], 1e-2)
+
+        self.assertTrue(result["is_symmetry"])
+        self.assertEqual(result["matching_operation_index"], 3)
+
+    def test_composes_existing_and_custom_sequence_items(self):
+        c4 = [
+            [0, -1, 0],
+            [1, 0, 0],
+            [0, 0, 1],
+        ]
+        render_data = {
+            "unit_cell": {"lattice": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]},
+            "atoms": [],
+            "operations": [
+                {"index": 0, "matrix_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "translation_frac": [0, 0, 0]},
+                {"index": 2, "matrix_frac": c4, "translation_frac": [0, 0, 0]},
+                {"index": 3, "matrix_frac": c4, "translation_frac": [0, 0.25, 0]},
+            ],
+        }
+
+        result = compose_operation_sequence_items(
+            render_data,
+            [
+                {"type": "custom", "label": "custom translation", "W_frac": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "t_frac": [0.25, 0, 0]},
+                {"type": "operation", "index": 2},
+            ],
+            0.01,
+        )
+
+        self.assertTrue(result["is_symmetry"])
+        self.assertEqual(result["matching_operation_index"], 3)
+        self.assertEqual(result["sequence_labels"], ["custom translation", "op 2"])
+        self.assertEqual(result["t_frac"], [0.0, 0.25, 0.0])
 
 
 class CachedExportJsonPathTest(unittest.TestCase):
