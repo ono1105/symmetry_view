@@ -655,7 +655,7 @@ HTML = """<!doctype html>
           <label for="operation-label-mode">Notation</label>
           <select id="operation-label-mode">
             <option value="standard">Element</option>
-            <option value="itc_like">ITC-like</option>
+            <option value="itc_like">Approx. position</option>
           </select>
         </div>
         <div>
@@ -678,7 +678,6 @@ HTML = """<!doctype html>
             <button id="btn-add-existing-op" class="secondary">Add</button>
           </div>
           <div class="button-row flush">
-            <button id="btn-add-checked-custom" class="secondary">Add checked custom</button>
             <button id="btn-compose-custom-sequence" class="secondary">Compose sequence</button>
             <button id="btn-clear-custom-sequence" class="secondary">Clear sequence</button>
           </div>
@@ -833,6 +832,7 @@ HTML = """<!doctype html>
       </div>
       <div class="button-row flush">
         <button id="btn-check-op">Check symmetry</button>
+        <button id="btn-add-checked-custom" class="secondary">Add checked custom to sequence</button>
         <button id="btn-clear-check" class="secondary">Clear custom</button>
       </div>
       <div id="cop-result" class="cop-result" hidden></div>
@@ -1290,7 +1290,7 @@ function syncOperationLabelModeControls() {
   const hint = document.getElementById("operation-notation-hint");
   if (!hint) return;
   hint.textContent = operationLabelMode === "itc_like"
-    ? "ITC-like notation is a readable approximation; exact ITC row matching is not guaranteed."
+    ? "Position notation is an approximation from the operation matrix; exact ITC table matching is not implemented."
     : "The selected operation controls the axis/plane/center shown in PyVista.";
 }
 
@@ -1725,7 +1725,7 @@ function renderOperationDetails() {
   let lines = [];
   lines.push(`${stripHtml(optionText(op))}`);
   if (operationLabelMode === "itc_like") {
-    lines.push("notation: ITC-like approximation");
+    lines.push("notation: position approximation, not exact ITC table matching");
   }
   if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
   lines.push("W (frac):");
