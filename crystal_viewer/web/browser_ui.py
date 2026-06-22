@@ -655,7 +655,7 @@ HTML = """<!doctype html>
           <label for="operation-label-mode">Notation</label>
           <select id="operation-label-mode">
             <option value="standard">Element</option>
-            <option value="itc_like">ITC xyz</option>
+            <option value="itc_like">ITC operation</option>
           </select>
         </div>
         <div>
@@ -1038,9 +1038,9 @@ function optionText(operation) {
     return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
   }
   if (operationLabelMode === "itc_like") {
-    const itc = operation.itc_coordinate_summary;
+    const itc = operation.itc_operation_summary || operation.itc_coordinate_summary;
     if (itc) return `op ${operation.index}: ${formatSymbol(itc)}`;
-    return `op ${operation.index}: ITC xyz unmatched`;
+    return `op ${operation.index}: ITC table unmatched`;
   }
   const symbol = formatSymbol(displayOperationSymbol(operation));
   const summary = operation.element_summary || "";
@@ -1050,7 +1050,7 @@ function optionText(operation) {
 
 function operationSummaryText(operation) {
   if (operationLabelMode === "itc_like") {
-    return operation.itc_coordinate_summary || "No ITC table match for the current cell setting.";
+    return operation.itc_operation_summary || operation.itc_coordinate_summary || "No ITC table match for the current cell setting.";
   }
   return operation.element_summary || "";
 }
@@ -1291,7 +1291,7 @@ function syncOperationLabelModeControls() {
   const hint = document.getElementById("operation-notation-hint");
   if (!hint) return;
   hint.textContent = operationLabelMode === "itc_like"
-    ? "ITC xyz notation is read from the local operation table and matched to the current (W|t)."
+    ? "ITC operation notation is read from the local Vol. A table and matched to the current operation order."
     : "The selected operation controls the axis/plane/center shown in PyVista.";
 }
 
@@ -1726,7 +1726,7 @@ function renderOperationDetails() {
   let lines = [];
   lines.push(`${stripHtml(optionText(op))}`);
   if (operationLabelMode === "itc_like") {
-    lines.push(op.itc_coordinate_summary ? "notation: ITC xyz table match" : "notation: no ITC table match for this cell setting");
+    lines.push(op.itc_operation_summary ? "notation: ITC operation table match" : "notation: no ITC table match for this cell setting");
   }
   if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
   lines.push("W (frac):");
