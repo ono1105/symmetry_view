@@ -7,6 +7,7 @@ from math import gcd
 import numpy as np
 
 from crystal_viewer.geometry import integer_index_vector, normalize
+from crystal_viewer.itc_tables import itc_coordinate_summaries
 from crystal_viewer.viewer.animation import animation_paths
 from crystal_viewer.viewer.animation_path import effective_rotation_axis
 from crystal_viewer.viewer.display_atoms import display_point_cart, display_scene_center
@@ -20,6 +21,7 @@ def operation_summaries(
     atom_mappings: dict | None,
 ) -> list[dict]:
     summaries = []
+    itc_coordinates = itc_coordinate_summaries(render_data)
     for operation in render_data["operations"]:
         summary_operation = dict(operation)
         visual_translation = visual_translation_direction_cart(render_data, operation, atom_mappings)
@@ -55,6 +57,7 @@ def operation_summaries(
                     centers,
                     display_symbol=display_symbol,
                 ),
+                "itc_coordinate_summary": itc_coordinates.get(operation["index"], ""),
                 "element_sort_key": operation_element_sort_key(render_data, summary_operation, axes, planes, centers),
                 "direction_sort_key": operation_direction_sort_key(render_data, summary_operation, axes, planes, centers),
                 "direction_label": operation_direction_label(render_data, summary_operation, axes, planes, centers),
@@ -82,6 +85,7 @@ def minimal_operation_summaries(render_data: dict) -> list[dict]:
                 "angle_deg": operation.get("angle_deg"),
                 "element_summary": "",
                 "itc_like_summary": "",
+                "itc_coordinate_summary": "",
                 "element_sort_key": "",
                 "direction_sort_key": "",
                 "direction_label": "",
