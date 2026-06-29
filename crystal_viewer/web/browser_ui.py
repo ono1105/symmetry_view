@@ -654,8 +654,8 @@ HTML = """<!doctype html>
         <div id="operation-label-mode-block">
           <label for="operation-label-mode">Notation</label>
           <select id="operation-label-mode">
+            <option value="itc_like" selected>ITC operation</option>
             <option value="standard">Element</option>
-            <option value="itc_like">ITC operation</option>
           </select>
         </div>
         <div>
@@ -1000,7 +1000,7 @@ let lastAtomRenderSignature = "";
 let state = {};
 let directionFilterValue = "";
 let atomElementFilterValue = "";
-let operationLabelMode = "standard";
+let operationLabelMode = "itc_like";
 let customOperationSequence = [];
 let summariesReady = false;
 let activeMode = "standard";
@@ -1291,7 +1291,7 @@ function syncOperationLabelModeControls() {
   const hint = document.getElementById("operation-notation-hint");
   if (!hint) return;
   hint.textContent = operationLabelMode === "itc_like"
-    ? "ITC operation notation is read from the local Vol. A table and matched to the current operation order."
+    ? "ITC-style notation computed from each operation's (W, t): symbol, intrinsic translation, and the element location."
     : "The selected operation controls the axis/plane/center shown in PyVista.";
 }
 
