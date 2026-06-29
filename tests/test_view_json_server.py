@@ -13,6 +13,7 @@ from tools.view_json_server import (
     example_catalog,
     export_cell_setting_json_worker,
     find_operation_sequence_for_target,
+    replace_shared_state_for_load,
     resolve_example_path,
 )
 
@@ -64,6 +65,19 @@ class AtomMotionApiItemsTest(unittest.TestCase):
 
     def test_returns_empty_list_without_mapping(self):
         self.assertEqual(atom_motion_api_items({"atoms": []}, None, 1), [])
+
+
+class LoadedStateReplacementTest(unittest.TestCase):
+    def test_preserves_nonzero_load_request_id_for_async_summary_worker(self):
+        shared_state = {"load_request_id": 12, "old": True}
+        next_state = {"summaries_ready": False}
+
+        replace_shared_state_for_load(shared_state, next_state, request_id=42)
+
+        self.assertEqual(
+            shared_state,
+            {"summaries_ready": False, "load_request_id": 42},
+        )
 
 
 class ComposeOperationIndicesTest(unittest.TestCase):

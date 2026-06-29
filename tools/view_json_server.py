@@ -88,6 +88,12 @@ def debug_import_timing(label: str, start: float) -> None:
         print(f"[import] {label} {time.monotonic() - start:.3f}s", flush=True)
 
 
+def replace_shared_state_for_load(shared_state: dict, next_state: dict, request_id: int) -> None:
+    next_state["load_request_id"] = request_id
+    shared_state.clear()
+    shared_state.update(next_state)
+
+
 def empty_viewer_payload() -> dict:
     return {
         "schema_version": EXPORT_SCHEMA_VERSION,
@@ -788,8 +794,7 @@ def make_handler(
                 next_state["import_status"] = import_status_with_warnings(import_status, new_payload)
                 next_state["json_path"] = str(json_path)
                 next_state["summaries_ready"] = False
-                shared_state.clear()
-                shared_state.update(next_state)
+                replace_shared_state_for_load(shared_state, next_state, request_id)
                 body = {
                     "ok": True,
                     "json_path": str(json_path),
@@ -804,13 +809,15 @@ def make_handler(
             def worker() -> None:
                 try:
                     summaries = loaded_session.compute_operation_summaries()
-                except Exception:
+                except Exception as exc:
+                    logging.exception("Failed to compute operation summaries for %s", loaded_session.json_path)
                     with state_lock:
                         if (
                             self.load_request_is_current(request_id)
                             and session.json_path == loaded_session.json_path
                             and session.payload is loaded_session.payload
                         ):
+                            shared_state["summaries_error"] = str(exc)
                             shared_state["summaries_ready"] = True
                     return
                 with state_lock:
