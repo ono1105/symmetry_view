@@ -283,7 +283,7 @@ def _itc_rationalize(v: np.ndarray) -> np.ndarray:
     if max_abs < 1e-10:
         return np.zeros(3)
     v = v / max_abs
-    fracs = [Fraction(float(x)).limit_denominator(12) for x in v]
+    fracs = [crystallographic_fraction(float(x)) or Fraction(round(float(x))) for x in v]
     lcm_d = 1
     for f in fracs:
         lcm_d = lcm_d * f.denominator // gcd(lcm_d, f.denominator)
@@ -314,7 +314,7 @@ def _itc_coord_str(const: float, terms: list[tuple[float, str]]) -> str:
     """Format one coordinate: 'x+1/2', '-x', '1/4', '0', etc."""
     parts: list[str] = []
     for coeff, name in terms:
-        c = Fraction(float(coeff)).limit_denominator(12)
+        c = crystallographic_fraction(float(coeff)) or Fraction(round(float(coeff)))
         if abs(float(c)) < 1e-8:
             continue
         if c == 1:
@@ -327,7 +327,7 @@ def _itc_coord_str(const: float, terms: list[tuple[float, str]]) -> str:
             parts.append(f"({c}){name}")
 
     c_val = float(const)
-    c_frac = Fraction(c_val).limit_denominator(24)
+    c_frac = crystallographic_fraction(c_val) or Fraction(0)
     has_const = abs(float(c_frac)) > 1e-8
 
     if not parts:
@@ -492,6 +492,10 @@ def operation_itc_like_summary(
     *,
     display_symbol: str | None = None,
 ) -> str:
+    # Identity: ITC notation is just "1"
+    if "identity" in str(operation.get("kind", "")):
+        return str(display_symbol or operation.get("symbol") or operation.get("label", "1"))
+
     # Pure translations: t|(p/q,r/s,u/v)
     if is_pure_translation_operation(operation):
         t_label = translation_frac_label(operation)
@@ -869,12 +873,33 @@ def format_index_text(value: int) -> str:
     return f"{abs(value)}\u0305" if value < 0 else str(value)
 
 
+# Denominators that occur in the 230 space groups' symmetry-element coordinates
+# and intrinsic translations: 1/2,1/3,1/4,1/6 (most groups) and 1/8 (Fd-3m etc.).
+# Listed smallest-first so the simplest valid fraction wins.
+CRYSTALLOGRAPHIC_DENOMINATORS = (1, 2, 3, 4, 6, 8, 12)
+
+
+def crystallographic_fraction(value: float, *, tol: float = 1e-3) -> Fraction | None:
+    """Snap a value to the nearest fraction with a crystallographically valid
+    denominator (a divisor of 24).  Returns None when no valid fraction is
+    within tolerance, so genuinely non-crystallographic values surface as
+    decimals instead of invented fractions like 13/20.
+    """
+    value = float(value)
+    for denominator in CRYSTALLOGRAPHIC_DENOMINATORS:
+        numerator = round(value * denominator)
+        candidate = Fraction(numerator, denominator)
+        if abs(value - float(candidate)) < tol:
+            return candidate
+    return None
+
+
 def format_fraction(value: float) -> str:
     value = float(value)
     if abs(value) < 1e-8 or abs(value - 1.0) < 1e-8:
         return "0"
-    fraction = Fraction(value).limit_denominator(24)
-    if abs(value - float(fraction)) < 2e-3:
+    fraction = crystallographic_fraction(value)
+    if fraction is not None:
         if fraction.denominator == 1:
             return str(fraction.numerator)
         return f"{fraction.numerator}/{fraction.denominator}"

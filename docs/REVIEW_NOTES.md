@@ -4029,3 +4029,130 @@ ITC期待:  不明（空間群依存）
 **影響確認:**
 
 カメラ操作（`view_along_current_operation()`、`operation_camera_basis()`、`set_camera_view()`）は `operation_summaries` や `itc_like_summary` に依存せず、raw の operation dict と対称要素（axes/planes/centers）を直接使用するため影響なし。`pyvista_controller.py` が `operation_labels` からインポートするのは `camera_up_vector`・`custom_focus_point_cart`・`is_pure_translation_operation`・`operation_focus_point_cart`・`operation_view_direction_cart`・`rotate_vector`・`visual_translation_direction_cart` のみで、いずれも変更なし。
+
+---
+
+## `itc_operation_notation_summaries`（PDF テーブル照合）の重大バグ（Claude レビュー）（2026-06-24）
+
+`docs/ITC vol.A.pdf` から ITC 本文の「Symmetry operations」ブロックを抽出して `itc_like_summary` を完全一致させる仕組み（commit `f8606dc`, `47d2662`）をレビューした。**`itc_operation_notation_summaries()` は実質的に機能しておらず、大半の操作で誤った notation を表示している。** 一方で `itc_coordinate_summaries()`（一般位置 xyz の照合）は健全。
+
+### 実装の構成（`crystal_viewer/itc_tables.py`）
+
+2 つの独立した JSON テーブルを使っている。
+
+| テーブル | 生成元 | 照合方法 |
+|---|---|---|
+| `data/itc_operations.json` | `tools/generate_itc_operation_table.py`（pymatgen `SpaceGroup.symmetry_ops` の `as_xyz_str()`） | `operation_match_key(W, t)` で **実際の行列 W, t** を完全一致照合 |
+| `data/itc_operation_notations.json` | `tools/extract_itc_operation_notations.py`（`pdftotext -layout` で PDF 本文をパース） | render_data の `operation["index"]` を **PDF 内の出現順序（`linear_index`）** にそのまま対応付け |
+
+前者（`itc_coordinate_summary`）は W, t による厳密一致なので方式自体は健全。後者（`itc_operation_summary`）は **行列を一切見ず、「render_data の何番目の操作か」と「PDF に何番目に印字されているか」が同じ並び順であることを前提にしている。**
+
+`browser_ui.py` の ITC-like モードは `itc_operation_summary || itc_coordinate_summary` の優先順で表示するため、`itc_operation_summary` が取れる空間群では常に後者（信頼できない方）が優先表示される。
+
+### 検証方法
+
+`render_data["operations"][i]["matrix_frac"]` から `det(W)`, `tr(W)` を計算し、`itc_operation_notation_summaries()` が返す notation 文字列の先頭記号（`1`, `2`, `3±`, `4±`, `6±`, `m`, `g`, `-1`, `-3`, `-4`, `-6`）が要求する `(det, tr)` と一致するかを照合した（操作の種類さえ合っているかという最低限のチェック）。
+
+```python
+from crystal_viewer.itc_tables import itc_operation_notation_summaries
+# render_data["operations"][i]["matrix_frac"] から det, tr を計算し、
+# notation 文字列の先頭記号が要求する (det, tr) と比較
+```
+
+### 結果（種類レベルでの不一致率）
+
+| 構造 | 空間群 | 操作数 | 不一致 |
+|---|---|---|---|
+| Halite.cif | Fm-3m (225) | 192 | **158/180 (87.8%)** |
+| Cadmoselite.json | P6₃mc (186) | 12 | 2/9（**3回転と6回転が入れ替わっている**） |
+| BaTiO3.json (native, 6 ops) | R3m (160) | 6 | 0/6（操作数が少なく偶然一致） |
+| BaTiO3.json (conventional, 18 ops) | R3m (160) | 18 | 0/16（同上） |
+
+Halite の例（spglib の操作 index と PDF notation の対応がそもそも種類から外れている）:
+
+```text
+op1: notation='2 0, 0, z'   実際は det=-1, tr=-3 → 反転 (-1) であり 2回転ではない
+op2: notation='2 0, y, 0'   実際は det=1,  tr=1  → 4回転であり 2回転ではない
+op4: notation='3+ x, x, x'  実際は det=1,  tr=-1 → 2回転であり 3回転ではない
+```
+
+Cadmoselite の例（回転の位数自体が入れ替わっている、単なる順序のズレではない）:
+
+```text
+op1: notation='3+ 0, 0, z'  実際は tr=2 → 6回転（3回転は tr=0）
+op2: notation='3-0, 0, z'   実際は tr=0 → 3回転（こちらが本来 3+/3- であるべき）
+op4: notation='6-(0,0,1/2)' 実際は tr=0 → 3回転（6回転ではない）
+```
+
+R3m で 0% だったのは、操作数が少なく（6〜18）曖昧さが少ないため偶然一致しただけで、`linear_index` 対応付けが正しいことの証明にはならない。
+
+### 原因
+
+spglib が `get_symmetry_dataset()` で返す対称操作の並び順は、ITC Vol. A 本文に印字されている並び順（generator 選択や coset 展開の規約）と一般に一致しない。`itc_operation_notation_summaries()` は両者の並び順が一致するという前提で `linear_index` を直接 `operation["index"]` にマッピングしており、この前提に数学的根拠がない。
+
+加えて、`itc_operation_notation_description()` は同じ操作数の `description` が複数ある場合（unique axis b/c、cell choice 1/2/3 などの設定差）に `candidates[0]` を無条件採用しており、検査した範囲で **37 空間群** がこの曖昧さを持つ（例: 単斜晶系の No.3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ...）。
+
+### テストが見逃した理由
+
+`tests/test_itc_tables.py::test_halite_uses_pdf_operation_notation_for_all_operations` は `matches[0] == "1"`（恒等操作）のみを検証している。恒等操作はどんな並び順でも先頭に来る規約なので、このテストは並び順の正しさを一切検証できていない。`test_batio3_conventional_cell_uses_pdf_operation_notation` も index 9 の1件のみを確認しており、たまたま操作数が少ない R3m だったため偶然パスしている。
+
+### 推奨対応
+
+1. **`itc_operation_notation_summaries()` を `itc_operation_summary` として表示に使うのは現状では危険。** 一旦 `browser_ui.py` の優先順位を `itc_coordinate_summary`（W,t 照合で健全）のみにフォールバックするか、`itc_operation_summary` の使用を止める。
+2. 正しく直すには、PDF 抽出した notation 文字列自体を **W, t に逆変換**し、`itc_coordinate_summaries()` と同じ `operation_match_key(W, t)` で照合する必要がある（xyz 文字列の照合と同じ仕組みに統一）。これは「記号 → 行列」のパーサーが新たに必要で、xyz 文字列からの逆変換（`SymmOp.from_xyz_str()` がほぼそのまま使える）に比べて実装コストが高い。
+3. もしくは、前セッションで実装・検証済みの `operation_itc_position()` / `operation_itc_like_summary()`（W, t から直接 ITC 形式の文字列を計算するロジック）をそのまま使う方が、PDF テーブル照合より確実。Fm-3m (No.225) で 21/21 完全一致を検証済み（本ファイル「ITC 位置表現の正規化実装」セクション参照）。`itc_operations.json`（xyz 一般位置）は記号表記そのものではないため、`operation_itc_position()` で生成した記号表記と併用するのが現実的。
+4. `itc_operation_notation_description()` の `candidates[0]` 無条件採用も、unique axis / cell choice の判定ロジックを追加するまでは曖昧な空間群で誤動作する。
+
+---
+
+## 分数表記の脆弱性を修正（`limit_denominator` → 結晶学的スナップ）（2026-06-24）
+
+### 背景
+
+ユーザーが ITC テーブル照合を導入した動機は「W,t からの直接計算だと `13/20` のような結晶学的にありえない分数が表示される」ことだった。しかし ITC テーブル照合（`itc_operation_notation_summaries`）には上記の重大な並び順バグがあるため、本来の直接計算側の分数表記バグを直す方が筋が良い。
+
+### 原因
+
+`format_fraction()`・`_itc_coord_str()`・`_itc_rationalize()` がいずれも `Fraction(value).limit_denominator(24)`（または 12）を使っていた。`limit_denominator(N)` は「分母 N 以下の**最良の近似分数**」を返すため、FP 誤差で 0.65 になった値に対して `13/20`（分母 20）のような結晶学的にありえない分数を発明する。
+
+結晶の対称要素の座標・固有並進は、230 空間群すべてで **1/2, 1/3, 1/4, 1/6（大半）と 1/8（Fd-3m 等）の倍数**に限られる。つまり有効な分母は必ず 24 の約数 `{1,2,3,4,6,8,12}` のいずれか。`13/20` や `2/5`, `7/10` などは数学的に出現しない。
+
+### 修正
+
+`crystal_viewer/viewer/operation_labels.py` に `crystallographic_fraction(value, *, tol=1e-3)` を追加。
+
+```python
+CRYSTALLOGRAPHIC_DENOMINATORS = (1, 2, 3, 4, 6, 8, 12)
+
+def crystallographic_fraction(value, *, tol=1e-3):
+    for denominator in CRYSTALLOGRAPHIC_DENOMINATORS:
+        numerator = round(value * denominator)
+        candidate = Fraction(numerator, denominator)
+        if abs(value - float(candidate)) < tol:
+            return candidate
+    return None
+```
+
+- 有効な分母を**小さい順**に試し、許容誤差内で最初（=最小分母）の分数を返す。
+- どの有効分母にも当てはまらない値は `None` を返し、呼び出し元が小数表示にフォールバックする。これにより `13/20` のような偽の分数を発明せず、本物の数値異常（例: 真に 0.65 な値）は `0.650` と表示して可視化する。
+
+`format_fraction()`・`_itc_coord_str()`・`_itc_rationalize()` の `limit_denominator` 呼び出しをすべてこのヘルパーに置き換えた。
+
+### 検証
+
+| 入力 | 旧 (`limit_denominator(24)`) | 新 (`crystallographic_fraction`) |
+|---|---|---|
+| 2/3 = 0.6667 | 2/3 | 2/3 |
+| 0.65 | **13/20** | 0.650（小数フォールバック） |
+| 5/12 = 0.4167 | 5/12 | 5/12 |
+| 1/8 = 0.125 | 1/8 | 1/8 |
+| 0.7 | **7/10** | 0.700（小数フォールバック） |
+| 0.45 | **9/20** | 0.450（小数フォールバック） |
+
+- `tests/test_operation_labels.py`・`tests/test_itc_tables.py` 全 15 件パス。
+- Fm-3m (No.225) 全 192 操作の position・t_int で、分母が `{1,2,3,4,6,8,12}` 以外の分数が **0 件**であることを確認。
+- 既存の export JSON 17 構造（native / conventional / primitive）でも怪しい分数 0 件。
+
+### 推奨
+
+ITC テーブル照合（特に `itc_operation_notation_summaries`）の並び順バグを直すよりも、この分数スナップ修正を入れた `operation_itc_position()` / `operation_itc_like_summary()` を ITC-like 表記の主経路にする方が確実。`itc_coordinate_summaries()`（W,t 厳密照合の xyz 一般位置）は健全なので、記号表記が必要な場面の補助として併用してよい。

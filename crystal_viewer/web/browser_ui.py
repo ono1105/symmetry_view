@@ -1038,9 +1038,9 @@ function optionText(operation) {
     return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
   }
   if (operationLabelMode === "itc_like") {
-    const itc = operation.itc_operation_summary || operation.itc_coordinate_summary;
+    const itc = operation.itc_like_summary || operation.itc_coordinate_summary;
     if (itc) return `op ${operation.index}: ${formatSymbol(itc)}`;
-    return `op ${operation.index}: ITC table unmatched`;
+    return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
   }
   const symbol = formatSymbol(displayOperationSymbol(operation));
   const summary = operation.element_summary || "";
@@ -1050,7 +1050,7 @@ function optionText(operation) {
 
 function operationSummaryText(operation) {
   if (operationLabelMode === "itc_like") {
-    return operation.itc_operation_summary || operation.itc_coordinate_summary || "No ITC table match for the current cell setting.";
+    return operation.itc_like_summary || operation.itc_coordinate_summary || "";
   }
   return operation.element_summary || "";
 }
@@ -1726,7 +1726,8 @@ function renderOperationDetails() {
   let lines = [];
   lines.push(`${stripHtml(optionText(op))}`);
   if (operationLabelMode === "itc_like") {
-    lines.push(op.itc_operation_summary ? "notation: ITC operation table match" : "notation: no ITC table match for this cell setting");
+    lines.push("notation: ITC-like (computed from W, t)");
+    if (op.itc_coordinate_summary) lines.push(`ITC general position: ${op.itc_coordinate_summary}`);
   }
   if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
   lines.push("W (frac):");
