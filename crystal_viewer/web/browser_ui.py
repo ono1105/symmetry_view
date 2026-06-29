@@ -665,7 +665,7 @@ HTML = """<!doctype html>
       </div>
       <label for="operations">Operation list</label>
       <div class="operation-list" id="operations" role="listbox"></div>
-      <p class="hint" id="operation-notation-hint">The selected operation controls the axis/plane/center shown in PyVista.</p>
+      <p class="hint" id="operation-notation-hint">ITC-style notation computed from each operation's (W, t): symbol, intrinsic translation, and the element location.</p>
     </section>
     <section class="panel" id="custom-panel" hidden>
       <h2 class="section-title">Custom Operation</h2>
