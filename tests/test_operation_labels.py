@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from crystal_viewer.viewer.cell_settings import standardized_payload
-from crystal_viewer.viewer.operation_labels import operation_summaries
+from crystal_viewer.viewer.operation_labels import operation_notation_order, operation_summaries
 import numpy as np
 
 from crystal_viewer.viewer.animation_context import select_animation_context, shared_step_translation
@@ -12,6 +12,25 @@ from crystal_viewer.viewer.symmetry_elements import display_symmetry_elements, g
 
 
 class OperationLabelsTest(unittest.TestCase):
+    def test_rotoinversion_notation_order_comes_from_symbol(self):
+        operation = {
+            "kind": "rotoinversion_or_improper_6",
+            "order": 6,
+            "angle_deg": None,
+            "symbol": "-3",
+        }
+
+        self.assertEqual(operation_notation_order(operation), 3)
+
+    def test_halite_rotoinversion_summary_separates_notation_and_matrix_orders(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+
+        summaries = operation_summaries(payload["render_data"], payload["atom_mappings"])
+        bar_three = next(item for item in summaries if item["symbol"] == "-3")
+
+        self.assertEqual(bar_three["order"], 6)
+        self.assertEqual(bar_three["notation_order"], 3)
+
     def test_cadmoselite_glides_are_labeled_as_c_glides(self):
         payload = json.loads(Path("exports/json/cadmoselite.json").read_text(encoding="utf-8"))
 

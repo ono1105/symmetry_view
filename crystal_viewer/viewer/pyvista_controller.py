@@ -294,6 +294,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if reset:
             self.frame_position = 0.0
             self.update_atoms(0.0)
+            self.update_start_markers()
             if self.using_custom_paths:
                 self.update_custom_sequence_element_actors(0.0)
             should_render = True
@@ -425,6 +426,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 reset = True
                 should_render = True
 
+        playing_before_update = self.playing
         if requested_playing and not self.playing and self.frame_position >= self.frame_count - 1:
             self.frame_position = 0.0
         if requested_playing != self.playing:
@@ -442,6 +444,10 @@ class BrowserControlledViewer(NativePyVistaViewer):
             if self.frame_position >= self.frame_count - 1:
                 self.playing = False
                 should_update_status = True
+
+        if self.playing != playing_before_update:
+            self.update_start_markers()
+            should_render = True
 
         with self.state_lock:
             self.shared_state["playing"] = self.playing

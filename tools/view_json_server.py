@@ -778,14 +778,16 @@ def make_handler(
                     "cell_origin_mode": shared_state.get("cell_origin_mode", "center"),
                     "cell_setting_mode": "native",
                     "improper_mode": shared_state.get("improper_mode", "auto"),
-                    "display_mode": shared_state.get("display_mode", default_display_mode),
+                    # A range suitable for the previous structure can create a
+                    # very large atom scene after loading a denser structure.
+                    "display_mode": "source",
                     "reload_request_id": shared_state.get("reload_request_id"),
                 }
                 session.replace_from(new_session)
                 next_state = initial_render_state(
                     new_payload,
                     initial_operation=None,
-                    display_mode=default_display_mode,
+                    display_mode="source",
                     preserved=preserved,
                 )
                 next_state["reload_request_id"] = int(shared_state.get("reload_request_id") or 0) + 1

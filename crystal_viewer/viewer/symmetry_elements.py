@@ -117,16 +117,22 @@ def add_symmetry_element_actors(
             if actor is not None:
                 actors.append(actor)
 
+    # Keep inversion centers compact and independent of Cell Range.  Using an
+    # opaque octahedron avoids the transparency sorting problems seen on
+    # WSL/Mesa while remaining distinguishable from spherical atoms.
+    center_span = display_scene_span(render_data, "source", cell_origin_mode)
+    center_radius = max(center_span * 0.04, 0.10)
     for center in centers:
-
         point = display_point_cart(render_data, center["point_cart"], display_mode, cell_origin_mode)
-        cube = pv.Cube(
-            center=point,
-            x_length=max(span * 0.055, 0.12),
-            y_length=max(span * 0.055, 0.12),
-            z_length=max(span * 0.055, 0.12),
+        marker = pv.Octahedron(radius=center_radius, center=point)
+        actors.append(
+            plotter.add_mesh(
+                marker,
+                color="#ff5f57",
+                opacity=1.0,
+                lighting=False,
+            )
         )
-        actors.append(plotter.add_mesh(cube, color="#ff5f57", opacity=0.8, show_edges=True))
 
     if operation is not None and _is_pure_translation(operation):
         actor = add_translation_direction_actor(

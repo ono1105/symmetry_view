@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock
 
 import numpy as np
 
@@ -8,6 +9,36 @@ from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 
 
 class AnimationPathTest(unittest.TestCase):
+    def test_start_marker_is_visible_only_while_playing(self):
+        viewer = BrowserControlledViewer.__new__(BrowserControlledViewer)
+        marker = Mock()
+        viewer.animated_atoms = [
+            {
+                "atom": {"index": 0},
+                "marker_actor": marker,
+                "is_primary_image": True,
+            }
+        ]
+        viewer.paths = {0: {"type": "linear"}}
+        viewer.playing = False
+        viewer.frame_position = 0.0
+
+        viewer.update_start_markers()
+        marker.SetVisibility.assert_called_with(False)
+
+        viewer.playing = True
+        viewer.update_start_markers()
+        marker.SetVisibility.assert_called_with(True)
+
+        viewer.playing = False
+        viewer.frame_position = 20.0
+        viewer.update_start_markers()
+        marker.SetVisibility.assert_called_with(True)
+
+        viewer.frame_position = 0.0
+        viewer.update_start_markers()
+        marker.SetVisibility.assert_called_with(False)
+
     def test_sequential_affine_path_applies_steps_in_order(self):
         c4 = np.array(
             [

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from fractions import Fraction
 from functools import lru_cache
 from math import gcd
@@ -41,6 +42,7 @@ def operation_summaries(
                 "kind": operation["kind"],
                 "order": operation.get("order"),
                 "angle_deg": operation.get("angle_deg"),
+                "notation_order": operation_notation_order(operation),
                 "element_summary": operation_element_summary(
                     render_data,
                     summary_operation,
@@ -83,6 +85,7 @@ def minimal_operation_summaries(render_data: dict) -> list[dict]:
                 "kind": operation["kind"],
                 "order": operation.get("order"),
                 "angle_deg": operation.get("angle_deg"),
+                "notation_order": operation_notation_order(operation),
                 "element_summary": "",
                 "itc_like_summary": "",
                 "itc_coordinate_summary": "",
@@ -97,6 +100,16 @@ def minimal_operation_summaries(render_data: dict) -> list[dict]:
             }
         )
     return summaries
+
+
+def operation_notation_order(operation: dict) -> int | None:
+    """Return the order written in the symbol rather than the matrix order."""
+    symbol = str(operation.get("symbol") or operation.get("display_symbol") or "")
+    match = re.search(r"[0-9]+", symbol)
+    if match is not None:
+        return int(match.group(0))
+    order = operation.get("order")
+    return int(order) if order is not None else None
 
 
 def operation_summary_elements(

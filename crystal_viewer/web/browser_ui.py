@@ -16,7 +16,11 @@ HTML = """<!doctype html>
       background: #111418;
       color: #edf2f7;
     }
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
     main {
+      width: 100%;
       max-width: 1100px;
       margin: 0 auto;
       padding: 20px;
@@ -89,6 +93,10 @@ HTML = """<!doctype html>
       color: #081017;
     }
     .mode-button.selected {
+      background: #7dd3fc;
+      color: #081017;
+    }
+    .experience-button.selected {
       background: #7dd3fc;
       color: #081017;
     }
@@ -191,10 +199,14 @@ HTML = """<!doctype html>
       display: grid;
       grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
       gap: 16px;
+      align-items: start;
+    }
+    .grid > *, .left-stack, .side-stack, .panel {
+      min-width: 0;
     }
     .topbar {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 16px;
       margin-bottom: 16px;
@@ -205,13 +217,16 @@ HTML = """<!doctype html>
       justify-content: flex-end;
       gap: 10px;
       flex-wrap: wrap;
+      min-width: 0;
     }
     .file-input {
       display: none;
     }
     .example-select {
-      min-width: 260px;
+      width: min(340px, 100%);
+      min-width: 0;
       max-width: 340px;
+      flex: 1 1 260px;
     }
     .structure-summary {
       display: grid;
@@ -264,11 +279,35 @@ HTML = """<!doctype html>
     .summary-grid.primary .summary-value {
       overflow-wrap: break-word;
     }
+    .atom-position-details {
+      margin-top: 12px;
+      border-top: 1px solid #29313c;
+      padding-top: 10px;
+    }
+    .atom-position-details summary {
+      cursor: pointer;
+      color: #cbd5e1;
+      font-size: 13px;
+    }
+    .atom-position-list {
+      display: grid;
+      gap: 5px;
+      margin-top: 9px;
+      max-height: 190px;
+      overflow: auto;
+      color: #aeb8c5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
     .panel {
       background: #151a20;
       border: 1px solid #29313c;
       border-radius: 8px;
       padding: 14px;
+      overflow: hidden;
+    }
+    #start-panel, #load-error-panel, #structure-info-panel {
+      margin-bottom: 16px;
     }
     .side-stack {
       display: grid;
@@ -351,7 +390,7 @@ HTML = """<!doctype html>
     }
     .view-direction-row {
       display: grid;
-      grid-template-columns: repeat(3, 52px) minmax(86px, 1fr);
+      grid-template-columns: repeat(3, minmax(44px, 52px)) minmax(78px, 1fr);
       gap: 6px;
       align-items: center;
     }
@@ -367,6 +406,7 @@ HTML = """<!doctype html>
     .atom-list {
       max-height: 280px;
       overflow: auto;
+      overflow-x: auto;
       background: #1b2027;
       border: 1px solid #3a4350;
       border-radius: 6px;
@@ -500,6 +540,7 @@ HTML = """<!doctype html>
       text-decoration-skip-ink: none;
     }
     .status {
+      display: none;
       margin-top: 14px;
       padding: 10px;
       border-radius: 6px;
@@ -507,6 +548,12 @@ HTML = """<!doctype html>
       color: #cbd5e1;
       font-size: 13px;
       white-space: pre-wrap;
+    }
+    body.advanced-mode .status {
+      display: block;
+    }
+    body.beginner-mode .advanced-only {
+      display: none !important;
     }
     .operation-details {
       max-height: 260px;
@@ -526,7 +573,7 @@ HTML = """<!doctype html>
     }
     .mat3-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 4px;
       margin-bottom: 8px;
     }
@@ -597,17 +644,51 @@ HTML = """<!doctype html>
       .grid, .topbar {
         display: block;
       }
+      .topbar h1 {
+        margin-bottom: 14px;
+      }
+      .topbar-actions {
+        justify-content: flex-start;
+      }
       .panel {
         margin-bottom: 14px;
       }
     }
+    @media (max-width: 420px) {
+      main {
+        padding: 10px;
+      }
+      .topbar-actions > button,
+      .topbar-actions > .button-row {
+        flex: 1 1 auto;
+      }
+      .topbar-actions > button {
+        min-width: 0;
+      }
+      .camera-grid {
+        grid-template-columns: repeat(3, 46px);
+      }
+      .camera-grid button, .angle-control {
+        width: 46px;
+      }
+      .view-direction-row {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .view-direction-row button {
+        grid-column: 1 / -1;
+      }
+    }
   </style>
 </head>
-<body>
+<body class="beginner-mode">
 <main>
   <div class="topbar">
     <h1>Symmetry Controls</h1>
     <div class="topbar-actions">
+      <div class="button-row flush" id="experience-controls">
+        <button class="secondary experience-button selected" data-experience="beginner">Beginner</button>
+        <button class="secondary experience-button" data-experience="advanced">Advanced</button>
+      </div>
       <div class="button-row flush" id="structure-kind-controls">
         <button class="secondary structure-kind-button selected" data-kind="crystal">Crystal</button>
         <button class="secondary structure-kind-button" data-kind="molecule">Molecule</button>
@@ -618,7 +699,7 @@ HTML = """<!doctype html>
       <button id="import-molecule" class="secondary">Open XYZ</button>
       <select id="example-select" class="example-select"></select>
       <button id="open-example" class="secondary">Open Example</button>
-      <div class="button-row flush" id="mode-controls">
+      <div class="button-row flush advanced-only" id="mode-controls">
         <button class="secondary mode-button selected" data-mode="standard">Symmetry operation</button>
         <button class="secondary mode-button" data-mode="custom">Custom operation</button>
       </div>
@@ -634,15 +715,15 @@ HTML = """<!doctype html>
     <div class="error-detail" id="load-error-detail"></div>
   </section>
   <section class="panel" id="structure-info-panel" hidden>
-    <h2 class="section-title">Structure Info</h2>
+    <h2 class="section-title" id="structure-info-title">Structure Info</h2>
     <div class="structure-summary" id="structure-info"></div>
   </section>
   <div class="grid" id="workspace">
     <div class="left-stack">
     <section class="panel" id="standard-panel">
-      <h2 class="section-title">Operations</h2>
+      <h2 class="section-title" id="operations-title">Operations</h2>
       <div class="control-stack">
-        <div>
+        <div class="advanced-only">
           <label for="operation-sort">Sort</label>
           <select id="operation-sort">
             <option value="index">Operation number</option>
@@ -651,21 +732,21 @@ HTML = """<!doctype html>
             <option value="direction">Direction only</option>
           </select>
         </div>
-        <div id="operation-label-mode-block">
+        <div class="advanced-only" id="operation-label-mode-block">
           <label for="operation-label-mode">Notation</label>
           <select id="operation-label-mode">
             <option value="itc_like" selected>ITC operation</option>
             <option value="standard">Element</option>
           </select>
         </div>
-        <div>
+        <div class="advanced-only">
           <label id="operation-filter-label">Direction</label>
           <div class="direction-filter-list" id="direction-filter"></div>
         </div>
       </div>
-      <label for="operations">Operation list</label>
+      <label for="operations" id="operations-label">Operation list</label>
       <div class="operation-list" id="operations" role="listbox"></div>
-      <p class="hint" id="operation-notation-hint">ITC-style notation computed from each operation's (W, t): symbol, intrinsic translation, and the element location.</p>
+      <p class="hint advanced-only" id="operation-notation-hint">ITC-style notation computed from each operation's (W, t): symbol, intrinsic translation, and the element location.</p>
     </section>
     <section class="panel" id="custom-panel" hidden>
       <h2 class="section-title">Custom Operation</h2>
@@ -837,28 +918,28 @@ HTML = """<!doctype html>
       </div>
       <div id="cop-result" class="cop-result" hidden></div>
     </section>
-    <section class="panel">
+    <section class="panel advanced-only">
       <h2 class="section-title">Selected Operation</h2>
       <div id="op-details" class="operation-details"></div>
     </section>
     </div>
     <div class="side-stack">
       <section class="panel">
-        <h2 class="section-title">Animation</h2>
+        <h2 class="section-title" id="animation-title">Animation</h2>
         <div class="button-row flush">
           <button id="play-toggle">Start</button>
           <button id="reset" class="secondary">Reset</button>
-          <button id="save-gif" class="secondary">Save GIF</button>
-          <button id="save-gif-3view" class="secondary">Save 3-view GIFs</button>
-          <button id="save-gif-3view-current" class="secondary">Save 3-view GIFs (current view)</button>
+          <button id="save-gif" class="secondary advanced-only">Save GIF</button>
+          <button id="save-gif-3view" class="secondary advanced-only">Save 3-view GIFs</button>
+          <button id="save-gif-3view-current" class="secondary advanced-only">Save 3-view GIFs (current view)</button>
         </div>
-        <h3 class="subsection-title">Speed</h3>
-        <div class="button-row flush" id="speed-controls">
+        <h3 class="subsection-title advanced-only">Speed</h3>
+        <div class="button-row flush advanced-only" id="speed-controls">
           <button class="secondary speed-button" data-speed="0.5">Slow</button>
           <button class="secondary speed-button selected" data-speed="1.0">Normal</button>
           <button class="secondary speed-button" data-speed="2.0">Fast</button>
         </div>
-        <div>
+        <div class="advanced-only">
           <label for="improper-mode">Improper operation</label>
           <select id="improper-mode">
             <option value="auto">Auto</option>
@@ -866,12 +947,12 @@ HTML = """<!doctype html>
             <option value="rotoinversion">Rotoinversion</option>
           </select>
         </div>
-        <h3 class="subsection-title">Boundary</h3>
-        <div class="button-row flush" id="animation-boundary-controls">
+        <h3 class="subsection-title advanced-only">Boundary</h3>
+        <div class="button-row flush advanced-only" id="animation-boundary-controls">
           <button class="secondary boundary-button selected" data-boundary-mode="continuous">Continuous</button>
           <button class="secondary boundary-button" data-boundary-mode="wrap">Wrap</button>
         </div>
-        <p class="hint">Start or stop the selected operation and save the current view as a GIF.</p>
+        <p class="hint advanced-only">Start or stop the selected operation and save the current view as a GIF.</p>
       </section>
       <section class="panel">
         <h2 class="section-title">View</h2>
@@ -882,14 +963,14 @@ HTML = """<!doctype html>
             <button id="camera-up" class="secondary" title="Tilt up" aria-label="Tilt up">↑</button>
             <button id="camera-roll-right" class="secondary" title="Roll right" aria-label="Roll right">↷</button>
             <button id="camera-left" class="secondary" title="Rotate left" aria-label="Rotate left">←</button>
-            <input id="camera-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1">
+            <button id="camera-down" class="secondary" title="Tilt down" aria-label="Tilt down">↓</button>
             <button id="camera-right" class="secondary" title="Rotate right" aria-label="Rotate right">→</button>
             <span></span>
-            <button id="camera-down" class="secondary" title="Tilt down" aria-label="Tilt down">↓</button>
+            <input id="camera-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1" title="Rotation angle" aria-label="Rotation angle">
             <span></span>
           </div>
         </div>
-        <div class="camera-block" id="view-direction-index-block">
+        <div class="camera-block advanced-only" id="view-direction-index-block">
           <label>View along [h k l]</label>
           <div class="view-direction-row">
             <input type="number" id="view-dir-h" value="0" step="any" placeholder="h">
@@ -898,7 +979,7 @@ HTML = """<!doctype html>
             <button id="view-direction-index" class="secondary">Apply</button>
           </div>
         </div>
-        <div class="camera-block" id="view-plane-index-block">
+        <div class="camera-block advanced-only" id="view-plane-index-block">
           <label>View plane (h k l)</label>
           <div class="view-direction-row">
             <input type="number" id="view-plane-h" value="0" step="any" placeholder="h">
@@ -907,7 +988,7 @@ HTML = """<!doctype html>
             <button id="view-plane-index" class="secondary">Apply</button>
           </div>
         </div>
-        <div class="camera-block">
+        <div class="camera-block advanced-only">
           <label id="view-center-label">View center [x y z] — fractional</label>
           <div class="view-center-row">
             <input type="number" id="view-center-x" value="0" step="any" placeholder="x">
@@ -926,14 +1007,14 @@ HTML = """<!doctype html>
             <button class="secondary projection-button" data-projection-mode="orthographic">Orthographic</button>
           </div>
         </div>
-        <div class="camera-block">
+        <div class="camera-block advanced-only">
           <label>Background</label>
           <div class="button-row flush" id="background-controls">
             <button class="secondary background-button" data-background-mode="light">White</button>
             <button class="secondary background-button selected" data-background-mode="dark">Black</button>
           </div>
         </div>
-        <div class="camera-block">
+        <div class="camera-block advanced-only">
           <label>Legend</label>
           <div class="button-row flush" id="legend-controls">
             <button class="secondary legend-button selected" data-legend-visible="false">Hide</button>
@@ -958,14 +1039,14 @@ HTML = """<!doctype html>
             <button class="secondary display-button" data-display-mode="expanded_1_0">±1</button>
           </div>
         </div>
-        <div class="cell-block">
+        <div class="cell-block advanced-only">
           <label>Unit cell origin</label>
           <div class="button-row flush" id="cell-origin-controls">
             <button class="secondary cell-origin-button selected" data-cell-origin-mode="center">Center</button>
             <button class="secondary cell-origin-button" data-cell-origin-mode="corner">Corner</button>
           </div>
         </div>
-        <div class="cell-block">
+        <div class="cell-block advanced-only">
           <label>Cell basis</label>
           <div class="button-row flush" id="cell-setting-controls">
             <button class="secondary cell-setting-button" data-cell-setting-mode="primitive">Primitive cell</button>
@@ -973,7 +1054,7 @@ HTML = """<!doctype html>
           </div>
         </div>
       </section>
-      <section class="panel">
+      <section class="panel advanced-only">
         <h2 class="section-title">Atoms</h2>
         <label>Elements</label>
         <div class="element-color-list" id="element-colors"></div>
@@ -997,6 +1078,7 @@ let operations = [];
 let atoms = [];
 let atomMotionBySource = new Map();
 let lastAtomRenderSignature = "";
+let lastStructureInfoSignature = "";
 let state = {};
 let directionFilterValue = "";
 let atomElementFilterValue = "";
@@ -1004,6 +1086,7 @@ let operationLabelMode = "itc_like";
 let customOperationSequence = [];
 let summariesReady = false;
 let activeMode = "standard";
+let experienceMode = "beginner";
 let customUnmappedAtoms = new Set();
 let sourceKind = "crystal";
 let selectedStructureKind = "crystal";
@@ -1034,6 +1117,9 @@ async function api(path, options) {
 }
 
 function optionText(operation) {
+  if (experienceMode === "beginner") {
+    return beginnerOperationText(operation);
+  }
   if (sourceKind === "molecule") {
     return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
   }
@@ -1046,6 +1132,63 @@ function optionText(operation) {
   const summary = operation.element_summary || "";
   const element = summary ? ` | ${formatSymbol(summary)}` : "";
   return `op ${operation.index}: ${symbol}${element}`;
+}
+
+function beginnerOperationText(operation) {
+  const kind = String(operation.kind || "").toLowerCase();
+  const reportedAngle = operation.angle_deg;
+  const matrixOrder = Number(operation.order);
+  const notationOrder = improperNotationOrder(operation);
+  const fallbackOrder = isImproperOperation(operation) ? notationOrder : matrixOrder;
+  const angle = isImproperOperation(operation) && Number.isFinite(notationOrder) && notationOrder > 1
+    ? 360 / notationOrder
+    : reportedAngle !== null && reportedAngle !== undefined && Number.isFinite(Number(reportedAngle))
+      ? Math.abs(Number(reportedAngle))
+      : (Number.isFinite(fallbackOrder) && fallbackOrder > 1 ? 360 / fallbackOrder : 0);
+  const angleText = Number.isFinite(angle) && angle > 1e-6
+    ? `${Math.round(angle)}°`
+    : "";
+  const symbol = beginnerOperationSymbol(operation);
+  const reading = beginnerOperationReading(operation);
+  const label = `${symbol} (${reading})`;
+  if (kind === "identity") return `${label}:恒等操作`;
+  if (kind.includes("screw")) return `${label}:${angleText}回転+平行移動`;
+  if (kind.includes("glide")) return `${label}:鏡映+平行移動`;
+  if (kind.includes("mirror")) return `${label}:鏡映`;
+  if (kind.includes("inversion") && !kind.includes("roto")) return `${label}:反転`;
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) {
+    return `${label}:${angleText}回転+反転`;
+  }
+  if (kind.includes("rotation")) return `${label}:${angleText}回転`;
+  if (kind.includes("translation")) return `${label}:平行移動`;
+  return `${label}:対称操作`;
+}
+
+function beginnerOperationSymbol(operation) {
+  const kind = String(operation.kind || "").toLowerCase();
+  const order = improperNotationOrder(operation);
+  if (kind.includes("glide")) return "g";
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) {
+    return `<span class="overline">${order}</span>`;
+  }
+  if (kind.includes("inversion")) return '<span class="overline">1</span>';
+  return formatSymbol(operation.display_symbol || operation.symbol || "?");
+}
+
+function beginnerOperationReading(operation) {
+  const kind = String(operation.kind || "").toLowerCase();
+  const order = isImproperOperation(operation) ? improperNotationOrder(operation) : (operation.order || "");
+  if (kind === "identity") return "恒等";
+  if (kind.includes("screw")) return `${order}回らせん`;
+  if (kind.includes("glide")) return "映進";
+  if (kind.includes("mirror")) return "鏡映";
+  if (kind.includes("inversion") && !kind.includes("roto")) return "反転";
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) {
+    return `${order}回回反`;
+  }
+  if (kind.includes("rotation")) return `${order}回回転`;
+  if (kind.includes("translation")) return "並進";
+  return "対称操作";
 }
 
 function operationSummaryText(operation) {
@@ -1079,16 +1222,28 @@ function isImproperOperation(operation) {
   return kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection");
 }
 
+function improperNotationOrder(operation) {
+  const suppliedOrder = Number(operation.notation_order);
+  if (Number.isFinite(suppliedOrder) && suppliedOrder > 0) return suppliedOrder;
+  const symbol = String(operation.symbol || operation.display_symbol || "");
+  const match = symbol.match(/[0-9]+/);
+  if (match) return Number(match[0]);
+  const matrixOrder = Number(operation.order);
+  return Number.isFinite(matrixOrder) ? matrixOrder : 0;
+}
+
 function displayOperationSymbol(operation) {
   if (!isImproperOperation(operation)) {
     return operation.display_symbol || operation.symbol || "";
   }
-  const match = String(operation.symbol || "").match(/[0-9]+/);
-  const order = operation.order || (match ? match[0] : "");
+  const notationOrder = improperNotationOrder(operation);
   if (resolvedImproperMode() === "rotoreflection") {
-    return order ? `S${order}` : (operation.display_symbol || operation.symbol || "");
+    const reflectionOrder = operation.order || notationOrder;
+    return reflectionOrder ? `S${reflectionOrder}` : (operation.display_symbol || operation.symbol || "");
   }
-  return order ? `<span class="overline">${order}</span>` : (operation.display_symbol || operation.symbol || "");
+  return notationOrder
+    ? `<span class="overline">${notationOrder}</span>`
+    : (operation.display_symbol || operation.symbol || "");
 }
 
 function atomDisplayLabel(atom) {
@@ -1296,6 +1451,14 @@ function syncOperationLabelModeControls() {
 }
 
 function sortedOperations() {
+  if (experienceMode === "beginner") {
+    return [...operations].sort((a, b) =>
+      compareNumber(beginnerOperationTypeRank(a), beginnerOperationTypeRank(b))
+      || compareNumber(Number(a.order) || 0, Number(b.order) || 0)
+      || compareNumber(Number(a.angle_deg) || 0, Number(b.angle_deg) || 0)
+      || compareNumber(a.index, b.index)
+    );
+  }
   const mode = document.getElementById("operation-sort").value;
   return [...operations].sort((a, b) => {
     if (mode === "symbol") {
@@ -1309,6 +1472,19 @@ function sortedOperations() {
     }
     return compareNumber(a.index, b.index);
   });
+}
+
+function beginnerOperationTypeRank(operation) {
+  const kind = String(operation.kind || "").toLowerCase();
+  if (kind === "identity") return 0;
+  if (kind.includes("rotation") && !kind.includes("improper")) return 1;
+  if (kind.includes("screw")) return 2;
+  if (kind.includes("mirror")) return 3;
+  if (kind.includes("glide")) return 4;
+  if (kind.includes("inversion") && !kind.includes("roto")) return 5;
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) return 6;
+  if (kind.includes("translation")) return 7;
+  return 8;
 }
 
 function sortableSymbol(operation) {
@@ -1416,38 +1592,67 @@ function renderStructureInfo() {
   if (!structureLoadedForSelectedKind()) {
     panel.hidden = true;
     root.innerHTML = "";
+    lastStructureInfoSignature = "";
     return;
   }
   const metadata = state.metadata || {};
+  const signature = JSON.stringify({
+    experienceMode,
+    sourceKind,
+    selectedStructureKind,
+    sourceFile: metadata.source_file || state.json_path,
+    formula: metadata.formula,
+    symmetryLabel: metadata.symmetry_label,
+    pointGroupLabel: metadata.point_group_label,
+    operationCount: metadata.operation_count || operations.length,
+    latticeParameters: metadata.lattice_parameters,
+    displayLatticeParameters: metadata.display_lattice_parameters,
+    cellSettingMode: state.cell_setting_mode,
+    atoms: atoms.map(atom => [atom.index, atom.element, atom.frac, atom.cart]),
+  });
+  if (signature === lastStructureInfoSignature && !panel.hidden) return;
+  const previousDetails = root.querySelector(".atom-position-details");
+  const atomPositionsWereOpen = Boolean(previousDetails?.open);
+  const atomPositionScrollTop = previousDetails?.querySelector(".atom-position-list")?.scrollTop || 0;
+  lastStructureInfoSignature = signature;
   const config = sourceKindConfig(sourceKind);
   const summaryItems = [
-    ["Name", basename(metadata.source_file || state.json_path)],
-    ["Formula", metadata.formula || "-"],
-  ];
+        ["Name", basename(metadata.source_file || state.json_path)],
+        ["Formula", metadata.formula || "-"],
+      ];
   if (sourceKind === "crystal") {
-    summaryItems.push(
-      [
-        config.symmetryLabel,
-        symmetryLabelWithGenerators(metadata.symmetry_label, metadata.space_group_generators, { spaceGroup: true }),
-      ],
-      [
-        "Point group",
-        symmetryLabelWithGenerators(metadata.point_group_label || "-", metadata.point_group_generators, {
-          pointGroup: true,
-        }),
-      ],
-    );
+    if (experienceMode === "beginner") {
+      summaryItems.push(
+        ["Crystal system", crystalSystemFromSymmetryLabel(metadata.symmetry_label)],
+        ["Operations", metadata.operation_count || operations.length || 0],
+      );
+    } else {
+      summaryItems.push(
+        [
+          config.symmetryLabel,
+          symmetryLabelWithGenerators(metadata.symmetry_label, metadata.space_group_generators, { spaceGroup: true }),
+        ],
+        [
+          "Point group",
+          symmetryLabelWithGenerators(metadata.point_group_label || "-", metadata.point_group_generators, {
+            pointGroup: true,
+          }),
+        ],
+      );
+    }
   } else {
-    summaryItems.push([
-      config.symmetryLabel,
-      symmetryLabelWithGenerators(metadata.symmetry_label || metadata.point_group_label, metadata.point_group_generators),
-    ]);
+    summaryItems.push(experienceMode === "beginner"
+      ? ["Operations", metadata.operation_count || operations.length || 0]
+      : [
+          config.symmetryLabel,
+          symmetryLabelWithGenerators(metadata.symmetry_label || metadata.point_group_label, metadata.point_group_generators),
+        ]);
   }
   root.innerHTML = "";
 
   appendSummaryGrid(root, summaryItems, "primary");
 
-  if (sourceKind === "crystal") {
+  if (sourceKind === "crystal" && experienceMode === "advanced") {
     appendSummaryGrid(root, [
       ["Cell", formatCellSettingLabel(state.cell_setting_mode || metadata.display_cell_setting || "native")],
       ["Atoms", metadata.display_atom_count || atoms.length || "-"],
@@ -1455,8 +1660,14 @@ function renderStructureInfo() {
     ], "cell-setting");
   }
 
-  const lattice = metadata.lattice_parameters;
+  const lattice = metadata.display_lattice_parameters || metadata.lattice_parameters;
   if (sourceKind === "crystal" && lattice) {
+    if (experienceMode === "beginner") {
+      const latticeTitle = document.createElement("div");
+      latticeTitle.className = "summary-label";
+      latticeTitle.textContent = "Lattice constants";
+      root.appendChild(latticeTitle);
+    }
     appendSummaryGrid(root, [
       ["a", formatLength(lattice.a)],
       ["b", formatLength(lattice.b)],
@@ -1466,7 +1677,50 @@ function renderStructureInfo() {
       ["gamma", formatAngle(lattice.gamma)],
     ], "compact");
   }
+  appendAtomPositionSummary(root, atomPositionsWereOpen, atomPositionScrollTop);
   panel.hidden = false;
+}
+
+function crystalSystemFromSymmetryLabel(label) {
+  const match = String(label || "").match(/^([0-9]+)/);
+  if (!match) return "-";
+  const number = Number(match[1]);
+  if (number <= 2) return "Triclinic";
+  if (number <= 15) return "Monoclinic";
+  if (number <= 74) return "Orthorhombic";
+  if (number <= 142) return "Tetragonal";
+  if (number <= 167) return "Trigonal";
+  if (number <= 194) return "Hexagonal";
+  if (number <= 230) return "Cubic";
+  return "-";
+}
+
+function appendAtomPositionSummary(root, open = false, scrollTop = 0) {
+  const counts = new Map();
+  for (const atom of atoms) counts.set(atom.element, (counts.get(atom.element) || 0) + 1);
+  const composition = [...counts.entries()].map(([element, count]) => `${element} × ${count}`).join("、") || "-";
+  appendSummaryGrid(root, [["Atoms", composition]], "cell-setting");
+
+  const details = document.createElement("details");
+  details.className = "atom-position-details";
+  details.open = open;
+  const summary = document.createElement("summary");
+  summary.textContent = `Atom positions (${atoms.length})`;
+  details.appendChild(summary);
+  const list = document.createElement("div");
+  list.className = "atom-position-list";
+  for (const atom of atoms) {
+    const coordinates = sourceKind === "crystal" && Array.isArray(atom.frac)
+      ? atom.frac.map(formatFrac).join(", ")
+      : (atom.cart || []).map(formatCoord).join(", ");
+    const unit = sourceKind === "crystal" ? "fractional" : "Å";
+    const row = document.createElement("div");
+    row.textContent = `${atom.index + 1}. ${atom.element}: (${coordinates}) ${unit}`;
+    list.appendChild(row);
+  }
+  details.appendChild(list);
+  root.appendChild(details);
+  list.scrollTop = scrollTop;
 }
 
 function formatCellSettingLabel(value) {
@@ -1564,7 +1818,7 @@ function syncImportControls() {
 
 function renderExampleOptions() {
   const select = document.getElementById("example-select");
-  const items = exampleCatalog[selectedStructureKind] || [];
+  const items = sortedExampleItems(exampleCatalog[selectedStructureKind] || [], selectedStructureKind);
   select.innerHTML = "";
   const placeholder = document.createElement("option");
   placeholder.value = "";
@@ -1580,6 +1834,21 @@ function renderExampleOptions() {
   const hasSelectedExample = items.some(item => item.path === selectedExamplePath);
   select.value = hasSelectedExample ? selectedExamplePath : "";
   document.getElementById("open-example").disabled = importInProgress || items.length === 0;
+}
+
+function sortedExampleItems(items, kind) {
+  const sorted = [...items];
+  if (kind !== "crystal") return sorted;
+  return sorted.sort((a, b) => {
+    const numberA = spaceGroupNumber(a.symmetry);
+    const numberB = spaceGroupNumber(b.symmetry);
+    return compareNumber(numberA, numberB) || compareText(a.name || "", b.name || "");
+  });
+}
+
+function spaceGroupNumber(label) {
+  const match = String(label || "").match(/(?:No[.][ ]*)?([0-9]+)/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
 function exampleOptionText(item) {
@@ -2397,6 +2666,33 @@ function syncActiveModeControls() {
   }
 }
 
+function syncExperienceModeControls() {
+  const beginner = experienceMode === "beginner";
+  document.body.classList.toggle("beginner-mode", beginner);
+  document.body.classList.toggle("advanced-mode", !beginner);
+  for (const button of document.querySelectorAll(".experience-button")) {
+    button.classList.toggle("selected", button.dataset.experience === experienceMode);
+  }
+  document.getElementById("operations-title").textContent = "Operations";
+  document.getElementById("operations-label").textContent = "Operation list";
+  document.getElementById("structure-info-title").textContent = "Structure Info";
+  document.getElementById("animation-title").textContent = "Animation";
+}
+
+function setExperienceMode(mode) {
+  experienceMode = mode === "advanced" ? "advanced" : "beginner";
+  if (experienceMode === "beginner") directionFilterValue = "";
+  if (experienceMode === "beginner" && activeMode !== "standard") {
+    activeMode = "standard";
+    postState({active_mode: "standard", playing: false, reset: true, clear_custom_check: true});
+  }
+  syncActiveModeControls();
+  syncExperienceModeControls();
+  renderOperations();
+  renderStructureInfo();
+  renderOperationDetails();
+}
+
 function setActiveMode(mode) {
   activeMode = mode === "custom" ? "custom" : "standard";
   syncActiveModeControls();
@@ -2491,6 +2787,9 @@ document.getElementById("open-example").addEventListener("click", () => {
 });
 for (const button of document.querySelectorAll(".mode-button")) {
   button.addEventListener("click", () => setActiveMode(button.dataset.mode));
+}
+for (const button of document.querySelectorAll(".experience-button")) {
+  button.addEventListener("click", () => setExperienceMode(button.dataset.experience));
 }
 function startAnimation() {
   if (activeMode === "custom") {
@@ -2978,6 +3277,7 @@ document.getElementById("btn-clear-check").addEventListener("click", async () =>
 
 async function boot() {
   const st = document.getElementById("status");
+  syncExperienceModeControls();
   st.textContent = "Connecting…";
   const [info, atomInfo, stateInfo, examplesInfo] = await Promise.all([
     api("/api/operations"),

@@ -245,7 +245,8 @@ class NativePyVistaViewer:
                 continue
             self.start_marker_actors.append(actor)
             path = self.paths.get(item["atom"]["index"])
-            visible = path is not None and path_applies_to_display_item(path, item)
+            animation_started = self.playing or self.frame_position > 0.0
+            visible = animation_started and path is not None and path_applies_to_display_item(path, item)
             try:
                 actor.SetVisibility(visible)
             except Exception:
