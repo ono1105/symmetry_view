@@ -764,7 +764,7 @@ HTML = """<!doctype html>
       <canvas aria-label="Interactive three-dimensional structure view"></canvas>
       <div class="three-view-status" data-three-status>Loading Three.js view…</div>
     </div>
-    <p class="hint">Left-drag to grab and rotate the structure, scroll to zoom, and right-drag to pan. PyVista remains the reference view.</p>
+    <p class="hint">Left-click an atom to select it, Shift/Ctrl-click to add or remove atoms, left-drag to rotate, scroll to zoom, and right-drag to pan. PyVista remains the reference view.</p>
   </section>
   <div class="grid" id="workspace">
     <div class="left-stack">
@@ -2504,6 +2504,8 @@ async function postState(update) {
   renderStatus();
   renderOperationDetails();
 }
+
+window.symmetryPostState = postState;
 
 async function applyCellSetting(mode) {
   setCellSettingBusy(true, mode);

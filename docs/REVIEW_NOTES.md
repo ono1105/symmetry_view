@@ -59,7 +59,8 @@
 - 静的配信: ファイル欠損を404/503で処理し、Three.js未導入時は`npm ci`手順を返す。
 - デッドコード: 未使用のOrbitControls配信ルートを削除した。
 - op77/op88の表示ずれ: 対称要素はcenterセルへ移されていた一方、Three.js原子・単位胞だけcornerセルのままだったことが原因。`/api/render_data`からPython生成のdisplay atom instancesとdisplay unit cellを返してPyVistaと統一した。
-- Three.jsの開始位置マーカー: 再生開始時にprimary imageの開始位置へ黄色の半透明球を置き、Stop・完了後も保持し、Reset・操作変更・構造変更で削除する。PyVistaの既存挙動と統一する。
+- Three.jsの開始位置マーカー: 再生開始時にアニメーション対象display instanceの開始位置へ黄色の半透明球を置き、Displayed allでは周期像も含める。Stop・完了後も保持し、Reset・操作変更・構造変更で削除する。PyVistaの既存挙動と統一する。
+- Three.js原子選択: 左クリックでsource atomを選択し、Shift/Ctrl/Metaクリックで複数選択をtoggleする。既存`postState()`を通して`selected_atoms`/`scope`を更新するため、左パネル・PyVista・アニメーション経路生成と同じ状態を共有する。
 
 ## 2026-07-01: 初学者モードのUI方針
 

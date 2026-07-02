@@ -30,6 +30,9 @@ class StaticStructureView {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.controls = null;
+    this.raycaster = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2();
+    this.pointerDown = null;
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x263342, 2.2));
     const keyLight = new THREE.DirectionalLight(0xffffff, 2.8);
@@ -65,6 +68,10 @@ class StaticStructureView {
     this.tempScale = new THREE.Vector3();
     this.tempQuaternion = new THREE.Quaternion();
     this.animate = this.animate.bind(this);
+    this.handlePointerDown = this.handlePointerDown.bind(this);
+    this.handlePointerUp = this.handlePointerUp.bind(this);
+    this.canvas.addEventListener("pointerdown", this.handlePointerDown);
+    this.canvas.addEventListener("pointerup", this.handlePointerUp);
     requestAnimationFrame(this.animate);
   }
 
@@ -117,12 +124,13 @@ class StaticStructureView {
     const matrix = new THREE.Matrix4();
     for (const group of groups.values()) {
       const material = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(group.style.color),
+        color: 0xffffff,
         roughness: 0.34,
         metalness: 0.04,
       });
       const mesh = new THREE.InstancedMesh(geometry, material, group.atoms.length);
       mesh.frustumCulled = false;
+      mesh.userData.atomInstances = [];
       this.instanceMeshes.add(mesh);
       group.atoms.forEach((atom, instanceIndex) => {
         matrix.compose(
@@ -132,18 +140,22 @@ class StaticStructureView {
         );
         mesh.setMatrixAt(instanceIndex, matrix);
         const instanceId = Number(atom.instance_id ?? atom.index);
-        this.atomInstances.set(instanceId, {
+        const instance = {
           mesh,
           instanceIndex,
           sourceAtom: Number(atom.source_atom ?? atom.index),
           isPrimaryImage: atom.is_primary_image !== false,
           radius: group.radius,
           start: [...atom.cart],
-        });
+          baseColor: new THREE.Color(group.style.color),
+        };
+        mesh.userData.atomInstances[instanceIndex] = instance;
+        this.atomInstances.set(instanceId, instance);
       });
       mesh.instanceMatrix.needsUpdate = true;
       this.content.add(mesh);
     }
+    this.updateAtomSelectionHighlight();
   }
 
   addUnitCell(unitCell) {
@@ -230,6 +242,95 @@ class StaticStructureView {
     this.resize();
   }
 
+  handlePointerDown(event) {
+    if (event.button !== 0) return;
+    this.pointerDown = {
+      x: event.clientX,
+      y: event.clientY,
+      time: performance.now(),
+    };
+  }
+
+  handlePointerUp(event) {
+    if (event.button !== 0 || !this.pointerDown) return;
+    const movement = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y);
+    const elapsed = performance.now() - this.pointerDown.time;
+    this.pointerDown = null;
+    if (movement > 5 || elapsed > 500) return;
+    const hit = this.pickAtomInstance(event);
+    if (!hit) return;
+    this.selectAtom(hit.sourceAtom, event);
+  }
+
+  pickAtomInstance(event) {
+    const rect = this.canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.activeCamera);
+    const intersections = this.raycaster.intersectObjects([...this.instanceMeshes], false);
+    for (const intersection of intersections) {
+      const instanceIndex = intersection.instanceId;
+      if (!Number.isInteger(instanceIndex)) continue;
+      const instance = intersection.object.userData.atomInstances?.[instanceIndex];
+      if (instance) return instance;
+    }
+    return null;
+  }
+
+  async selectAtom(sourceAtom, event) {
+    const current = new Set((this.state.selected_atoms || []).map(Number));
+    let selected;
+    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+      if (current.has(sourceAtom)) current.delete(sourceAtom);
+      else current.add(sourceAtom);
+      selected = [...current].sort((a, b) => a - b);
+    } else {
+      selected = [sourceAtom];
+    }
+    const update = {
+      selected_atoms: selected,
+      scope: selected.length ? "selected" : "representative",
+      playing: false,
+      reset: true,
+    };
+    try {
+      if (typeof window.symmetryPostState === "function") {
+        await window.symmetryPostState(update);
+        return;
+      }
+      const response = await fetch("/api/state", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(update),
+      });
+      if (!response.ok) throw new Error(await response.text() || `${response.status} ${response.statusText}`);
+      const state = await response.json();
+      window.dispatchEvent(new CustomEvent("symmetry-state-update", {
+        detail: {state: {...state}, update: {...update}},
+      }));
+    } catch (error) {
+      this.setStatus(`Three.js selection error: ${error.message}`);
+    }
+  }
+
+  updateAtomSelectionHighlight() {
+    const selected = this.state.scope === "selected"
+      ? new Set((this.state.selected_atoms || []).map(Number))
+      : new Set();
+    for (const mesh of this.instanceMeshes) {
+      const instances = mesh.userData.atomInstances || [];
+      instances.forEach((instance, index) => {
+        const color = selected.has(instance.sourceAtom)
+          ? instance.baseColor.clone().lerp(new THREE.Color(0xf7dc6f), 0.58)
+          : instance.baseColor;
+        mesh.setColorAt(index, color);
+      });
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
+    this.render();
+  }
+
   syncState(state, update = {}) {
     this.syncQueue = this.syncQueue
       .catch(() => {})
@@ -245,6 +346,7 @@ class StaticStructureView {
     );
     this.state = {...state};
     if (displayLayoutChanged) await this.refresh();
+    this.updateAtomSelectionHighlight();
     this.setProjection(state.projection_mode);
     const operationChanged = Number(state.operation_index) !== Number(previousOperation);
     const pathOptionsChanged = operationChanged || [

@@ -169,9 +169,11 @@ come from `/api/symmetry_elements` and are rendered alongside the animation.
 For glide operations, the same response includes the Python-resolved Cartesian
 glide translation used by the animation; a yellow arrow on the plane shows its
 direction.
-When playback starts, translucent yellow markers remain at the primary atoms'
-starting positions. They persist after Stop or completion and are removed by
-Reset, operation changes, or structure changes.
+When playback starts, translucent yellow markers remain at each animated
+display instance's starting position. `Displayed all` includes periodic images;
+`Unit cell only` shows markers only for primary images. They persist after Stop
+or completion and are removed by Reset, operation changes, or structure
+changes.
 Cell Range uses the same Python-generated display instances as PyVista.
 `Displayed all` evaluates every periodic image from its displayed Cartesian
 start position; `Unit cell only` moves primary images and leaves periodic
@@ -179,8 +181,10 @@ copies fixed. `Continuous` leaves evaluated Cartesian positions unchanged.
 For `Wrap`, Python supplies the Cartesian-to-cell and cell-to-Cartesian
 matrices and the origin convention, and JavaScript only applies that versioned
 boundary contract. Molecules always use continuous behavior because they have
-no unit cell. PyVista remains the reference renderer; custom-operation
-animation and picking have not yet moved to Three.js.
+no unit cell. Left-click picking in Three.js selects the source atom and updates
+the shared browser/PyVista state; Shift/Ctrl-click toggles multi-selection.
+PyVista remains the reference renderer; custom-operation animation has not yet
+moved to Three.js.
 
 Install the pinned browser dependency after cloning or changing the lockfile:
 
