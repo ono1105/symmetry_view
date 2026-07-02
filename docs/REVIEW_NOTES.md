@@ -1,5 +1,63 @@
 # コードレビューメモ（Codex向け共有）
 
+## 2026-07-01: UI統合時の結晶・分子共通契約
+
+- 描画・経路JSONは結晶用と分子用に分割せず、`source_kind: "crystal" | "molecule"`を必須判別子とする。
+- Cartesian原子座標、対称操作、AtomMapping、アニメーション経路は共通とする。
+- `unit_cell`、fractional座標、周期像は結晶固有のoptional情報であり、分子では利用しない。
+- `periodic_image_policy`は結晶で`transform_with_source`、分子で`not_applicable`とする。
+- 分子の`rotoreflection`と結晶の`rotoinversion`はPythonが決定し、JSは経路タグを再解釈しない。
+
+## 2026-07-02: Three.js静的比較ビュー
+
+- Three.js 0.185.1は`three.module.js`から相対参照される`three.core.js`も配信する必要がある。前者だけを配信すると、パネルは表示されてもESモジュール読込に失敗して構造が描画されない。
+- `three_view.js`、Three.js本体、TrackballControlsは同一オリジンの絶対URLで配信し、モジュール読込の各段階をパネル下部のステータスへ表示する。
+- HaliteをヘッドレスEdgeで確認し、原子8個と単位胞が描画されることを確認済み。
+- `browser_ui.py`の`HTML`はPythonプロセス起動時に確定するため、UIコードや静的配信ルートを変更した後は`view_json_server.py`を再起動する。
+- マウス操作は左ドラッグで自由回転、右ドラッグで画面平面内のパン、ホイールでズームとする。
+- `GET /api/animation_path`とJS版`evaluatePath()`をThree.js原子インスタンスへ接続した。Start/Stop/Reset、操作変更、速度変更を現行ブラウザ状態と共有する。周期像とwrap境界は次段階で移植する。
+- 軌道上に拘束されるOrbitControlsは廃止し、ロールを含む自由回転が可能なTrackballControlsへ変更した。Controlsは自動カメラフィット後に初期化し、Perspective/Orthographic切替時にも再生成する。
+- `GET /api/symmetry_elements`はPyVistaと同じPythonの要素選択処理を使い、互換な軸・面・中心だけをCartesianで返す。Three.jsでは軸を水色、鏡映面を半透明紫、反転中心を原子と重なっても見える小さな赤いワイヤー立方体で表示する。
+- Halite op187では、初期実装の鏡映面表示がアニメーション経路面から格子周期`[0, 5.62, 0] Å`ずれていた。対称要素APIにも経路と同じ`display_equivalent_operation_context()`を適用して修正した。Halite全192操作について軸・面・中心と経路の244組が一致する回帰テストを追加した。
+- Beginnerの操作一覧に表示する`op N`は現在のソート順位ではなく、不変のoperation indexとして別スタイルで表示する。ソートしても番号自体は変えない。
+- `op N`は本文と異なる色・固定幅にせず、同じ書体・色の`op N:`接頭辞として表示する。
+- 反転中心は小さな赤いワイヤー立方体へ変更した。
+- 映進操作では、Pythonの`glide_translation_cart()`がアニメーション後半と同じ並進ベクトルを返し、Three.jsは鏡映面上へ低彩度・半透明の短い有向矢印を表示する。Halite op53で`[-2.81, 2.81, 0] Å`の一致と実描画を確認した。
+
+## 2026-07-02: Three.js統合（未コミット差分）のバグ・非効率レビュー（Claude）
+
+対象は未コミットの Three.js 表示層＋サーバ結合部（`crystal_viewer/web/three_view.js`、`crystal_viewer/web/animation_path.js`、`tools/view_json_server.py` の新エンドポイント、`crystal_viewer/web/browser_ui.py` の追加分）。
+
+前提: 経路計算の移植ロジックは正常。`evaluatePath()`（`animation_path.js`）は Python 参照 `evaluate_path()` と忠実に一致し、ゴールデンJSONパリティテストは node/unittest 両方でパス（`tests/js/animation_path.test.mjs` ✓、`tests/test_animation_api.py` 10件 ✓）。以下は表示層ライフサイクルと結合部の指摘。
+
+### バグ（動作の不整合）
+
+1. **アニメ完了後に Three.js だけ勝手にリプレイ／PyVistaと再生がずれる** — `three_view.js` `syncState`（L232-238）と `updateAnimation`（L413-417）。`updateAnimation` は完了時に `this.playing=false` にするが、サーバの `shared_state["playing"]` は PyVista の tick 経由で遅れて false に書き戻される（`pyvista_controller.py` L445-453）。1秒ポーリングがその窓で `state.playing=true` を読むと `if (this.playing) { if (this.animationProgress >= 1) this.resetAnimation(); }` が発火し、Three.js だけ最初から再生し直す。固定 `BASE_ANIMATION_SECONDS=3.15s` と PyVista のフレーム数ベースの所要時間がずれると顕在化する。→ サーバ側完了を明示同期するか、`playing && progress>=1` での自動リセットをやめる。
+
+2. **`syncState` に再入ガードがなく、fetch競合で表示と経路が食い違う** — `three_view.js` L209-253。`syncState` は①初期化、②1秒ポーリング、③`symmetry-state-update` イベントの3経路から非同期に呼ばれ、排他していない。操作を素早く切替えると op A/op B の `loadAnimationPaths` が並走し、解決順によって `this.animationPaths` が A のまま `this.state` が B になり、別操作のアニメを再生し得る。→ 世代トークン（最新リクエストIDのみ採用）で防御する。
+
+### 非効率
+
+3. **毎フレームで全 InstancedMesh の `computeBoundingSphere()`＋オブジェクト再確保** — `three_view.js` `markInstanceMatricesDirty`（L436-442）と `setAtomPosition`（L425-434）。境界球計算は全インスタンス走査（O(原子数)）で毎フレーム実行され、原子ごとに `Matrix4/Vector3/Quaternion` を新規生成する。→ `mesh.frustumCulled=false` にして境界球計算をやめ、テンポラリ行列を使い回す。
+
+4. **全 `send_json` を毎回 `to_jsonable` で再走査** — `view_json_server.py` L966-969。新エンドポイント（`/api/animation_path`・`/api/symmetry_elements`・`/api/render_data`）は内部で既にシリアライズ済みで、`/api/operations`（192操作構造で大）や `/api/state` はポーリングで頻繁に叩かれるため、毎回ペイロード全体を再帰 walk するのは冗長。→ numpy が入る箇所だけで変換する。
+
+### 軽微・堅牢性
+
+5. **ベンダ静的配信にファイル存在チェックがなく 500＋トレースバック** — `view_json_server.py` L448-490。`node_modules/three` 未インストール時に `read_bytes()` が `FileNotFoundError` を送出し生のスタックが露出する（`package.json` は追加されたが `node_modules` は生成物）。→ 404 か「`npm install` が必要」メッセージへ。
+6. **`OrbitControls.js` 配信ルートがデッドコード** — `view_json_server.py` L483。HTML/`three_view.js` は `TrackballControls` のみ import しており未使用。
+
+### Claudeレビューへの対応
+
+- 完了後の自動リプレイ: サーバーの`playing=true`が残っていても完了済みprogressをresetしないラッチへ変更。新しいfalse→true開始時だけresetする。
+- 状態/fetch競合: `syncState`をPromise queueで直列化し、経路・要素fetchにも世代番号を付けた。
+- 毎フレーム負荷: 原子更新用のMatrix/Vector/Quaternionを再利用し、InstancedMeshを`frustumCulled=false`として`computeBoundingSphere()`を毎フレーム呼ばない。
+- JSON変換: `json.dumps(..., default=to_jsonable)`へ変更し、JSON互換の値まで事前に再帰walkしない。
+- 静的配信: ファイル欠損を404/503で処理し、Three.js未導入時は`npm ci`手順を返す。
+- デッドコード: 未使用のOrbitControls配信ルートを削除した。
+- op77/op88の表示ずれ: 対称要素はcenterセルへ移されていた一方、Three.js原子・単位胞だけcornerセルのままだったことが原因。`/api/render_data`からPython生成のdisplay atom instancesとdisplay unit cellを返してPyVistaと統一した。
+- Three.jsの開始位置マーカー: 再生開始時にprimary imageの開始位置へ黄色の半透明球を置き、Stop・完了後も保持し、Reset・操作変更・構造変更で削除する。PyVistaの既存挙動と統一する。
+
 ## 2026-07-01: 初学者モードのUI方針
 
 - ブラウザ操作盤は `Beginner` をデフォルトとし、`Advanced` で従来の全機能を表示する。

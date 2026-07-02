@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+
+from crystal_viewer.json_export import to_jsonable
+from crystal_viewer.source_kinds import SOURCE_KIND_MOLECULE, normalize_source_kind
+from crystal_viewer.viewer.animation import operation_speed_multiplier
+from crystal_viewer.viewer.animation_context import animation_paths, display_equivalent_operation_context
+from crystal_viewer.viewer.operation_lookup import operation_by_index, selected_mapping
+from crystal_viewer.viewer.symmetry_elements import display_symmetry_elements, glide_translation_cart
+
+
+ANIMATION_PATH_SCHEMA_VERSION = 1
+ANIMATION_COORDINATE_SPACE = "cartesian"
+CRYSTAL_PERIODIC_IMAGE_POLICY = "transform_with_source"
+MOLECULE_PERIODIC_IMAGE_POLICY = "not_applicable"
+
+
+def animation_path_response(
+    render_data: dict,
+    atom_mappings: dict | None,
+    operation_index: int,
+    *,
+    scope: str = "displayed",
+    selected_atoms: tuple[int, ...] = (),
+    improper_mode: str = "auto",
+    display_mode: str = "source",
+    cell_origin_mode: str = "center",
+) -> dict[str, Any]:
+    operation = operation_by_index(render_data.get("operations", []), operation_index)
+    if operation is None:
+        raise ValueError(f"Operation index not found: {operation_index}")
+    mapping = selected_mapping(atom_mappings, operation_index)
+    if mapping is None:
+        raise ValueError(f"Atom mapping not found for operation: {operation_index}")
+
+    source_kind = normalize_source_kind(
+        str((render_data.get("metadata") or {}).get("mode") or "crystal")
+    )
+    animation_scope, effective_selected_atoms, representative_atom, unit_cell_only = _scope_options(
+        render_data,
+        scope,
+        selected_atoms,
+    )
+    paths = animation_paths(
+        render_data,
+        operation,
+        mapping,
+        animation_scope=animation_scope,
+        representative_atom=representative_atom,
+        selected_atoms=effective_selected_atoms,
+        improper_mode=improper_mode,
+        display_mode=display_mode,
+        cell_origin_mode=cell_origin_mode,
+    )
+    entries_by_source = {
+        int(entry["source_atom"]): entry
+        for entry in mapping.get("entries", [])
+    }
+    items = []
+    for source_atom, path in sorted(paths.items()):
+        public_path = serialize_animation_path(path)
+        if unit_cell_only:
+            public_path["unit_cell_only"] = True
+        entry = entries_by_source.get(int(source_atom), {})
+        items.append(
+            {
+                "source_atom": int(source_atom),
+                "target_atom": entry.get("target_atom"),
+                "path": public_path,
+            }
+        )
+
+    return {
+        "schema_version": ANIMATION_PATH_SCHEMA_VERSION,
+        "source_kind": source_kind,
+        "coordinate_space": ANIMATION_COORDINATE_SPACE,
+        "periodic_image_policy": (
+            MOLECULE_PERIODIC_IMAGE_POLICY
+            if source_kind == SOURCE_KIND_MOLECULE
+            else CRYSTAL_PERIODIC_IMAGE_POLICY
+        ),
+        "operation_index": int(operation_index),
+        "playback_speed_multiplier": operation_speed_multiplier(operation),
+        "scope": scope,
+        "paths": items,
+    }
+
+
+def serialize_animation_path(path: dict) -> dict[str, Any]:
+    """Convert an internal NumPy/radian path to the public JSON schema."""
+    result = {}
+    for key, value in path.items():
+        if key == "angle":
+            result["angle_deg"] = float(np.rad2deg(value))
+        elif key == "segments":
+            result[key] = [serialize_animation_path(segment) for segment in value]
+        else:
+            result[key] = to_jsonable(value)
+    return result
+
+
+def symmetry_elements_response(
+    render_data: dict,
+    atom_mappings: dict | None,
+    operation_index: int,
+    *,
+    improper_mode: str = "auto",
+    display_mode: str = "source",
+    cell_origin_mode: str = "center",
+) -> dict[str, Any]:
+    operation = operation_by_index(render_data.get("operations", []), operation_index)
+    if operation is None:
+        raise ValueError(f"Operation index not found: {operation_index}")
+    axes, planes, centers = display_symmetry_elements(
+        render_data,
+        atom_mappings,
+        operation_index,
+        None,
+        improper_mode=improper_mode,
+    )
+    mapping = selected_mapping(atom_mappings, operation_index)
+    glide_translation = (
+        glide_translation_cart(render_data, operation, planes[0], mapping=mapping)
+        if planes and "glide" in str(operation.get("kind", ""))
+        else None
+    )
+    _, axis, plane, center = display_equivalent_operation_context(
+        render_data,
+        operation,
+        axes[0] if axes else None,
+        planes[0] if planes else None,
+        centers[0] if centers else None,
+        display_mode,
+        cell_origin_mode,
+    )
+    return {
+        "schema_version": ANIMATION_PATH_SCHEMA_VERSION,
+        "coordinate_space": ANIMATION_COORDINATE_SPACE,
+        "operation_index": int(operation_index),
+        "axes": to_jsonable([axis] if axis is not None else []),
+        "planes": to_jsonable([plane] if plane is not None else []),
+        "centers": to_jsonable([center] if center is not None else []),
+        "glide_translation_cart": to_jsonable(glide_translation),
+    }
+
+
+def _scope_options(
+    render_data: dict,
+    scope: str,
+    selected_atoms: tuple[int, ...],
+) -> tuple[str, tuple[int, ...], int | None, bool]:
+    atom_indices = tuple(int(atom["index"]) for atom in render_data.get("atoms", []))
+    effective_selected_atoms = tuple(int(index) for index in selected_atoms)
+    animation_scope = scope
+    unit_cell_only = scope in ("selected", "unit_cell", "representative")
+    if scope in ("displayed", "unit_cell"):
+        animation_scope = "selected"
+        effective_selected_atoms = atom_indices
+    representative_atom = (
+        effective_selected_atoms[0]
+        if scope == "selected" and effective_selected_atoms
+        else None
+    )
+    return animation_scope, effective_selected_atoms, representative_atom, unit_cell_only

@@ -119,6 +119,16 @@ Codex への申し送り。以下は Claude による回答。実装判断の材
 - JS(表示と入力): 描画・カメラ・Projection・Cell Range周期像展開・`evaluate_path`相当の補間再生・マウス選択（返すのは選択index）。
 - 鉄則: JSに行列意味論（frac/cart, row/column, 掛け順）を持ち込ませない。**本プロジェクトはrow-vector規約**（`x_cart = x_frac @ L`, `matrix_cart = L.T @ W @ (L.T)^-1`）だが、cart空間の適用は列ベクトル左掛け（`animation_path.py` の `W @ start + t`）。この2つを混同しないよう、JSへは「補間済み前提の点」だけ渡す。
 
+### 結晶・分子を共通に扱う統合契約
+
+- 結晶用と分子用に別々の描画・経路スキーマを作らず、共通スキーマに `source_kind: "crystal" | "molecule"` を必須判別子として持たせる。
+- ブラウザは `unit_cell` の有無などから種別を推測せず、必ず `source_kind` で機能を切り替える。
+- 原子の描画座標、対称操作、AtomMapping、アニメーション経路は両方ともCartesian座標で共通化する。
+- 結晶固有の `unit_cell`、fractional座標、周期像関連情報は、分子ではnullまたは利用不可として扱う。JSでfractional/Cartesian変換を補完しない。
+- 結晶の周期像は `periodic_image_policy: "transform_with_source"` とし、表示位置を開始点として同じ操作を適用する。分子は `"not_applicable"` とする。
+- 分子の回映・回反と結晶の回反で経路表現が異なる場合も、Python側が決定した `rotoreflection` / `rotoinversion` のタグをJSがそのまま補間する。
+- 将来、分子固有データを追加する場合も共通フィールドの意味を変更せず、optionalフィールドまたは新しいタグとして拡張し、`schema_version`で管理する。
+
 ### 経路スキーマ（拡張しやすい形）
 
 既存dictを踏襲しつつ以下を追加:

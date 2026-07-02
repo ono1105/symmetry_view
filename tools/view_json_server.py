@@ -11,7 +11,7 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 try:
     import _bootstrap  # noqa: F401
@@ -27,7 +27,7 @@ from crystal_viewer.export_pipeline import (
     export_analysis_to_json,
     slug_from_path,
 )
-from crystal_viewer.json_export import EXPORT_SCHEMA_VERSION
+from crystal_viewer.json_export import EXPORT_SCHEMA_VERSION, to_jsonable
 from crystal_viewer.source_kinds import (
     SOURCE_KIND_CRYSTAL,
     SOURCE_KIND_EMPTY,
@@ -39,7 +39,9 @@ from crystal_viewer.symmetry_operations import (
     find_matching_operation_index,
     find_operation_sequence_bfs,
 )
-from crystal_viewer.viewer.atom_style import atom_color
+from crystal_viewer.viewer.atom_style import atom_color, display_atom_radius
+from crystal_viewer.viewer.display_atoms import display_atom_instances, display_fractional_bounds
+from crystal_viewer.viewer.animation_api import animation_path_response, symmetry_elements_response
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
     check_custom_operation,
@@ -168,6 +170,64 @@ def atom_api_items(atoms: list[dict]) -> list[dict]:
         }
         for atom in atoms
     ]
+
+
+def atom_render_style_items(render_data: dict) -> list[dict]:
+    return [
+        {
+            "index": int(atom["index"]),
+            "color": atom_color(atom),
+            "radius": display_atom_radius(atom, render_data),
+        }
+        for atom in render_data.get("atoms", [])
+    ]
+
+
+def display_atom_api_items(
+    render_data: dict,
+    *,
+    display_mode: str,
+    cell_origin_mode: str,
+) -> list[dict]:
+    items = []
+    for instance_id, item in enumerate(
+        display_atom_instances(
+            render_data,
+            display_mode=display_mode,
+            cell_origin_mode=cell_origin_mode,
+        )
+    ):
+        atom = item["atom"]
+        items.append(
+            {
+                "instance_id": instance_id,
+                "source_atom": int(atom["index"]),
+                "element": atom["element"],
+                "atomic_number": int(atom["atomic_number"]),
+                "cart": item["cart"],
+                "display_shift_cart": item["display_shift_cart"],
+                "is_primary_image": bool(item["is_primary_image"]),
+            }
+        )
+    return items
+
+
+def display_unit_cell_api_item(
+    render_data: dict,
+    *,
+    display_mode: str,
+    cell_origin_mode: str,
+) -> dict | None:
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is None:
+        return None
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    lower, _ = display_fractional_bounds(display_mode, cell_origin_mode)
+    shift = np.asarray([lower, lower, lower], dtype=float) @ lattice
+    return {
+        "vertices_cart": np.asarray(unit_cell["vertices_cart"], dtype=float) + shift,
+        "edges": unit_cell["edges"],
+    }
 
 
 def atom_motion_api_items(render_data: dict, atom_mappings: dict | None, operation_index: int | None) -> list[dict]:
@@ -431,9 +491,37 @@ def make_handler(
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            path = urlparse(self.path).path
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
             if path == "/":
                 self.send_bytes(HTML.encode("utf-8"), content_type="text/html; charset=utf-8")
+                return
+            if path == "/static/animation_path.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "animation_path.js"
+                self.send_javascript_file(module_path)
+                return
+            if path == "/static/three_view.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "three_view.js"
+                self.send_javascript_file(module_path)
+                return
+            if path == "/vendor/three/three.module.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "node_modules" / "three" / "build" / "three.module.js"
+                self.send_javascript_file(module_path, vendor=True)
+                return
+            if path == "/vendor/three/three.core.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "node_modules" / "three" / "build" / "three.core.js"
+                self.send_javascript_file(module_path, vendor=True)
+                return
+            if path == "/vendor/three/addons/controls/TrackballControls.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "node_modules" / "three" / "examples" / "jsm" / "controls" / "TrackballControls.js"
+                self.send_javascript_file(
+                    module_path,
+                    vendor=True,
+                    transform=lambda text: text.replace(
+                        "from 'three';",
+                        "from '/vendor/three/three.module.js';",
+                    ),
+                )
                 return
             if path == "/api/operations":
                 with state_lock:
@@ -449,6 +537,90 @@ def make_handler(
                 with state_lock:
                     atoms = list(session.atoms)
                 body = {"atoms": atom_api_items(atoms)}
+                self.send_json(body)
+                return
+            if path == "/api/render_data":
+                with state_lock:
+                    render_data = session.render_data
+                    schema_version = session.payload.get("schema_version")
+                    source_kind = session.source_kind
+                    display_mode = str(shared_state.get("display_mode", "source"))
+                    cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                body = {
+                    "schema_version": schema_version,
+                    "source_kind": source_kind,
+                    "coordinate_space": "cartesian",
+                    "render_data": render_data,
+                    "display_mode": display_mode,
+                    "cell_origin_mode": cell_origin_mode,
+                    "display_atoms": display_atom_api_items(
+                        render_data,
+                        display_mode=display_mode,
+                        cell_origin_mode=cell_origin_mode,
+                    ),
+                    "display_unit_cell": display_unit_cell_api_item(
+                        render_data,
+                        display_mode=display_mode,
+                        cell_origin_mode=cell_origin_mode,
+                    ),
+                    "atom_styles": atom_render_style_items(render_data),
+                }
+                self.send_json(body)
+                return
+            if path == "/api/animation_path":
+                query = parse_qs(parsed_url.query)
+                try:
+                    with state_lock:
+                        operation_index = int(
+                            query.get("operation_index", [shared_state.get("operation_index", 0)])[0]
+                        )
+                        render_data = session.render_data
+                        atom_mappings = session.atom_mappings
+                        scope = str(shared_state.get("scope", "displayed"))
+                        selected_atoms = tuple(
+                            int(index) for index in shared_state.get("selected_atoms", [])
+                        )
+                        improper_mode = str(shared_state.get("improper_mode", "auto"))
+                        display_mode = str(shared_state.get("display_mode", "source"))
+                        cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                    body = animation_path_response(
+                        render_data,
+                        atom_mappings,
+                        operation_index,
+                        scope=scope,
+                        selected_atoms=selected_atoms,
+                        improper_mode=improper_mode,
+                        display_mode=display_mode,
+                        cell_origin_mode=cell_origin_mode,
+                    )
+                except (TypeError, ValueError) as exc:
+                    self.send_json_error(str(exc), status=400)
+                    return
+                self.send_json(body)
+                return
+            if path == "/api/symmetry_elements":
+                query = parse_qs(parsed_url.query)
+                try:
+                    with state_lock:
+                        operation_index = int(
+                            query.get("operation_index", [shared_state.get("operation_index", 0)])[0]
+                        )
+                        render_data = session.render_data
+                        atom_mappings = session.atom_mappings
+                        improper_mode = str(shared_state.get("improper_mode", "auto"))
+                        display_mode = str(shared_state.get("display_mode", "source"))
+                        cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                    body = symmetry_elements_response(
+                        render_data,
+                        atom_mappings,
+                        operation_index,
+                        improper_mode=improper_mode,
+                        display_mode=display_mode,
+                        cell_origin_mode=cell_origin_mode,
+                    )
+                except (TypeError, ValueError) as exc:
+                    self.send_json_error(str(exc), status=400)
+                    return
                 self.send_json(body)
                 return
             if path == "/api/atom_motion":
@@ -835,7 +1007,25 @@ def make_handler(
             threading.Thread(target=worker, daemon=True).start()
 
         def send_json(self, body: dict) -> None:
-            self.send_bytes(json.dumps(body).encode("utf-8"), content_type="application/json")
+            self.send_bytes(
+                json.dumps(body, default=to_jsonable).encode("utf-8"),
+                content_type="application/json",
+            )
+
+        def send_javascript_file(self, path: Path, *, vendor: bool = False, transform=None) -> None:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                message = (
+                    "Three.js dependency is missing; run `cd crystal_viewer/web && npm ci`."
+                    if vendor
+                    else f"JavaScript asset not found: {path.name}"
+                )
+                self.send_json_error(message, status=503 if vendor else 404)
+                return
+            if transform is not None:
+                text = transform(text)
+            self.send_bytes(text.encode("utf-8"), content_type="text/javascript; charset=utf-8")
 
         def send_json_error(self, message: str, *, status: int = 500) -> None:
             body = json.dumps({"ok": False, "error": message}).encode("utf-8")

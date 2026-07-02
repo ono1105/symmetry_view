@@ -5,17 +5,110 @@ import unittest
 from pathlib import Path
 
 from crystal_viewer.json_export import EXPORT_SCHEMA_VERSION
+from crystal_viewer.viewer.animation_api import symmetry_elements_response
 from tools.view_json_server import (
     atom_motion_api_items,
+    atom_render_style_items,
     cached_export_json_path,
     compose_operation_indices,
     compose_operation_sequence_items,
     example_catalog,
+    display_atom_api_items,
+    display_unit_cell_api_item,
     export_cell_setting_json_worker,
     find_operation_sequence_for_target,
     replace_shared_state_for_load,
     resolve_example_path,
 )
+
+
+class AtomRenderStyleItemsTest(unittest.TestCase):
+    def test_provides_index_color_and_positive_radius_for_molecule(self):
+        render_data = {
+            "atoms": [
+                {"index": 4, "element": "O", "atomic_number": 8, "cart": [0.0, 0.0, 0.0]},
+            ],
+            "unit_cell": None,
+        }
+
+        result = atom_render_style_items(render_data)
+
+        self.assertEqual(result[0]["index"], 4)
+        self.assertRegex(result[0]["color"], r"^#[0-9a-f]{6}$")
+        self.assertGreater(result[0]["radius"], 0.0)
+
+    def test_scales_crystal_radius_against_shortest_lattice_vector(self):
+        render_data = {
+            "atoms": [
+                {"index": 0, "element": "Cs", "atomic_number": 55, "cart": [0.0, 0.0, 0.0]},
+            ],
+            "unit_cell": {
+                "lattice": [[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0]],
+            },
+        }
+
+        result = atom_render_style_items(render_data)
+
+        self.assertLessEqual(result[0]["radius"], 0.24 + 1e-12)
+
+
+class DisplayRenderApiItemsTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+        cls.render_data = cls.payload["render_data"]
+
+    def test_centered_display_atoms_use_centered_periodic_images(self):
+        items = display_atom_api_items(
+            self.render_data,
+            display_mode="source",
+            cell_origin_mode="center",
+        )
+
+        self.assertEqual(len(items), 8)
+        for item in items:
+            self.assertTrue(all(-2.81 - 1e-8 <= value < 2.81 + 1e-8 for value in item["cart"]))
+
+    def test_centered_display_unit_cell_matches_pyvista_bounds(self):
+        cell = display_unit_cell_api_item(
+            self.render_data,
+            display_mode="source",
+            cell_origin_mode="center",
+        )
+
+        coordinates = [value for vertex in cell["vertices_cart"] for value in vertex]
+        self.assertAlmostEqual(min(coordinates), -2.81)
+        self.assertAlmostEqual(max(coordinates), 2.81)
+
+    def test_op77_and_op88_elements_are_inside_centered_display_cell(self):
+        cell = display_unit_cell_api_item(
+            self.render_data,
+            display_mode="source",
+            cell_origin_mode="center",
+        )
+        vertices = cell["vertices_cart"]
+        lower = [min(vertex[axis] for vertex in vertices) for axis in range(3)]
+        upper = [max(vertex[axis] for vertex in vertices) for axis in range(3)]
+
+        for operation_index in (77, 88):
+            with self.subTest(operation_index=operation_index):
+                elements = symmetry_elements_response(
+                    self.render_data,
+                    self.payload["atom_mappings"],
+                    operation_index,
+                    display_mode="source",
+                    cell_origin_mode="center",
+                )
+                points = [
+                    element["point_cart"]
+                    for key in ("axes", "centers")
+                    for element in elements[key]
+                ]
+                self.assertTrue(points)
+                for point in points:
+                    self.assertTrue(
+                        all(lower[axis] - 1e-8 <= point[axis] <= upper[axis] + 1e-8 for axis in range(3))
+                    )
 
 
 class AtomMotionApiItemsTest(unittest.TestCase):

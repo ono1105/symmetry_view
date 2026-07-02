@@ -142,6 +142,12 @@ HTML = """<!doctype html>
       background: #7dd3fc;
       color: #081017;
     }
+    .operation-number {
+      display: inline-block;
+      margin-right: 0.35em;
+      color: inherit;
+      font: inherit;
+    }
     button {
       border: 0;
       border-radius: 6px;
@@ -308,6 +314,40 @@ HTML = """<!doctype html>
     }
     #start-panel, #load-error-panel, #structure-info-panel {
       margin-bottom: 16px;
+    }
+    #three-view-panel {
+      margin-bottom: 16px;
+    }
+    .three-view-shell {
+      position: relative;
+      width: 100%;
+      min-height: 360px;
+      overflow: hidden;
+      border: 1px solid #29313c;
+      border-radius: 7px;
+      background: #0b0f14;
+    }
+    .three-view-shell canvas {
+      display: block;
+      width: 100%;
+      height: clamp(360px, 52vh, 620px);
+      cursor: grab;
+      touch-action: none;
+    }
+    .three-view-shell canvas:active {
+      cursor: grabbing;
+    }
+    .three-view-status {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      max-width: calc(100% - 20px);
+      padding: 5px 8px;
+      border-radius: 5px;
+      background: rgba(11, 15, 20, 0.78);
+      color: #aeb8c5;
+      font-size: 11px;
+      pointer-events: none;
     }
     .side-stack {
       display: grid;
@@ -717,6 +757,14 @@ HTML = """<!doctype html>
   <section class="panel" id="structure-info-panel" hidden>
     <h2 class="section-title" id="structure-info-title">Structure Info</h2>
     <div class="structure-summary" id="structure-info"></div>
+  </section>
+  <section class="panel" id="three-view-panel">
+    <h2 class="section-title">Three.js 3D View <span class="hint">(comparison preview)</span></h2>
+    <div class="three-view-shell" id="three-view">
+      <canvas aria-label="Interactive three-dimensional structure view"></canvas>
+      <div class="three-view-status" data-three-status>Loading Three.js view…</div>
+    </div>
+    <p class="hint">Left-drag to grab and rotate the structure, scroll to zoom, and right-drag to pan. PyVista remains the reference view.</p>
   </section>
   <div class="grid" id="workspace">
     <div class="left-stack">
@@ -1330,6 +1378,13 @@ function renderOperations() {
     row.setAttribute("role", "option");
     row.setAttribute("aria-selected", operation.index === state.operation_index ? "true" : "false");
     if (operation.index === state.operation_index) row.classList.add("selected");
+    if (experienceMode === "beginner") {
+      const operationNumber = document.createElement("span");
+      operationNumber.className = "operation-number";
+      operationNumber.textContent = `op ${operation.index}:`;
+      operationNumber.title = "Stable operation index (independent of sort order)";
+      row.appendChild(operationNumber);
+    }
     row.appendChild(renderHtml(text));
     row.addEventListener("click", () => {
       postState({operation_index: operation.index, playing: false, reset: true});
@@ -2424,6 +2479,9 @@ async function postState(update) {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(update),
   });
+  window.dispatchEvent(new CustomEvent("symmetry-state-update", {
+    detail: {state: {...state}, update: {...update}},
+  }));
   await refreshAtomMotion();
   syncSpeedButtons();
   syncBoundaryButtons();
@@ -3328,6 +3386,22 @@ async function boot() {
 boot().catch(error => {
   document.getElementById("status").textContent = `Boot error: ${error}`;
 });
+</script>
+<script type="module">
+  const threeStatus = document.querySelector("[data-three-status]");
+  async function loadThreeView() {
+    if (threeStatus) threeStatus.textContent = "Loading Three.js core…";
+    await import("/vendor/three/three.module.js");
+    if (threeStatus) threeStatus.textContent = "Loading Three.js controls…";
+    await import("/vendor/three/addons/controls/TrackballControls.js");
+    if (threeStatus) threeStatus.textContent = "Loading Three.js view…";
+    await import("/static/three_view.js");
+  }
+  loadThreeView().catch(error => {
+    const stage = threeStatus ? threeStatus.textContent : "Three.js module";
+    if (threeStatus) threeStatus.textContent = `${stage} error: ${error.message}`;
+    console.error("Three.js module load failed", error);
+  });
 </script>
 </body>
 </html>

@@ -126,6 +126,68 @@ custom operation check and animation
 
 `tools/view_json_server.py` should stay a thin entry point and HTTP API. Shared viewer code belongs under `crystal_viewer/viewer/`; browser-facing UI assets belong under `crystal_viewer/web/`.
 
+### Browser rendering API
+
+The browser renderer consumes these read-only endpoints:
+
+```text
+GET /api/render_data
+GET /api/animation_path?operation_index=<index>
+```
+
+Animation path responses use their own `schema_version`, independently of the
+analysis export schema. Version 1 declares `source_kind`,
+`coordinate_space: "cartesian"`, and uses `angle_deg` for all public angles.
+For crystals, `periodic_image_policy` is `"transform_with_source"`: a periodic
+display image is evaluated from its displayed start position with the same
+operation, rather than being held fixed or retaining a constant Cartesian
+offset during a rotation. For molecules it is `"not_applicable"`.
+
+Crystal and molecule responses share one schema. Consumers must branch on
+`source_kind: "crystal" | "molecule"`, not infer the source from optional
+fields. Crystal-only data such as `unit_cell`, fractional coordinates, and
+periodic-image controls must be treated as nullable or unavailable for a
+molecule. Atom Cartesian coordinates, symmetry operations, atom mappings, and
+animation path types remain common to both modes.
+
+The renderer-independent JavaScript reference interpolator is served from
+`/static/animation_path.js`. Its parity test uses the same golden JSON as the
+Python reference implementation:
+
+```bash
+node --test tests/js/animation_path.test.mjs
+```
+
+The current browser page also contains a Three.js comparison view. It
+renders Cartesian atom positions with `InstancedMesh`, renders a unit-cell line
+frame only for crystal input, and supports orbit, zoom, pan, and projection
+switching. Left-drag uses unrestricted trackball rotation, including roll,
+rather than a camera orbit constrained to a fixed up-axis. Standard
+operation animation uses `/api/animation_path` and the JavaScript reference
+interpolator. The selected operation's Python-resolved axis, plane, and center
+come from `/api/symmetry_elements` and are rendered alongside the animation.
+For glide operations, the same response includes the Python-resolved Cartesian
+glide translation used by the animation; a yellow arrow on the plane shows its
+direction.
+When playback starts, translucent yellow markers remain at the primary atoms'
+starting positions. They persist after Stop or completion and are removed by
+Reset, operation changes, or structure changes.
+PyVista remains the reference renderer; periodic images, wrap
+boundary behavior, custom-operation animation, and picking have not yet moved
+to Three.js.
+
+Install the pinned browser dependency after cloning or changing the lockfile:
+
+```bash
+cd crystal_viewer/web
+npm ci
+```
+
+Restart `tools/view_json_server.py` after changing browser HTML, JavaScript, or
+static asset routes. The page HTML is constructed when the Python process
+imports `browser_ui.py`; an already-running server does not pick up those
+changes.
+
 ## CLI Viewers
 
 The older JSON-only viewers remain useful for debugging.

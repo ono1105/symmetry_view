@@ -27,6 +27,10 @@
 
 Pythonを計算の唯一の真実とし、fractional/Cartesian変換、回転符号、行列規約をJavaScript側で再解釈しないこと。
 
+結晶と分子は別スキーマに分けず、`source_kind`を必須判別子とする共通JSON契約で扱う。描画座標とアニメーション経路は両方Cartesianで統一し、`unit_cell`、fractional座標、周期像は結晶固有のoptional情報とする。周期像ポリシーは結晶が`transform_with_source`、分子が`not_applicable`。
+
+追記: 現行ブラウザUI内にThree.js比較ビューを追加した。Cartesian原子座標、Python側の原子色・半径、表示セル、対称要素、標準操作アニメーション、開始位置マーカーを実装し、自由回転・ズーム・パン・投影切替に対応する。PyVistaは維持し、wrap境界、custom operation、マウス選択は未移植。
+
 ## 作業状態
 
 変更は未push。`gh`は一時CLIを用意できたがGitHub認証がないため、公開には`gh auth login`が必要。
