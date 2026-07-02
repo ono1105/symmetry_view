@@ -6,10 +6,12 @@ import numpy as np
 
 from crystal_viewer.viewer.animation_api import (
     ANIMATION_PATH_SCHEMA_VERSION,
+    animation_boundary_context,
     animation_path_response,
     serialize_animation_path,
     symmetry_elements_response,
 )
+from crystal_viewer.viewer.animation import apply_boundary_context
 from crystal_viewer.viewer.animation_path import evaluate_path
 
 
@@ -90,6 +92,7 @@ class AnimationPathResponseTest(unittest.TestCase):
         self.assertEqual(result["periodic_image_policy"], "not_applicable")
         self.assertEqual(result["operation_index"], 3)
         self.assertEqual(result["playback_speed_multiplier"], 1.0)
+        self.assertEqual(result["boundary"], {"mode": "continuous"})
         self.assertEqual(result["paths"][0]["source_atom"], 0)
         self.assertEqual(result["paths"][0]["target_atom"], 1)
         self.assertAlmostEqual(result["paths"][0]["path"]["angle_deg"], 90.0)
@@ -133,6 +136,50 @@ class AnimationPathResponseTest(unittest.TestCase):
         self.assertEqual(result["source_kind"], "crystal")
         self.assertEqual(result["periodic_image_policy"], "transform_with_source")
 
+    def test_wrap_context_is_cartesian_and_python_generated(self):
+        render_data = {
+            "unit_cell": {"lattice": [[2.0, 0.0, 0.0], [1.0, 2.0, 0.0], [0.0, 0.0, 3.0]]}
+        }
+
+        result = animation_boundary_context(
+            render_data,
+            animation_boundary_mode="wrap",
+            cell_origin_mode="corner",
+        )
+
+        self.assertEqual(result["mode"], "wrap")
+        self.assertEqual(result["coordinate_space"], "cartesian")
+        self.assertEqual(result["cell_origin_mode"], "corner")
+        np.testing.assert_allclose(
+            np.asarray(result["cart_to_cell"]) @ np.asarray(result["cell_to_cart"]),
+            np.eye(3),
+            atol=1e-12,
+        )
+
+    def test_molecule_cannot_enable_periodic_wrap(self):
+        self.assertEqual(
+            animation_boundary_context(
+                {"unit_cell": None},
+                animation_boundary_mode="wrap",
+                cell_origin_mode="center",
+            ),
+            {"mode": "continuous"},
+        )
+
+    def test_displayed_and_unit_cell_scopes_encode_periodic_copy_policy(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+        displayed = animation_path_response(
+            payload["render_data"], payload["atom_mappings"], 2, scope="displayed"
+        )
+        unit_cell = animation_path_response(
+            payload["render_data"], payload["atom_mappings"], 2, scope="unit_cell"
+        )
+
+        self.assertTrue(displayed["paths"])
+        self.assertTrue(unit_cell["paths"])
+        self.assertTrue(all(not item["path"].get("unit_cell_only") for item in displayed["paths"]))
+        self.assertTrue(all(item["path"].get("unit_cell_only") is True for item in unit_cell["paths"]))
+
     def test_rejects_unknown_operation(self):
         with self.assertRaisesRegex(ValueError, "Operation index not found"):
             animation_path_response(
@@ -156,6 +203,26 @@ class AnimationPathGoldenTest(unittest.TestCase):
                     np.testing.assert_allclose(
                         evaluate_path(path, sample["s"]),
                         sample["position"],
+                        atol=1e-6,
+                    )
+
+    def test_python_wrap_matches_boundary_golden_samples(self):
+        fixture_path = Path(__file__).parent / "fixtures" / "boundary_wrap_golden.json"
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(fixture["coordinate_space"], "cartesian")
+        for case in fixture["cases"]:
+            context = case["context"]
+            python_context = (
+                np.asarray(context["cell_to_cart"], dtype=float),
+                np.asarray(context["cart_to_cell"], dtype=float),
+                context["cell_origin_mode"],
+            )
+            for sample in case["samples"]:
+                with self.subTest(case=case["name"], position=sample["position"]):
+                    np.testing.assert_allclose(
+                        apply_boundary_context(np.asarray(sample["position"]), python_context),
+                        sample["wrapped"],
                         atol=1e-6,
                     )
 

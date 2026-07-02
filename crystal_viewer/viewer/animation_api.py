@@ -28,6 +28,7 @@ def animation_path_response(
     improper_mode: str = "auto",
     display_mode: str = "source",
     cell_origin_mode: str = "center",
+    animation_boundary_mode: str = "continuous",
 ) -> dict[str, Any]:
     operation = operation_by_index(render_data.get("operations", []), operation_index)
     if operation is None:
@@ -84,6 +85,11 @@ def animation_path_response(
         ),
         "operation_index": int(operation_index),
         "playback_speed_multiplier": operation_speed_multiplier(operation),
+        "boundary": animation_boundary_context(
+            render_data,
+            animation_boundary_mode=animation_boundary_mode,
+            cell_origin_mode=cell_origin_mode,
+        ),
         "scope": scope,
         "paths": items,
     }
@@ -100,6 +106,30 @@ def serialize_animation_path(path: dict) -> dict[str, Any]:
         else:
             result[key] = to_jsonable(value)
     return result
+
+
+def animation_boundary_context(
+    render_data: dict,
+    *,
+    animation_boundary_mode: str,
+    cell_origin_mode: str,
+) -> dict[str, Any]:
+    unit_cell = render_data.get("unit_cell")
+    if animation_boundary_mode != "wrap" or unit_cell is None:
+        return {"mode": "continuous"}
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    try:
+        inverse_lattice = np.linalg.inv(lattice)
+    except np.linalg.LinAlgError:
+        return {"mode": "continuous"}
+    return {
+        "mode": "wrap",
+        "coordinate_space": ANIMATION_COORDINATE_SPACE,
+        "cell_origin_mode": "corner" if cell_origin_mode == "corner" else "center",
+        "cart_to_cell": to_jsonable(inverse_lattice),
+        "cell_to_cart": to_jsonable(lattice),
+        "boundary_epsilon": 1e-9,
+    }
 
 
 def symmetry_elements_response(

@@ -151,8 +151,8 @@ molecule. Atom Cartesian coordinates, symmetry operations, atom mappings, and
 animation path types remain common to both modes.
 
 The renderer-independent JavaScript reference interpolator is served from
-`/static/animation_path.js`. Its parity test uses the same golden JSON as the
-Python reference implementation:
+`/static/animation_path.js`. Its path and boundary-wrap parity tests use the
+same golden JSON as the Python reference implementation:
 
 ```bash
 node --test tests/js/animation_path.test.mjs
@@ -172,9 +172,15 @@ direction.
 When playback starts, translucent yellow markers remain at the primary atoms'
 starting positions. They persist after Stop or completion and are removed by
 Reset, operation changes, or structure changes.
-PyVista remains the reference renderer; periodic images, wrap
-boundary behavior, custom-operation animation, and picking have not yet moved
-to Three.js.
+Cell Range uses the same Python-generated display instances as PyVista.
+`Displayed all` evaluates every periodic image from its displayed Cartesian
+start position; `Unit cell only` moves primary images and leaves periodic
+copies fixed. `Continuous` leaves evaluated Cartesian positions unchanged.
+For `Wrap`, Python supplies the Cartesian-to-cell and cell-to-Cartesian
+matrices and the origin convention, and JavaScript only applies that versioned
+boundary contract. Molecules always use continuous behavior because they have
+no unit cell. PyVista remains the reference renderer; custom-operation
+animation and picking have not yet moved to Three.js.
 
 Install the pinned browser dependency after cloning or changing the lockfile:
 

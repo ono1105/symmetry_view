@@ -222,7 +222,10 @@ def display_unit_cell_api_item(
     if unit_cell is None:
         return None
     lattice = np.asarray(unit_cell["lattice"], dtype=float)
-    lower, _ = display_fractional_bounds(display_mode, cell_origin_mode)
+    # Match the current PyVista browser view: Cell Range expands atom/symmetry
+    # display context, but the drawn reference unit cell itself remains the
+    # source cell.  Only the origin convention changes the cell placement.
+    lower, _ = display_fractional_bounds("source", cell_origin_mode)
     shift = np.asarray([lower, lower, lower], dtype=float) @ lattice
     return {
         "vertices_cart": np.asarray(unit_cell["vertices_cart"], dtype=float) + shift,
@@ -583,6 +586,9 @@ def make_handler(
                         improper_mode = str(shared_state.get("improper_mode", "auto"))
                         display_mode = str(shared_state.get("display_mode", "source"))
                         cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                        animation_boundary_mode = str(
+                            shared_state.get("animation_boundary_mode", "continuous")
+                        )
                     body = animation_path_response(
                         render_data,
                         atom_mappings,
@@ -592,6 +598,7 @@ def make_handler(
                         improper_mode=improper_mode,
                         display_mode=display_mode,
                         cell_origin_mode=cell_origin_mode,
+                        animation_boundary_mode=animation_boundary_mode,
                     )
                 except (TypeError, ValueError) as exc:
                     self.send_json_error(str(exc), status=400)

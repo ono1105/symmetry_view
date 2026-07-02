@@ -54,6 +54,29 @@ function multiplyMatrixVector(matrix, vector) {
   return matrix.map(row => dot(row, vector));
 }
 
+function multiplyRowVectorMatrix(vector, matrix) {
+  return matrix[0].map((_, column) =>
+    vector.reduce((sum, value, row) => sum + value * matrix[row][column], 0));
+}
+
+export function applyBoundaryContext(position, context) {
+  if (!context || context.mode !== "wrap") return [...position];
+  let cell = multiplyRowVectorMatrix(position, context.cart_to_cell);
+  const epsilon = Number(context.boundary_epsilon ?? 1e-9);
+  if (context.cell_origin_mode === "corner") {
+    cell = cell.map(value => value - Math.floor(value));
+    cell = cell.map(value => value >= 1 - epsilon ? value - 1 : value);
+  } else {
+    cell = cell.map(value => value - Math.floor(value + 0.5));
+    cell = cell.map(value => value >= 0.5 - epsilon ? value - 1 : value);
+  }
+  return multiplyRowVectorMatrix(cell, context.cell_to_cart);
+}
+
+export function pathAppliesToDisplayInstance(path, instance) {
+  return Boolean(path) && (!path.unit_cell_only || Boolean(instance.isPrimaryImage));
+}
+
 function angleRadians(path) {
   if (!Number.isFinite(path.angle_deg)) {
     throw new Error(`Path type ${path.type} requires angle_deg`);

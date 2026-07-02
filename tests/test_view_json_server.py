@@ -6,6 +6,7 @@ from pathlib import Path
 
 from crystal_viewer.json_export import EXPORT_SCHEMA_VERSION
 from crystal_viewer.viewer.animation_api import symmetry_elements_response
+from crystal_viewer.viewer.display_atoms import display_atom_instances
 from tools.view_json_server import (
     atom_motion_api_items,
     atom_render_style_items,
@@ -69,6 +70,36 @@ class DisplayRenderApiItemsTest(unittest.TestCase):
         for item in items:
             self.assertTrue(all(-2.81 - 1e-8 <= value < 2.81 + 1e-8 for value in item["cart"]))
 
+    def test_all_cell_ranges_match_shared_pyvista_display_instances(self):
+        expected_counts = {
+            "source": 8,
+            "expanded_quarter": 27,
+            "expanded_half": 64,
+            "expanded_0_75": 125,
+            "expanded_1_0": 216,
+        }
+        for origin in ("center", "corner"):
+            for mode, expected_count in expected_counts.items():
+                with self.subTest(origin=origin, mode=mode):
+                    api_items = display_atom_api_items(
+                        self.render_data,
+                        display_mode=mode,
+                        cell_origin_mode=origin,
+                    )
+                    pyvista_items = display_atom_instances(
+                        self.render_data,
+                        display_mode=mode,
+                        cell_origin_mode=origin,
+                    )
+                    self.assertEqual(len(api_items), expected_count)
+                    self.assertEqual(len(pyvista_items), expected_count)
+                    np_api = sorted(tuple(round(value, 10) for value in item["cart"]) for item in api_items)
+                    np_pyvista = sorted(
+                        tuple(round(float(value), 10) for value in item["cart"])
+                        for item in pyvista_items
+                    )
+                    self.assertEqual(np_api, np_pyvista)
+
     def test_centered_display_unit_cell_matches_pyvista_bounds(self):
         cell = display_unit_cell_api_item(
             self.render_data,
@@ -79,6 +110,31 @@ class DisplayRenderApiItemsTest(unittest.TestCase):
         coordinates = [value for vertex in cell["vertices_cart"] for value in vertex]
         self.assertAlmostEqual(min(coordinates), -2.81)
         self.assertAlmostEqual(max(coordinates), 2.81)
+
+    def test_display_unit_cell_does_not_follow_cell_range(self):
+        source_cell = display_unit_cell_api_item(
+            self.render_data,
+            display_mode="source",
+            cell_origin_mode="center",
+        )
+
+        for mode in ("expanded_quarter", "expanded_half", "expanded_0_75", "expanded_1_0"):
+            with self.subTest(mode=mode):
+                expanded_cell = display_unit_cell_api_item(
+                    self.render_data,
+                    display_mode=mode,
+                    cell_origin_mode="center",
+                )
+                expanded_vertices = [
+                    tuple(round(float(value), 10) for value in vertex)
+                    for vertex in expanded_cell["vertices_cart"]
+                ]
+                source_vertices = [
+                    tuple(round(float(value), 10) for value in vertex)
+                    for vertex in source_cell["vertices_cart"]
+                ]
+                self.assertEqual(expanded_vertices, source_vertices)
+                self.assertEqual(expanded_cell["edges"], source_cell["edges"])
 
     def test_op77_and_op88_elements_are_inside_centered_display_cell(self):
         cell = display_unit_cell_api_item(

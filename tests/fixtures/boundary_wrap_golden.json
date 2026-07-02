@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "coordinate_space": "cartesian",
+  "cases": [
+    {
+      "name": "centered identity cell",
+      "context": {
+        "mode": "wrap",
+        "coordinate_space": "cartesian",
+        "cell_origin_mode": "center",
+        "cart_to_cell": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "cell_to_cart": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "boundary_epsilon": 1e-9
+      },
+      "samples": [
+        {"position": [0.75, -0.75, 0.1], "wrapped": [-0.25, 0.25, 0.1]},
+        {"position": [0.5, -0.5, 0], "wrapped": [-0.5, -0.5, 0]}
+      ]
+    },
+    {
+      "name": "corner identity cell",
+      "context": {
+        "mode": "wrap",
+        "coordinate_space": "cartesian",
+        "cell_origin_mode": "corner",
+        "cart_to_cell": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "cell_to_cart": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "boundary_epsilon": 1e-9
+      },
+      "samples": [
+        {"position": [1.25, -0.25, 0.1], "wrapped": [0.25, 0.75, 0.1]}
+      ]
+    },
+    {
+      "name": "centered skew cell",
+      "context": {
+        "mode": "wrap",
+        "coordinate_space": "cartesian",
+        "cell_origin_mode": "center",
+        "cart_to_cell": [[0.5, 0, 0], [-0.25, 0.5, 0], [0, 0, 0.3333333333333333]],
+        "cell_to_cart": [[2, 0, 0], [1, 2, 0], [0, 0, 3]],
+        "boundary_epsilon": 1e-9
+      },
+      "samples": [
+        {"position": [2.1, -0.6, 1.5], "wrapped": [0.1, -0.6, -1.5]}
+      ]
+    },
+    {
+      "name": "corner skew cell",
+      "context": {
+        "mode": "wrap",
+        "coordinate_space": "cartesian",
+        "cell_origin_mode": "corner",
+        "cart_to_cell": [[0.5, 0, 0], [-0.25, 0.5, 0], [0, 0, 0.3333333333333333]],
+        "cell_to_cart": [[2, 0, 0], [1, 2, 0], [0, 0, 3]],
+        "boundary_epsilon": 1e-9
+      },
+      "samples": [
+        {"position": [2.1, -0.6, 1.5], "wrapped": [1.1, 1.4, 1.5]}
+      ]
+    }
+  ]
+}

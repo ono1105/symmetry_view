@@ -15,7 +15,10 @@
 - HaliteをヘッドレスEdgeで確認し、原子8個と単位胞が描画されることを確認済み。
 - `browser_ui.py`の`HTML`はPythonプロセス起動時に確定するため、UIコードや静的配信ルートを変更した後は`view_json_server.py`を再起動する。
 - マウス操作は左ドラッグで自由回転、右ドラッグで画面平面内のパン、ホイールでズームとする。
-- `GET /api/animation_path`とJS版`evaluatePath()`をThree.js原子インスタンスへ接続した。Start/Stop/Reset、操作変更、速度変更を現行ブラウザ状態と共有する。周期像とwrap境界は次段階で移植する。
+- `GET /api/animation_path`とJS版`evaluatePath()`をThree.js原子インスタンスへ接続した。Start/Stop/Reset、操作変更、速度変更を現行ブラウザ状態と共有する。
+- Cell RangeはPyVistaと同じPython生成のdisplay atom instancesを使う。Haliteのcenter/cornerについて`source`, `±1/4`, `±1/2`, `±3/4`, `±1`の原子数とCartesian位置を回帰テストで照合する。
+- `Displayed all`では各周期像を表示開始位置から同じ経路で動かし、`Unit cell only`ではprimary imageだけを動かして周期コピーを固定する。
+- `Continuous`は経路評価後のCartesian座標を変更しない。`Wrap`はPythonが`cart_to_cell`, `cell_to_cart`, セル原点規約を経路APIへ出力し、JSはその契約だけを適用する。分子は単位胞を持たないため常にcontinuousとする。直交・斜交格子のcenter/cornerをPython/Node共通golden JSONで比較する。
 - 軌道上に拘束されるOrbitControlsは廃止し、ロールを含む自由回転が可能なTrackballControlsへ変更した。Controlsは自動カメラフィット後に初期化し、Perspective/Orthographic切替時にも再生成する。
 - `GET /api/symmetry_elements`はPyVistaと同じPythonの要素選択処理を使い、互換な軸・面・中心だけをCartesianで返す。Three.jsでは軸を水色、鏡映面を半透明紫、反転中心を原子と重なっても見える小さな赤いワイヤー立方体で表示する。
 - Halite op187では、初期実装の鏡映面表示がアニメーション経路面から格子周期`[0, 5.62, 0] Å`ずれていた。対称要素APIにも経路と同じ`display_equivalent_operation_context()`を適用して修正した。Halite全192操作について軸・面・中心と経路の244組が一致する回帰テストを追加した。

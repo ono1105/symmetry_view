@@ -1,6 +1,10 @@
 import * as THREE from "/vendor/three/three.module.js";
 import { TrackballControls } from "/vendor/three/addons/controls/TrackballControls.js";
-import { evaluatePath } from "/static/animation_path.js";
+import {
+  applyBoundaryContext,
+  evaluatePath,
+  pathAppliesToDisplayInstance,
+} from "/static/animation_path.js";
 
 
 const CAMERA_FOV = 42;
@@ -42,6 +46,7 @@ class StaticStructureView {
     this.atomInstances = new Map();
     this.instanceMeshes = new Set();
     this.animationPaths = new Map();
+    this.boundaryContext = {mode: "continuous"};
     this.animationOperationIndex = null;
     this.symmetryOperationIndex = null;
     this.symmetryObjects = [];
@@ -248,6 +253,7 @@ class StaticStructureView {
       "improper_mode",
       "display_mode",
       "cell_origin_mode",
+      "animation_boundary_mode",
       "structure_reload",
     ].some(key => Object.prototype.hasOwnProperty.call(update, key));
     if (pathOptionsChanged || this.animationOperationIndex === null) {
@@ -288,6 +294,7 @@ class StaticStructureView {
     this.animationPaths = new Map(
       (payload.paths || []).map(item => [Number(item.source_atom), item.path]),
     );
+    this.boundaryContext = payload.boundary || {mode: "continuous"};
     this.animationOperationIndex = operationIndex;
     this.playbackSpeedMultiplier = Math.max(Number(payload.playback_speed_multiplier) || 1, 0.01);
   }
@@ -439,8 +446,7 @@ class StaticStructureView {
     this.clearStartMarkers();
     for (const instance of this.atomInstances.values()) {
       const path = this.animationPaths.get(instance.sourceAtom);
-      if (!path || !instance.isPrimaryImage) continue;
-      if (path.unit_cell_only && !instance.isPrimaryImage) continue;
+      if (!pathAppliesToDisplayInstance(path, instance)) continue;
       const geometry = new THREE.SphereGeometry(instance.radius * 0.98, 20, 12);
       const material = new THREE.MeshBasicMaterial({
         color: 0xf7dc6f,
@@ -479,10 +485,13 @@ class StaticStructureView {
     );
     for (const [instanceId, instance] of this.atomInstances) {
       const path = this.animationPaths.get(instance.sourceAtom);
-      const applies = path && (!path.unit_cell_only || instance.isPrimaryImage);
-      const position = applies
+      const applies = pathAppliesToDisplayInstance(path, instance);
+      const evaluated = applies
         ? evaluatePath(path, this.animationProgress, instance.start)
         : instance.start;
+      const position = applies
+        ? applyBoundaryContext(evaluated, this.boundaryContext)
+        : evaluated;
       this.setAtomPosition(instanceId, position);
     }
     this.markInstanceMatricesDirty();
