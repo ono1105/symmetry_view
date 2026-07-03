@@ -2468,6 +2468,7 @@ function renderSelectedAtomSummary() {
   const root = document.getElementById("selected-atom-summary");
   if (!root) return;
   root.innerHTML = "";
+  if (experienceMode !== "beginner") return;
   const selected = String(state.scope).startsWith("selected")
     ? new Set((state.selected_atoms || []).map(Number))
     : new Set();
@@ -3147,6 +3148,7 @@ function setExperienceMode(mode) {
   syncExperienceModeControls();
   renderOperations();
   renderStructureInfo();
+  renderSelectedAtomSummary();
   renderOperationDetails();
 }
 

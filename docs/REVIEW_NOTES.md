@@ -1,5 +1,29 @@
 # コードレビューメモ（Codex向け共有）
 
+## 2026-07-03: browser_ui.py UI再構成のレビュー（Claude, commit 7379c97）
+
+`7379c97 feat: refine web viewer controls and animation` の browser_ui.py（≈433行）UI再構成を精査。多くはCSS圧縮とパネルの `<details>` 折りたたみ化。インラインJS 2ブロックとも構文チェックOK。動作上の重大バグはなし。良かった点と軽微な指摘は以下。
+
+### 良好（確認済み）
+
+- **Beginner/Advanced と Crystal/Molecule が2ボタン→単一トグルボタン化**。トグルは `.experience-button`/`.structure-kind-button` クラスを維持し、`sync*` が `dataset` を反対モードへ書き換える方式。クリックハンドラは `dataset` を読むため正しくトグルする。
+- **Range が5ボタン→＋/−ステッパー化**（`changeDisplayRange`）。楽観更新＋失敗時ロールバック＋`displayRangeUpdatePending` ガード＋端で `disabled` と、堅牢に書けている。
+- **新スコープ `selected_displayed`** への切替に伴い、`renderSelectedAtomSummary` / `currentAnimationAtoms` の判定が `String(state.scope).startsWith("selected")` に統一されており整合。
+- パネルの `<details>` 化後も内部要素は id 参照可能で、ハンドラ・描画は維持。
+
+### 軽微な指摘
+
+1. **`include_boundary_images` がセル基底変換で保持されない** — `tools/view_json_server.py:907` の `preserved` dict に本キーが無い（`display_mode`/`cell_origin_mode`/`improper_mode` 等は保持）。そのため Primitive/Bravais セル切替時に「Show boundary atoms」チェックが無言で off に戻る。構造の新規ロード(:959)でのリセットは `display_mode→source` と同様に妥当だが、セル基底変換(:907)は他の表示設定を維持するため不整合。→ :907 の `preserved` に `"include_boundary_images"` を追加。
+2. **`renderSelectedAtomSummary` が Advanced モードでも全DOM構築** — `#selected-atom-summary` は `beginner-only`（CSSで非表示）だが、`postState` の度に要素グループ・カードを生成している。→ 先頭で `experienceMode !== "beginner"` なら early-return（低優先）。
+
+（別途、three_view.js の毎フレーム進捗イベント発火＝前回 #6 は未対応のまま。scrubber 更新の throttle 候補。）
+
+### Codex対応
+
+- `handle_cell_setting()`の`preserved`へ`include_boundary_images`を追加し、Primitive/Bravais切替後も境界原子表示を維持するよう修正。
+- `renderSelectedAtomSummary()`はFull時にrootを空にして早期returnする。Simpleへ戻した直後に再構築されるよう、`setExperienceMode()`から明示的に再描画する。
+- Three.jsの原子座標更新は毎フレーム維持し、DOM向け進捗イベントだけ1%刻みに抑制した。Resetと手動スクラブは強制通知する。
+
 ## 2026-07-03: アニメ速度正規化・スクラバー・選択マーカーのレビュー（Claude, 未コミット差分）
 
 対象は作業ツリーの未コミット差分（`animation_api.py`, `animation_path.py`, `pyvista_controller.py`, `three_view.js`, `browser_ui.py`）。速度正規化の修正で「同じ4回回反(Halite op131/op147)で見かけ速度が違う」問題は解消される方向。原因は Three.js が再生時間を固定値`BASE_ANIMATION_SECONDS=3.15s`にしていたため（op131≈19.2Å/op147≈8.0Åと移動距離が違うのに同じ時間→速度2.4倍差）。修正は PyVista と同じ定速 6 Å/s（`ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND`）へ統一。テスト17件＋JSパリティ4件パス、JS構文OK、致命的バグなし。以下は効率・重複・デッドコードの指摘。

@@ -66,6 +66,7 @@ class StaticStructureView {
     this.maximumTravelDistance = 0;
     this.baseStatus = "Three.js comparison";
     this.lastProgressBucket = -1;
+    this.lastPublishedProgressBucket = -1;
     this.pathGeneration = 0;
     this.syncQueue = Promise.resolve();
     this.serverPlaying = false;
@@ -648,6 +649,7 @@ class StaticStructureView {
     this.animationProgress = 0;
     this.animationStartedAt = null;
     this.lastProgressBucket = -1;
+    this.lastPublishedProgressBucket = -1;
     this.clearStartMarkers();
     for (const [instanceId, instance] of this.atomInstances) {
       this.setAtomPosition(instanceId, instance.start);
@@ -655,7 +657,7 @@ class StaticStructureView {
     this.markInstanceMatricesDirty();
     if (this.baseStatus) this.setStatus(`${this.baseStatus}, animation ready`);
     this.render();
-    this.publishAnimationProgress();
+    this.publishAnimationProgress(true);
   }
 
   setAnimationProgress(progress) {
@@ -670,7 +672,7 @@ class StaticStructureView {
     }
     this.applyAnimationProgress();
     this.setStatus(`${this.baseStatus}, movement ${Math.round(this.animationProgress * 100)}%`);
-    this.publishAnimationProgress();
+    this.publishAnimationProgress(true);
     this.render();
   }
 
@@ -689,7 +691,10 @@ class StaticStructureView {
     this.markInstanceMatricesDirty();
   }
 
-  publishAnimationProgress() {
+  publishAnimationProgress(force = false) {
+    const bucket = Math.round(this.animationProgress * 100);
+    if (!force && bucket === this.lastPublishedProgressBucket) return;
+    this.lastPublishedProgressBucket = bucket;
     window.dispatchEvent(new CustomEvent("symmetry-animation-progress-update", {
       detail: {progress: this.animationProgress},
     }));

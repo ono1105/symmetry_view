@@ -913,6 +913,7 @@ def make_handler(
                         "cell_setting_mode": mode,
                         "improper_mode": shared_state.get("improper_mode", "auto"),
                         "display_mode": shared_state.get("display_mode", default_display_mode),
+                        "include_boundary_images": shared_state.get("include_boundary_images", False),
                         "reload_request_id": shared_state.get("reload_request_id"),
                         "import_status": preserved_status,
                         "json_path": shared_state.get("json_path", str(current_json_path)),
