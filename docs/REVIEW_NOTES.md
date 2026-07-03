@@ -92,6 +92,12 @@
 - Beginnerのカメラ矢印・roll操作は共有`camera_request`をThree.jsでも処理する。`View along direction`用にPythonが選択操作の`view_direction_cart`と`focus_point_cart`を対称要素APIへ追加し、Three.jsは計算済みCartesian基準へカメラを合わせる。
 - 公開前レビュー: 経路長の120点サンプリングを各path型の解析的な弧長・直線長計算へ置換。128原子・Cell Range ±1のAPI応答を約8.1秒から約0.08秒へ短縮した。PyVistaはCell Range変更時に標準経路を再構築し、カスタム経路でも表示インスタンス基準の経路長キャッシュを無効化する。
 - 公開前レビュー: Three.jsの選択リングは選択集合が変わった場合だけ再生成する。旧`playback_speed_multiplier`/`custom_speed_multiplier`と未使用helperを削除し、分子Beginnerのop番号重複も解消した。
+- 複合経路の補間は固定50/50を廃止し、回転弧長・鏡映距離と後半の並進/反転距離に比例してphase時間を配分する。sequential pathも各segmentの経路長比を使う。Python/JavaScriptの同一式とgolden parityで検証する。
+- ブラウザUIはデスクトップで左にstickyな3D表示、右に操作パネルを配置し、980px以下では縦並びへ戻す。表示文言は既存の英語へ戻し、`View along direction`ボタンだけ視点回転の直下へ移動した。
+- 選択原子カードは開閉状態を保持する`details`へ格納する。3D上の周期像選択は`selected_displayed` scopeを使い、クリックした像と同じsource atomに属する表示中の全周期像をリング表示・移動対象にする。Advancedのcheckboxによる`selected`は従来どおり単位胞像のみを動かす。
+- Cell Rangeは5個の常時表示ボタンから`− / 現在値 / ＋`の段階操作へ変更した。連打による非同期state更新の順序逆転を避けるため、更新完了までは再入力を抑止する。
+- `Show boundary atoms`は半開区間の反対側境界に周期像を追加する表示オプションで、原子対応表自体は変更しない。Three.jsとPyVistaの表示インスタンス・経路長計算の両方へ同じ設定を渡す。Haliteのsource表示はOFFで8像、ONで27像になる。
+- 操作盤はstickyな3D表示の右へ集約し、低頻度設定を`details`へ格納した。SimpleではProjectionを直接表示し、Fullだけ追加View設定を表示する。Simple/FullとCrystal/Moleculeは現在値だけを示す単一切替ボタンとした。
 
 ## 2026-07-01: 初学者モードのUI方針
 

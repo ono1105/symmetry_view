@@ -36,6 +36,34 @@ class DisplayOriginTest(unittest.TestCase):
         np.testing.assert_allclose(display_scene_center(render_data(), "source", "corner"), [0.5, 0.5, 0.5])
         np.testing.assert_allclose(display_point_cart(render_data(), [0.75, 0.25, 0.25], "source", "corner"), [0.75, 0.25, 0.25])
 
+    def test_boundary_images_include_periodic_copies_on_opposite_faces(self):
+        boundary_data = render_data()
+        boundary_data["atoms"][0]["frac"] = [0.0, 0.0, 0.0]
+        boundary_data["atoms"][0]["cart"] = [0.0, 0.0, 0.0]
+
+        regular = display_atom_instances(
+            boundary_data,
+            display_mode="source",
+            cell_origin_mode="corner",
+        )
+        with_boundaries = display_atom_instances(
+            boundary_data,
+            display_mode="source",
+            cell_origin_mode="corner",
+            include_boundary_images=True,
+        )
+
+        self.assertEqual(len(regular), 1)
+        self.assertEqual(len(with_boundaries), 8)
+        positions = {tuple(item["cart"]) for item in with_boundaries}
+        self.assertEqual(positions, {
+            (x, y, z)
+            for x in (0.0, 1.0)
+            for y in (0.0, 1.0)
+            for z in (0.0, 1.0)
+        })
+        self.assertEqual(sum(bool(item["is_primary_image"]) for item in with_boundaries), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

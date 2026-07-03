@@ -35,6 +35,7 @@ def animation_path_response(
     improper_mode: str = "auto",
     display_mode: str = "source",
     cell_origin_mode: str = "center",
+    include_boundary_images: bool = False,
     animation_boundary_mode: str = "continuous",
 ) -> dict[str, Any]:
     operation = operation_by_index(render_data.get("operations", []), operation_index)
@@ -86,6 +87,7 @@ def animation_path_response(
         render_data,
         display_mode=display_mode,
         cell_origin_mode=cell_origin_mode,
+        include_boundary_images=include_boundary_images,
     ):
         path = paths.get(int(instance["atom"]["index"]))
         if path is None or (unit_cell_only and not instance["is_primary_image"]):
@@ -228,9 +230,11 @@ def _scope_options(
     if scope in ("displayed", "unit_cell"):
         animation_scope = "selected"
         effective_selected_atoms = atom_indices
+    elif scope == "selected_displayed":
+        animation_scope = "selected"
     representative_atom = (
         effective_selected_atoms[0]
-        if scope == "selected" and effective_selected_atoms
+        if scope in ("selected", "selected_displayed") and effective_selected_atoms
         else None
     )
     return animation_scope, effective_selected_atoms, representative_atom, unit_cell_only

@@ -3,6 +3,7 @@ import { TrackballControls } from "/vendor/three/addons/controls/TrackballContro
 import {
   applyBoundaryContext,
   evaluatePath,
+  pathBreakpoints,
   pathAppliesToDisplayInstance,
 } from "/static/animation_path.js";
 
@@ -11,27 +12,6 @@ const CAMERA_FOV = 42;
 const ORTHOGRAPHIC_HEIGHT = 10;
 const ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND = 6.0;
 const STATIONARY_ANIMATION_SECONDS = 0.6;
-
-
-function collectPathBreakpoints(path, offset, scale, result) {
-  if (!path) return;
-  if (path.type === "sequential") {
-    const segments = path.segments || [];
-    const count = Math.max(segments.length, 1);
-    segments.forEach((segment, index) => {
-      const segmentOffset = offset + scale * index / count;
-      result.add(segmentOffset);
-      collectPathBreakpoints(segment, segmentOffset, scale / count, result);
-    });
-    result.add(offset + scale);
-    return;
-  }
-  if (["screw", "glide", "rotoinversion", "rotoreflection"].includes(path.type)) {
-    result.add(offset + scale * 0.5);
-  } else if (path.type === "mirror_after_hold") {
-    result.add(offset + scale * Math.max(0, Math.min(Number(path.hold_fraction) || 0.3, 1)));
-  }
-}
 
 
 class StaticStructureView {
@@ -290,7 +270,7 @@ class StaticStructureView {
     this.pointerDown = null;
     if (movement > 5 || elapsed > 500) return;
     const hit = this.pickAtomInstance(event);
-    if (!hit && this.state.scope !== "selected") return;
+    if (!hit && !String(this.state.scope).startsWith("selected")) return;
     this.selectAtom(hit ? hit.sourceAtom : null, event);
   }
 
@@ -324,7 +304,7 @@ class StaticStructureView {
     }
     const update = {
       selected_atoms: selected,
-      scope: selected.length ? "selected" : "displayed",
+      scope: selected.length ? "selected_displayed" : "displayed",
       playing: false,
       reset: true,
     };
@@ -349,7 +329,7 @@ class StaticStructureView {
   }
 
   updateAtomSelectionHighlight() {
-    const selected = this.state.scope === "selected"
+    const selected = String(this.state.scope).startsWith("selected")
       ? new Set((this.state.selected_atoms || []).map(Number))
       : new Set();
     const signature = JSON.stringify([...selected].sort((a, b) => a - b));
@@ -405,6 +385,7 @@ class StaticStructureView {
     const displayLayoutChanged = this.state.operation_index !== undefined && (
       state.display_mode !== this.state.display_mode
       || state.cell_origin_mode !== this.state.cell_origin_mode
+      || state.include_boundary_images !== this.state.include_boundary_images
     );
     this.state = {...state};
     if (displayLayoutChanged) await this.refresh();
@@ -417,6 +398,7 @@ class StaticStructureView {
       "improper_mode",
       "display_mode",
       "cell_origin_mode",
+      "include_boundary_images",
       "animation_boundary_mode",
       "structure_reload",
     ].some(key => Object.prototype.hasOwnProperty.call(update, key));
@@ -464,12 +446,10 @@ class StaticStructureView {
     this.animationPaths = new Map(
       (payload.paths || []).map(item => [Number(item.source_atom), item.path]),
     );
-    const breakpoints = new Set([0, 1]);
-    for (const path of this.animationPaths.values()) {
-      collectPathBreakpoints(path, 0, 1, breakpoints);
-    }
+    const representativePath = this.animationPaths.values().next().value;
+    const breakpoints = representativePath ? pathBreakpoints(representativePath) : [0, 1];
     window.dispatchEvent(new CustomEvent("symmetry-animation-breakpoints", {
-      detail: {breakpoints: [...breakpoints].sort((a, b) => a - b)},
+      detail: {breakpoints},
     }));
     this.boundaryContext = payload.boundary || {mode: "continuous"};
     this.animationOperationIndex = operationIndex;

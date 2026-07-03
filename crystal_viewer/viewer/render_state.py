@@ -24,6 +24,7 @@ STATE_UPDATE_KEYS = frozenset(
         "cell_setting_mode",
         "improper_mode",
         "display_mode",
+        "include_boundary_images",
         "animation_boundary_mode",
         "active_mode",
         "scope",
@@ -68,6 +69,7 @@ class RenderStateSnapshot:
     cell_setting_mode: str
     improper_mode: str
     display_mode: str
+    include_boundary_images: bool
     animation_boundary_mode: str
     active_mode: str
     view_request_id: Any
@@ -135,6 +137,7 @@ def initial_render_state(
         "cell_setting_mode": preserved.get("cell_setting_mode", "native"),
         "improper_mode": preserved.get("improper_mode", "auto"),
         "display_mode": preserved.get("display_mode", display_mode),
+        "include_boundary_images": bool(preserved.get("include_boundary_images", False)),
         "animation_boundary_mode": preserved.get("animation_boundary_mode", "continuous"),
         "active_mode": "standard",
         "gif_status": "",
@@ -191,6 +194,7 @@ def pop_render_state_snapshot(state: dict) -> RenderStateSnapshot:
         cell_setting_mode=str(state.get("cell_setting_mode", "native")),
         improper_mode=str(state.get("improper_mode", "auto")),
         display_mode=str(state.get("display_mode", "")),
+        include_boundary_images=bool(state.get("include_boundary_images", False)),
         animation_boundary_mode=str(state.get("animation_boundary_mode", "continuous")),
         active_mode=str(state.get("active_mode", "standard")),
         view_request_id=state.get("view_request_id"),

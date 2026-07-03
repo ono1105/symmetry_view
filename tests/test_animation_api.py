@@ -36,6 +36,19 @@ class SerializeAnimationPathTest(unittest.TestCase):
         }
         self.assertAlmostEqual(animation_path_length(path), np.pi)
 
+    def test_compound_path_allocates_time_by_phase_length(self):
+        path = {
+            "type": "screw",
+            "start": np.array([1.0, 0.0, 0.0]),
+            "target": np.array([0.0, 1.0, 2.0]),
+            "axis_point": np.zeros(3),
+            "axis_direction": np.array([0.0, 0.0, 1.0]),
+            "angle": np.pi / 2,
+            "translation": np.array([0.0, 0.0, 2.0]),
+        }
+        split = (np.pi / 2) / (np.pi / 2 + 2.0)
+        np.testing.assert_allclose(evaluate_path(path, split), [0.0, 1.0, 0.0], atol=1e-8)
+
     def test_converts_numpy_values_and_radians_recursively(self):
         path = {
             "type": "sequential",
@@ -199,6 +212,20 @@ class AnimationPathResponseTest(unittest.TestCase):
         self.assertTrue(unit_cell["paths"])
         self.assertTrue(all(not item["path"].get("unit_cell_only") for item in displayed["paths"]))
         self.assertTrue(all(item["path"].get("unit_cell_only") is True for item in unit_cell["paths"]))
+
+    def test_selected_displayed_scope_moves_periodic_copies_of_selected_sources(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+        result = animation_path_response(
+            payload["render_data"],
+            payload["atom_mappings"],
+            2,
+            scope="selected_displayed",
+            selected_atoms=(3,),
+            display_mode="expanded_half",
+        )
+
+        self.assertEqual([item["source_atom"] for item in result["paths"]], [3])
+        self.assertTrue(all(not item["path"].get("unit_cell_only") for item in result["paths"]))
 
     def test_rejects_unknown_operation(self):
         with self.assertRaisesRegex(ValueError, "Operation index not found"):

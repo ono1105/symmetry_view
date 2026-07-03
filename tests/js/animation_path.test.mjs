@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   applyBoundaryContext,
   evaluatePath,
+  pathBreakpoints,
   pathAppliesToDisplayInstance,
 } from "../../crystal_viewer/web/animation_path.js";
 
@@ -36,6 +37,37 @@ test("evaluatePath matches Python golden samples", () => {
       );
     }
   }
+});
+
+test("compound path breakpoint follows phase travel distance", () => {
+  const screw = fixture.cases.find(item => item.name === "screw_rotation_then_translation").path;
+  const expected = (Math.PI / 2) / (Math.PI / 2 + 2);
+  const breakpoints = pathBreakpoints(screw);
+  assert.ok(Math.abs(breakpoints[1] - expected) <= tolerance);
+  assertVectorClose(evaluatePath(screw, breakpoints[1]), [0, 1, 0], "screw phase boundary");
+});
+
+test("compound path keeps Python parity for a periodic start override", () => {
+  const screw = fixture.cases.find(item => item.name === "screw_rotation_then_translation").path;
+  assertVectorClose(
+    evaluatePath(screw, 0.5, [2, 0, 0]),
+    [0.5630790622854015, 1.9190992599695809, 0],
+    "screw periodic image at s=0.5",
+  );
+});
+
+test("sequential breakpoints retain nested compound phase boundaries", () => {
+  const screw = fixture.cases.find(item => item.name === "screw_rotation_then_translation").path;
+  const linear = {
+    type: "linear",
+    start: [0, 1, 2],
+    target: [0, 1, 3],
+  };
+  const screwLength = Math.PI / 2 + 2;
+  const totalLength = screwLength + 1;
+  const breakpoints = pathBreakpoints({type: "sequential", segments: [screw, linear]});
+  assert.ok(breakpoints.some(value => Math.abs(value - (Math.PI / 2) / totalLength) <= tolerance));
+  assert.ok(breakpoints.some(value => Math.abs(value - screwLength / totalLength) <= tolerance));
 });
 
 test("applyBoundaryContext matches Python wrap samples", () => {

@@ -21,7 +21,7 @@ HTML = """<!doctype html>
     }
     main {
       width: 100%;
-      max-width: 1100px;
+      max-width: 1500px;
       margin: 0 auto;
       padding: 20px;
     }
@@ -33,7 +33,7 @@ HTML = """<!doctype html>
       display: block;
       font-size: 13px;
       color: #aeb8c5;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     select, button, input {
       font: inherit;
@@ -60,7 +60,7 @@ HTML = """<!doctype html>
       flex-wrap: wrap;
       gap: 6px;
       margin: 0;
-      max-height: 116px;
+      max-height: 92px;
       overflow: auto;
       padding: 6px;
       border: 1px solid #3a4350;
@@ -84,9 +84,35 @@ HTML = """<!doctype html>
       background: #7dd3fc;
       color: #081017;
     }
-    .display-button.selected {
-      background: #7dd3fc;
-      color: #081017;
+    .range-stepper {
+      display: grid;
+      grid-template-columns: 42px minmax(112px, 1fr) 42px;
+      gap: 6px;
+      max-width: 220px;
+      align-items: stretch;
+    }
+    .range-stepper button {
+      margin: 0;
+      padding: 7px 10px;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .range-stepper button:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .range-value {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      box-sizing: border-box;
+      padding: 6px 10px;
+      border: 1px solid #3a4350;
+      border-radius: 5px;
+      background: #151a20;
+      color: #edf2f7;
+      font-variant-numeric: tabular-nums;
     }
     .projection-button.selected {
       background: #7dd3fc;
@@ -114,8 +140,8 @@ HTML = """<!doctype html>
     }
     .operation-list {
       width: 100%;
-      min-height: 280px;
-      max-height: 380px;
+      min-height: 220px;
+      max-height: 320px;
       overflow: auto;
       background: #1b2027;
       color: #edf2f7;
@@ -151,7 +177,7 @@ HTML = """<!doctype html>
     button {
       border: 0;
       border-radius: 6px;
-      padding: 10px 14px;
+      padding: 8px 11px;
       color: #101216;
       background: #7dd3fc;
       cursor: pointer;
@@ -206,6 +232,21 @@ HTML = """<!doctype html>
       grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
       gap: 16px;
       align-items: start;
+    }
+    .viewer-workspace {
+      display: grid;
+      grid-template-columns: minmax(520px, 1.35fr) minmax(340px, 0.65fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .viewer-workspace > .grid {
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .viewer-workspace #three-view-panel {
+      position: sticky;
+      top: 12px;
+      margin-bottom: 0;
     }
     .grid > *, .left-stack, .side-stack, .panel {
       min-width: 0;
@@ -309,7 +350,7 @@ HTML = """<!doctype html>
       background: #151a20;
       border: 1px solid #29313c;
       border-radius: 8px;
-      padding: 14px;
+      padding: 12px;
       overflow: hidden;
     }
     #start-panel, #load-error-panel, #structure-info-panel {
@@ -406,78 +447,114 @@ HTML = """<!doctype html>
       font-size: 12px;
       overflow-wrap: anywhere;
     }
+    .selected-atom-details > summary {
+      cursor: pointer;
+      color: #cbd5e1;
+      font-size: 12px;
+      margin-bottom: 7px;
+    }
+    .selected-atom-cards {
+      display: grid;
+      gap: 7px;
+    }
     .side-stack {
       display: grid;
-      gap: 16px;
+      gap: 10px;
       align-content: start;
     }
     .left-stack {
       display: grid;
-      gap: 16px;
+      gap: 10px;
       align-content: start;
     }
     .section-title {
-      margin: 0 0 12px;
+      margin: 0 0 9px;
       font-size: 15px;
       color: #f8fafc;
     }
     .subsection-title {
-      margin: 14px 0 8px;
+      margin: 11px 0 6px;
       font-size: 13px;
       color: #d7dee9;
     }
     .control-stack {
       display: grid;
-      gap: 12px;
-      margin-bottom: 12px;
+      gap: 9px;
+      margin-bottom: 9px;
     }
     .button-row {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
-      margin: 12px 0 0;
+      margin: 9px 0 0;
     }
     .button-row.flush {
       margin-top: 0;
     }
     .camera-block {
       display: grid;
-      gap: 10px;
-      margin-bottom: 14px;
+      gap: 7px;
+      margin-bottom: 10px;
     }
     .camera-block:last-of-type {
       margin-bottom: 0;
     }
     .cell-block {
       display: grid;
-      gap: 8px;
-      margin-bottom: 14px;
+      gap: 6px;
+      margin-bottom: 10px;
     }
     .cell-block:last-child {
       margin-bottom: 0;
     }
     .camera-grid {
       display: grid;
-      grid-template-columns: repeat(3, 52px);
-      gap: 8px;
+      grid-template-columns: repeat(3, 44px);
+      gap: 6px;
       align-items: center;
       justify-items: center;
       justify-content: center;
     }
     .camera-grid button {
-      width: 52px;
-      height: 40px;
+      width: 44px;
+      height: 34px;
       padding: 0;
       font-size: 18px;
       line-height: 1;
     }
     .angle-control {
       box-sizing: border-box;
-      width: 52px;
-      height: 40px;
+      width: 44px;
+      height: 34px;
       padding: 0 2px;
       text-align: center;
       font-size: 13px;
+    }
+    .compact-details {
+      margin-top: 10px;
+      padding-top: 9px;
+      border-top: 1px solid #29313c;
+    }
+    .compact-details > summary,
+    .collapsible-panel > summary {
+      cursor: pointer;
+      color: #cbd5e1;
+      font-size: 13px;
+      font-weight: 650;
+      list-style-position: outside;
+    }
+    .compact-details[open] > summary {
+      margin-bottom: 10px;
+    }
+    .compact-details > :last-child {
+      margin-bottom: 0;
+    }
+    .collapsible-panel > summary {
+      color: #f8fafc;
+      font-size: 15px;
+    }
+    .collapsible-panel[open] > summary {
+      margin-bottom: 10px;
     }
     .view-center-row {
       display: grid;
@@ -580,6 +657,10 @@ HTML = """<!doctype html>
     .check-row input {
       width: auto;
       margin: 0;
+    }
+    .boundary-images-toggle {
+      margin: 2px 0 0;
+      font-size: 12px;
     }
     .atom-row span {
       color: #cbd5e1;
@@ -737,12 +818,16 @@ HTML = """<!doctype html>
     .sequence-item button {
       padding: 5px 8px;
     }
-    @media (max-width: 820px) {
+    @media (max-width: 980px) {
       main {
         padding: 14px;
       }
-      .grid, .topbar {
+      .grid, .topbar, .viewer-workspace {
         display: block;
+      }
+      .viewer-workspace #three-view-panel {
+        position: static;
+        margin-bottom: 14px;
       }
       .topbar h1 {
         margin-bottom: 14px;
@@ -783,15 +868,13 @@ HTML = """<!doctype html>
 <body class="beginner-mode">
 <main>
   <div class="topbar">
-    <h1>Symmetry Controls</h1>
+    <h1 id="main-title">Symmetry Controls</h1>
     <div class="topbar-actions">
       <div class="button-row flush" id="experience-controls">
-        <button class="secondary experience-button selected" data-experience="beginner">Beginner</button>
-        <button class="secondary experience-button" data-experience="advanced">Advanced</button>
+        <button class="secondary experience-button selected" id="experience-toggle" data-experience="advanced" title="Switch to Full mode">Simple</button>
       </div>
       <div class="button-row flush" id="structure-kind-controls">
-        <button class="secondary structure-kind-button selected" data-kind="crystal">Crystal</button>
-        <button class="secondary structure-kind-button" data-kind="molecule">Molecule</button>
+        <button class="secondary structure-kind-button selected" id="structure-kind-toggle" data-kind="molecule" title="Switch to Molecule">Crystal</button>
       </div>
       <input id="cif-file" class="file-input" type="file" accept=".cif,.txt">
       <button id="import-cif" class="secondary">Open CIF</button>
@@ -818,8 +901,9 @@ HTML = """<!doctype html>
     <h2 class="section-title" id="structure-info-title">Structure Info</h2>
     <div class="structure-summary" id="structure-info"></div>
   </section>
+  <div class="viewer-workspace">
   <section class="panel" id="three-view-panel">
-    <h2 class="section-title">Three.js 3D View <span class="hint">(comparison preview)</span></h2>
+    <h2 class="section-title">Three.js 3D View</h2>
     <div class="three-view-shell" id="three-view">
       <canvas aria-label="Interactive three-dimensional structure view"></canvas>
       <div class="three-view-status" data-three-status>Loading Three.js view…</div>
@@ -830,30 +914,35 @@ HTML = """<!doctype html>
     <section class="panel" id="standard-panel">
       <h2 class="section-title" id="operations-title">Operations</h2>
       <div class="control-stack">
-        <div class="advanced-only">
-          <label for="operation-sort">Sort</label>
-          <select id="operation-sort">
-            <option value="index">Operation number</option>
-            <option value="symbol">Operation symbol</option>
-            <option value="element">Axis / plane / center</option>
-            <option value="direction">Direction only</option>
-          </select>
-        </div>
-        <div class="advanced-only" id="operation-label-mode-block">
-          <label for="operation-label-mode">Notation</label>
-          <select id="operation-label-mode">
-            <option value="itc_like" selected>ITC operation</option>
-            <option value="standard">Element</option>
-          </select>
-        </div>
         <div>
           <label>Operation symbol</label>
           <div class="direction-filter-list" id="operation-type-filter"></div>
         </div>
-        <div class="advanced-only">
-          <label id="operation-filter-label">Direction</label>
-          <div class="direction-filter-list" id="direction-filter"></div>
-        </div>
+        <details class="compact-details advanced-only">
+          <summary>List settings</summary>
+          <div class="control-stack">
+            <div>
+              <label for="operation-sort">Sort</label>
+              <select id="operation-sort">
+                <option value="index">Operation number</option>
+                <option value="symbol">Operation symbol</option>
+                <option value="element">Axis / plane / center</option>
+                <option value="direction">Direction only</option>
+              </select>
+            </div>
+            <div id="operation-label-mode-block">
+              <label for="operation-label-mode">Notation</label>
+              <select id="operation-label-mode">
+                <option value="itc_like" selected>ITC operation</option>
+                <option value="standard">Element</option>
+              </select>
+            </div>
+            <div>
+              <label id="operation-filter-label">Direction</label>
+              <div class="direction-filter-list" id="direction-filter"></div>
+            </div>
+          </div>
+        </details>
       </div>
       <label for="operations" id="operations-label">Operation list</label>
       <div class="operation-list" id="operations" role="listbox"></div>
@@ -1029,20 +1118,17 @@ HTML = """<!doctype html>
       </div>
       <div id="cop-result" class="cop-result" hidden></div>
     </section>
-    <section class="panel advanced-only">
-      <h2 class="section-title">Selected Operation</h2>
+    <details class="panel advanced-only collapsible-panel">
+      <summary>Selected Operation</summary>
       <div id="op-details" class="operation-details"></div>
-    </section>
+    </details>
     </div>
     <div class="side-stack">
       <section class="panel">
-        <h2 class="section-title" id="animation-title">Atom movement</h2>
+        <h2 class="section-title" id="animation-title">Animation</h2>
         <div class="button-row flush">
           <button id="play-toggle">Start</button>
           <button id="reset" class="secondary">Reset</button>
-          <button id="save-gif" class="secondary advanced-only">Save GIF</button>
-          <button id="save-gif-3view" class="secondary advanced-only">Save 3-view GIFs</button>
-          <button id="save-gif-3view-current" class="secondary advanced-only">Save 3-view GIFs (current view)</button>
         </div>
         <label class="movement-slider-row" for="movement-progress">
           <input id="movement-progress" type="range" min="0" max="1000" value="0" step="1" list="movement-stops">
@@ -1050,31 +1136,39 @@ HTML = """<!doctype html>
           <span id="movement-progress-value" class="movement-progress-value">0%</span>
         </label>
         <div id="selected-atom-summary" class="selected-atom-summary beginner-only"></div>
-        <h3 class="subsection-title advanced-only">Speed</h3>
-        <div class="button-row flush advanced-only" id="speed-controls">
-          <button class="secondary speed-button" data-speed="0.5">Slow</button>
-          <button class="secondary speed-button selected" data-speed="1.0">Normal</button>
-          <button class="secondary speed-button" data-speed="2.0">Fast</button>
-        </div>
-        <div class="advanced-only">
-          <label for="improper-mode">Improper operation</label>
-          <select id="improper-mode">
-            <option value="auto">Auto</option>
-            <option value="rotoreflection">Rotoreflection</option>
-            <option value="rotoinversion">Rotoinversion</option>
-          </select>
-        </div>
-        <h3 class="subsection-title advanced-only">Boundary</h3>
-        <div class="button-row flush advanced-only" id="animation-boundary-controls">
-          <button class="secondary boundary-button selected" data-boundary-mode="continuous">Continuous</button>
-          <button class="secondary boundary-button" data-boundary-mode="wrap">Wrap</button>
-        </div>
-        <p class="hint advanced-only">Start or stop the selected operation and save the current view as a GIF.</p>
+        <details class="compact-details advanced-only">
+          <summary>Animation settings</summary>
+          <h3 class="subsection-title">Speed</h3>
+          <div class="button-row flush" id="speed-controls">
+            <button class="secondary speed-button" data-speed="0.5">Slow</button>
+            <button class="secondary speed-button selected" data-speed="1.0">Normal</button>
+            <button class="secondary speed-button" data-speed="2.0">Fast</button>
+          </div>
+          <div class="subsection-title">
+            <label for="improper-mode">Improper operation</label>
+            <select id="improper-mode">
+              <option value="auto">Auto</option>
+              <option value="rotoreflection">Rotoreflection</option>
+              <option value="rotoinversion">Rotoinversion</option>
+            </select>
+          </div>
+          <h3 class="subsection-title">Boundary</h3>
+          <div class="button-row flush" id="animation-boundary-controls">
+            <button class="secondary boundary-button selected" data-boundary-mode="continuous">Continuous</button>
+            <button class="secondary boundary-button" data-boundary-mode="wrap">Wrap</button>
+          </div>
+          <h3 class="subsection-title">Export</h3>
+          <div class="button-row flush">
+            <button id="save-gif" class="secondary">Save GIF</button>
+            <button id="save-gif-3view" class="secondary">Save 3-view GIFs</button>
+            <button id="save-gif-3view-current" class="secondary">Save current 3-view</button>
+          </div>
+        </details>
       </section>
       <section class="panel">
-        <h2 class="section-title">View</h2>
+        <h2 class="section-title" id="view-title">View</h2>
         <div class="camera-block">
-          <label for="camera-angle">Rotate current view</label>
+          <label for="camera-angle" id="camera-angle-label">Rotate current view</label>
           <div class="camera-grid">
             <button id="camera-roll-left" class="secondary" title="Roll left" aria-label="Roll left">↶</button>
             <button id="camera-up" class="secondary" title="Tilt up" aria-label="Tilt up">↑</button>
@@ -1086,7 +1180,19 @@ HTML = """<!doctype html>
             <input id="camera-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1" title="Rotation angle" aria-label="Rotation angle">
             <span></span>
           </div>
+          <div class="button-row flush">
+            <button id="view-direction" class="secondary">View along direction</button>
+          </div>
         </div>
+        <div class="camera-block">
+          <label id="projection-label">Projection</label>
+          <div class="button-row flush" id="projection-controls">
+            <button class="secondary projection-button selected" data-projection-mode="perspective">Perspective</button>
+            <button class="secondary projection-button" data-projection-mode="orthographic">Orthographic</button>
+          </div>
+        </div>
+        <details class="compact-details advanced-only">
+          <summary>View settings</summary>
         <div class="camera-block advanced-only" id="view-direction-index-block">
           <label>View along [h k l]</label>
           <div class="view-direction-row">
@@ -1117,13 +1223,6 @@ HTML = """<!doctype html>
             <button id="reset-view" class="secondary">Reset center</button>
           </div>
         </div>
-        <div class="camera-block">
-          <label>Projection</label>
-          <div class="button-row flush" id="projection-controls">
-            <button class="secondary projection-button selected" data-projection-mode="perspective">Perspective</button>
-            <button class="secondary projection-button" data-projection-mode="orthographic">Orthographic</button>
-          </div>
-        </div>
         <div class="camera-block advanced-only">
           <label>Background</label>
           <div class="button-row flush" id="background-controls">
@@ -1138,41 +1237,42 @@ HTML = """<!doctype html>
             <button class="secondary legend-button" data-legend-visible="true">Show</button>
           </div>
         </div>
-        <div class="camera-block">
-          <div class="button-row flush">
-            <button id="view-direction" class="secondary">View along direction</button>
-          </div>
-        </div>
+        </details>
       </section>
       <section class="panel" id="display-block">
-        <h2 class="section-title">Cell</h2>
+        <h2 class="section-title" id="cell-title">Cell</h2>
         <div class="cell-block">
-          <label>Range</label>
-          <div class="button-row flush" id="display-controls">
-            <button class="secondary display-button selected" data-display-mode="source">Unit cell</button>
-            <button class="secondary display-button" data-display-mode="expanded_quarter">±1/4</button>
-            <button class="secondary display-button" data-display-mode="expanded_half">±1/2</button>
-            <button class="secondary display-button" data-display-mode="expanded_0_75">±3/4</button>
-            <button class="secondary display-button" data-display-mode="expanded_1_0">±1</button>
+          <label id="range-label">Range</label>
+          <div class="range-stepper" id="display-controls">
+            <button class="secondary" id="display-range-decrease" type="button" aria-label="Decrease range">−</button>
+            <output class="range-value" id="display-range-value">Unit cell</output>
+            <button class="secondary" id="display-range-increase" type="button" aria-label="Increase range">＋</button>
           </div>
+          <label class="check-row boundary-images-toggle">
+            <input id="include-boundary-images" type="checkbox">
+            Show boundary atoms
+          </label>
         </div>
-        <div class="cell-block advanced-only">
-          <label>Unit cell origin</label>
-          <div class="button-row flush" id="cell-origin-controls">
-            <button class="secondary cell-origin-button selected" data-cell-origin-mode="center">Center</button>
-            <button class="secondary cell-origin-button" data-cell-origin-mode="corner">Corner</button>
+        <details class="compact-details advanced-only">
+          <summary>Cell settings</summary>
+          <div class="cell-block">
+            <label>Unit cell origin</label>
+            <div class="button-row flush" id="cell-origin-controls">
+              <button class="secondary cell-origin-button selected" data-cell-origin-mode="center">Center</button>
+              <button class="secondary cell-origin-button" data-cell-origin-mode="corner">Corner</button>
+            </div>
           </div>
-        </div>
-        <div class="cell-block advanced-only">
-          <label>Cell basis</label>
-          <div class="button-row flush" id="cell-setting-controls">
-            <button class="secondary cell-setting-button" data-cell-setting-mode="primitive">Primitive cell</button>
-            <button class="secondary cell-setting-button" data-cell-setting-mode="conventional">Bravais cell</button>
+          <div class="cell-block">
+            <label>Cell basis</label>
+            <div class="button-row flush" id="cell-setting-controls">
+              <button class="secondary cell-setting-button" data-cell-setting-mode="primitive">Primitive cell</button>
+              <button class="secondary cell-setting-button" data-cell-setting-mode="conventional">Bravais cell</button>
+            </div>
           </div>
-        </div>
+        </details>
       </section>
-      <section class="panel advanced-only">
-        <h2 class="section-title">Atoms</h2>
+      <details class="panel advanced-only collapsible-panel">
+        <summary>Atoms</summary>
         <label>Elements</label>
         <div class="element-color-list" id="element-colors"></div>
         <label>Element filter</label>
@@ -1185,8 +1285,9 @@ HTML = """<!doctype html>
           <button id="clear-atoms" class="secondary atom-mode-button" data-scope="representative">Clear</button>
         </div>
         <p class="hint">Check atoms to animate selected atom types. Unit cell only leaves periodic display copies fixed.</p>
-      </section>
+      </details>
     </div>
+  </div>
   </div>
   <div class="status" id="status">Loading...</div>
 </main>
@@ -1214,6 +1315,8 @@ let importRequestId = 0;
 let exampleCatalog = {crystal: [], molecule: []};
 let selectedExamplePath = "";
 let movementBreakpoints = [0, 1];
+let selectedAtomDetailsOpen = true;
+let displayRangeUpdatePending = false;
 const STRUCTURE_KIND_UI = __STRUCTURE_KIND_CONFIG__;
 
 async function api(path, options) {
@@ -1509,7 +1612,8 @@ function renderOperationTypeFilter() {
   const keys = [...symbols.keys()].sort(compareText);
   if (operationTypeFilterValue && !keys.includes(operationTypeFilterValue)) operationTypeFilterValue = "";
   root.innerHTML = "";
-  for (const [key, label] of [["", "All"], ...keys.map(key => [key, symbols.get(key)])]) {
+  const allLabel = "All";
+  for (const [key, label] of [["", allLabel], ...keys.map(key => [key, symbols.get(key)])]) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `direction-chip${key === operationTypeFilterValue ? " selected" : ""}`;
@@ -1978,9 +2082,11 @@ function summaryItem(label, value) {
 }
 
 function syncStructureKindButtons() {
-  for (const button of document.querySelectorAll(".structure-kind-button")) {
-    button.classList.toggle("selected", button.dataset.kind === selectedStructureKind);
-  }
+  const button = document.getElementById("structure-kind-toggle");
+  const moleculeSelected = selectedStructureKind === "molecule";
+  button.textContent = moleculeSelected ? "Molecule" : "Crystal";
+  button.dataset.kind = moleculeSelected ? "crystal" : "molecule";
+  button.title = moleculeSelected ? "Switch to Crystal" : "Switch to Molecule";
 }
 
 function setStructureKind(kind) {
@@ -2362,7 +2468,7 @@ function renderSelectedAtomSummary() {
   const root = document.getElementById("selected-atom-summary");
   if (!root) return;
   root.innerHTML = "";
-  const selected = state.scope === "selected"
+  const selected = String(state.scope).startsWith("selected")
     ? new Set((state.selected_atoms || []).map(Number))
     : new Set();
   const selectors = document.createElement("div");
@@ -2392,7 +2498,7 @@ function renderSelectedAtomSummary() {
       }
       postState({
         selected_atoms: [...next].sort((a, b) => a - b),
-        scope: next.size ? "selected" : "displayed",
+        scope: next.size ? "selected_displayed" : "displayed",
         playing: false,
         reset: true,
       });
@@ -2400,6 +2506,18 @@ function renderSelectedAtomSummary() {
     selectors.appendChild(button);
   }
   root.appendChild(selectors);
+  if (!selected.size) return;
+  const details = document.createElement("details");
+  details.className = "selected-atom-details";
+  details.open = selectedAtomDetailsOpen;
+  details.addEventListener("toggle", () => {
+    selectedAtomDetailsOpen = details.open;
+  });
+  const summary = document.createElement("summary");
+  summary.textContent = `Selected atoms (${selected.size})`;
+  details.appendChild(summary);
+  const cards = document.createElement("div");
+  cards.className = "selected-atom-cards";
   for (const atom of atoms.filter(item => selected.has(Number(item.index)))) {
     const motion = atomMotionBySource.get(atom.index);
     const start = sourceKind === "crystal" ? motion?.start_frac : motion?.start_cart;
@@ -2420,8 +2538,10 @@ function renderSelectedAtomSummary() {
       : "座標情報を取得できません";
     card.appendChild(name);
     card.appendChild(coordinates);
-    root.appendChild(card);
+    cards.appendChild(card);
   }
+  details.appendChild(cards);
+  root.appendChild(details);
 }
 
 function atomListRenderSignature() {
@@ -2464,10 +2584,46 @@ function syncBoundaryButtons() {
   }
 }
 
+const displayRangeSteps = [
+  {mode: "source", label: "Unit cell"},
+  {mode: "expanded_quarter", label: "±1/4"},
+  {mode: "expanded_half", label: "±1/2"},
+  {mode: "expanded_0_75", label: "±3/4"},
+  {mode: "expanded_1_0", label: "±1"},
+];
+
 function syncDisplayButtons() {
   const displayMode = state.display_mode || "source";
-  for (const button of document.querySelectorAll(".display-button")) {
-    button.classList.toggle("selected", button.dataset.displayMode === displayMode);
+  const index = Math.max(0, displayRangeSteps.findIndex(step => step.mode === displayMode));
+  document.getElementById("display-range-value").textContent = displayRangeSteps[index].label;
+  document.getElementById("display-range-decrease").disabled = index === 0;
+  document.getElementById("display-range-increase").disabled = index === displayRangeSteps.length - 1;
+  document.getElementById("include-boundary-images").checked = Boolean(state.include_boundary_images);
+}
+
+async function changeDisplayRange(offset) {
+  if (displayRangeUpdatePending) return;
+  const displayMode = state.display_mode || "source";
+  const currentIndex = Math.max(0, displayRangeSteps.findIndex(step => step.mode === displayMode));
+  const nextIndex = Math.max(0, Math.min(displayRangeSteps.length - 1, currentIndex + offset));
+  if (nextIndex === currentIndex) return;
+  displayRangeUpdatePending = true;
+  state.display_mode = displayRangeSteps[nextIndex].mode;
+  syncDisplayButtons();
+  document.getElementById("display-range-decrease").disabled = true;
+  document.getElementById("display-range-increase").disabled = true;
+  try {
+    await postState({
+      display_mode: displayRangeSteps[nextIndex].mode,
+      playing: false,
+      reset: true,
+    });
+  } catch (error) {
+    state.display_mode = displayMode;
+    throw error;
+  } finally {
+    displayRangeUpdatePending = false;
+    syncDisplayButtons();
   }
 }
 
@@ -2963,13 +3119,21 @@ function syncExperienceModeControls() {
   const beginner = experienceMode === "beginner";
   document.body.classList.toggle("beginner-mode", beginner);
   document.body.classList.toggle("advanced-mode", !beginner);
-  for (const button of document.querySelectorAll(".experience-button")) {
-    button.classList.toggle("selected", button.dataset.experience === experienceMode);
-  }
+  const modeButton = document.getElementById("experience-toggle");
+  modeButton.textContent = beginner ? "Simple" : "Full";
+  modeButton.dataset.experience = beginner ? "advanced" : "beginner";
+  modeButton.title = beginner ? "Switch to Full mode" : "Switch to Simple mode";
+  document.getElementById("main-title").textContent = "Symmetry Controls";
   document.getElementById("operations-title").textContent = "Operations";
   document.getElementById("operations-label").textContent = "Operation list";
   document.getElementById("structure-info-title").textContent = "Structure Info";
   document.getElementById("animation-title").textContent = "Animation";
+  document.getElementById("view-title").textContent = "View";
+  document.getElementById("camera-angle-label").textContent = "Rotate current view";
+  document.getElementById("projection-label").textContent = "Projection";
+  document.getElementById("cell-title").textContent = "Cell";
+  document.getElementById("range-label").textContent = "Range";
+  syncPlayToggleButton();
 }
 
 function setExperienceMode(mode) {
@@ -3132,13 +3296,17 @@ for (const button of document.querySelectorAll(".boundary-button")) {
     reset: true,
   }));
 }
-for (const button of document.querySelectorAll(".display-button")) {
-  button.addEventListener("click", () => postState({
-    display_mode: button.dataset.displayMode,
-    playing: false,
-    reset: true,
-  }));
-}
+document.getElementById("display-range-decrease").addEventListener("click", () => {
+  changeDisplayRange(-1).catch(error => showLoadError("Range update failed", error));
+});
+document.getElementById("display-range-increase").addEventListener("click", () => {
+  changeDisplayRange(1).catch(error => showLoadError("Range update failed", error));
+});
+document.getElementById("include-boundary-images").addEventListener("change", event => postState({
+  include_boundary_images: event.currentTarget.checked,
+  playing: false,
+  reset: true,
+}));
 for (const button of document.querySelectorAll(".cell-origin-button")) {
   button.addEventListener("click", () => postState({
     cell_origin_mode: button.dataset.cellOriginMode,
@@ -3414,7 +3582,7 @@ function currentAnimationAtoms() {
   if (state.scope === "representative") return all.slice(0, 1);
   if (state.scope === "unit_cell") return all;
   if (state.scope === "displayed") return all;
-  if (state.scope === "selected") return state.selected_atoms && state.selected_atoms.length ? state.selected_atoms : selectedAtomIndices();
+  if (String(state.scope).startsWith("selected")) return state.selected_atoms && state.selected_atoms.length ? state.selected_atoms : selectedAtomIndices();
   return all;
 }
 

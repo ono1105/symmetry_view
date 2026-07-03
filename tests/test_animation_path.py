@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import numpy as np
 
 from crystal_viewer.viewer.animation import apply_boundary_mode, update_animated_atoms
-from crystal_viewer.viewer.animation_path import evaluate_path
+from crystal_viewer.viewer.animation_path import animation_path_length, evaluate_path
 from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 
 
@@ -69,7 +69,8 @@ class AnimationPathTest(unittest.TestCase):
         }
 
         np.testing.assert_allclose(evaluate_path(path, 0.0), [1.0, 0.0, 0.0])
-        np.testing.assert_allclose(evaluate_path(path, 0.5), [1.25, 0.0, 0.0])
+        split = animation_path_length(path["segments"][0]) / animation_path_length(path)
+        np.testing.assert_allclose(evaluate_path(path, split), [1.25, 0.0, 0.0])
         np.testing.assert_allclose(evaluate_path(path, 1.0), [0.0, 1.25, 0.0])
 
     def test_sequential_affine_path_transforms_display_copy_offsets(self):
@@ -103,7 +104,9 @@ class AnimationPathTest(unittest.TestCase):
 
         start_override = np.array([2.0, 0.0, 0.0])
 
-        np.testing.assert_allclose(evaluate_path(path, 0.5, start_override=start_override), [2.25, 0.0, 0.0])
+        first_length = animation_path_length(path["segments"][0], start_override=start_override)
+        split = first_length / animation_path_length(path, start_override=start_override)
+        np.testing.assert_allclose(evaluate_path(path, split, start_override=start_override), [2.25, 0.0, 0.0])
         np.testing.assert_allclose(evaluate_path(path, 1.0, start_override=start_override), [0.0, 2.25, 0.0])
 
     def test_sequence_existing_rotation_uses_rotation_segment(self):

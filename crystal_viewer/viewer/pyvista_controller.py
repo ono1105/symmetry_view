@@ -80,6 +80,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_element_hidden: dict[str, bool] | None = None
         self.last_atom_hidden: dict[str, bool] | None = None
         self.last_display_mode: str | None = self.display_mode
+        self.include_boundary_images = bool(shared_state.get("include_boundary_images", False))
+        self.last_include_boundary_images: bool | None = self.include_boundary_images
         self.last_cell_origin_mode: str | None = self.cell_origin_mode
         self.last_projection_mode: str | None = None
         self.last_background_mode: str | None = None
@@ -142,6 +144,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
         element_hidden = snapshot.element_hidden
         atom_hidden = snapshot.atom_hidden
         display_mode = snapshot.display_mode
+        include_boundary_images = snapshot.include_boundary_images
         cell_origin_mode = "corner" if snapshot.cell_origin_mode == "corner" else "center"
         active_mode = snapshot.active_mode
         animation_boundary_mode = "wrap" if snapshot.animation_boundary_mode == "wrap" else "continuous"
@@ -294,6 +297,21 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.recenter_camera_for_display_mode(old_display_mode, display_mode)
             if active_mode == "standard":
                 self.show_element_actors(self.current_operation()["index"])
+            reset = True
+            should_render = True
+            should_update_status = True
+
+        if include_boundary_images != self.last_include_boundary_images:
+            self.playing = False
+            self.include_boundary_images = include_boundary_images
+            self.clear_glyph_atom_cache()
+            current_display_mode = self.display_mode
+            self.display_mode = ""
+            self.rebuild_display_atoms(current_display_mode)
+            self._path_length_cache_paths = None
+            if active_mode == "standard":
+                self.build_paths()
+            self.last_include_boundary_images = include_boundary_images
             reset = True
             should_render = True
             should_update_status = True
@@ -801,6 +819,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                     self.render_data,
                     display_mode=self.display_mode,
                     cell_origin_mode=self.cell_origin_mode,
+                    include_boundary_images=self.include_boundary_images,
                 )
             )
         except Exception:
@@ -1253,6 +1272,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 self.render_data,
                 display_mode=self.display_mode,
                 cell_origin_mode=self.cell_origin_mode,
+                include_boundary_images=self.include_boundary_images,
             ):
                 path = self.paths.get(int(instance["atom"]["index"]))
                 if path is None or (path.get("unit_cell_only") and not instance["is_primary_image"]):

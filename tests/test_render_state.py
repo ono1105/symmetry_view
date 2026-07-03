@@ -32,6 +32,7 @@ class RenderStateTest(unittest.TestCase):
                 "cell_origin_mode": "corner",
                 "improper_mode": "rotoreflection",
                 "display_mode": "expanded_quarter",
+                "include_boundary_images": True,
                 "animation_boundary_mode": "wrap",
                 "reload_request_id": 7,
             },
@@ -44,6 +45,7 @@ class RenderStateTest(unittest.TestCase):
         self.assertEqual(state["cell_origin_mode"], "corner")
         self.assertEqual(state["improper_mode"], "rotoreflection")
         self.assertEqual(state["display_mode"], "expanded_quarter")
+        self.assertTrue(state["include_boundary_images"])
         self.assertEqual(state["animation_boundary_mode"], "wrap")
         self.assertEqual(state["reload_request_id"], 7)
 
@@ -54,6 +56,7 @@ class RenderStateTest(unittest.TestCase):
         self.assertFalse(state["legend_visible"])
         self.assertEqual(state["cell_origin_mode"], "center")
         self.assertEqual(state["animation_boundary_mode"], "continuous")
+        self.assertFalse(state["include_boundary_images"])
 
     def test_apply_render_state_update_ignores_unknown_keys(self):
         state = initial_render_state(minimal_payload(), initial_operation=None, display_mode="source")

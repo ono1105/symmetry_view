@@ -188,6 +188,7 @@ def display_atom_api_items(
     *,
     display_mode: str,
     cell_origin_mode: str,
+    include_boundary_images: bool = False,
 ) -> list[dict]:
     items = []
     for instance_id, item in enumerate(
@@ -195,6 +196,7 @@ def display_atom_api_items(
             render_data,
             display_mode=display_mode,
             cell_origin_mode=cell_origin_mode,
+            include_boundary_images=include_boundary_images,
         )
     ):
         atom = item["atom"]
@@ -549,6 +551,7 @@ def make_handler(
                     source_kind = session.source_kind
                     display_mode = str(shared_state.get("display_mode", "source"))
                     cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                    include_boundary_images = bool(shared_state.get("include_boundary_images", False))
                 body = {
                     "schema_version": schema_version,
                     "source_kind": source_kind,
@@ -556,10 +559,12 @@ def make_handler(
                     "render_data": render_data,
                     "display_mode": display_mode,
                     "cell_origin_mode": cell_origin_mode,
+                    "include_boundary_images": include_boundary_images,
                     "display_atoms": display_atom_api_items(
                         render_data,
                         display_mode=display_mode,
                         cell_origin_mode=cell_origin_mode,
+                        include_boundary_images=include_boundary_images,
                     ),
                     "display_unit_cell": display_unit_cell_api_item(
                         render_data,
@@ -586,6 +591,7 @@ def make_handler(
                         improper_mode = str(shared_state.get("improper_mode", "auto"))
                         display_mode = str(shared_state.get("display_mode", "source"))
                         cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                        include_boundary_images = bool(shared_state.get("include_boundary_images", False))
                         animation_boundary_mode = str(
                             shared_state.get("animation_boundary_mode", "continuous")
                         )
@@ -598,6 +604,7 @@ def make_handler(
                         improper_mode=improper_mode,
                         display_mode=display_mode,
                         cell_origin_mode=cell_origin_mode,
+                        include_boundary_images=include_boundary_images,
                         animation_boundary_mode=animation_boundary_mode,
                     )
                 except (TypeError, ValueError) as exc:

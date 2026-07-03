@@ -84,6 +84,88 @@ function angleRadians(path) {
   return path.angle_deg * Math.PI / 180;
 }
 
+function rotationArcLength(path, start) {
+  const direction = normalize(path.axis_direction);
+  const relative = subtract(start, path.axis_point);
+  const axial = scale(direction, dot(relative, direction));
+  return Math.sqrt(dot(subtract(relative, axial), subtract(relative, axial))) * Math.abs(angleRadians(path));
+}
+
+function twoPhaseGeometry(path, start) {
+  let midpoint;
+  let endpoint;
+  let firstLength;
+  if (path.type === "glide") {
+    midpoint = reflectPoint(start, path.plane_point, path.plane_normal);
+    endpoint = add(midpoint, path.translation);
+    firstLength = Math.sqrt(dot(subtract(midpoint, start), subtract(midpoint, start)));
+  } else {
+    midpoint = rotateAboutAxis(start, path.axis_point, path.axis_direction, angleRadians(path));
+    firstLength = rotationArcLength(path, start);
+    if (path.type === "screw") endpoint = add(midpoint, path.translation);
+    else if (path.type === "rotoinversion") endpoint = subtract(scale(path.center, 2), midpoint);
+    else endpoint = reflectPoint(midpoint, path.plane_point, path.plane_normal);
+  }
+  const secondDelta = subtract(endpoint, midpoint);
+  return {midpoint, endpoint, firstLength, secondLength: Math.sqrt(dot(secondDelta, secondDelta))};
+}
+
+function pathLength(path, startOverride = null) {
+  if (path.type === "sequential") {
+    if (!path.segments?.length) throw new Error("Sequential path requires at least one segment");
+    let segmentStart = startOverride === null ? [...path.segments[0].start] : [...startOverride];
+    let length = 0;
+    for (const segment of path.segments) {
+      length += pathLength(segment, segmentStart);
+      segmentStart = evaluatePath(segment, 1, segmentStart);
+    }
+    return length;
+  }
+  const start = startOverride === null ? [...path.start] : [...startOverride];
+  if (path.type === "rotation") return rotationArcLength(path, start);
+  if (["screw", "glide", "rotoinversion", "rotoreflection"].includes(path.type)) {
+    const geometry = twoPhaseGeometry(path, start);
+    return geometry.firstLength + geometry.secondLength;
+  }
+  const delta = subtract(evaluatePath(path, 1, start), start);
+  return Math.sqrt(dot(delta, delta));
+}
+
+function phaseFraction(firstLength, secondLength) {
+  const total = firstLength + secondLength;
+  return total > EPSILON ? firstLength / total : 0.5;
+}
+
+export function pathBreakpoints(path, startOverride = null) {
+  const result = new Set([0, 1]);
+  if (path.type === "sequential" && path.segments?.length) {
+    let segmentStart = startOverride === null ? [...path.segments[0].start] : [...startOverride];
+    const starts = [];
+    const lengths = [];
+    for (const segment of path.segments) {
+      starts.push(segmentStart);
+      lengths.push(pathLength(segment, segmentStart));
+      segmentStart = evaluatePath(segment, 1, segmentStart);
+    }
+    const total = lengths.reduce((sum, length) => sum + length, 0);
+    let cumulative = 0;
+    for (let index = 0; index < path.segments.length; index += 1) {
+      const scale = total > EPSILON ? lengths[index] / total : 1 / lengths.length;
+      for (const local of pathBreakpoints(path.segments[index], starts[index])) {
+        result.add(cumulative + scale * local);
+      }
+      cumulative += scale;
+    }
+  } else if (["screw", "glide", "rotoinversion", "rotoreflection"].includes(path.type)) {
+    const start = startOverride === null ? [...path.start] : [...startOverride];
+    const geometry = twoPhaseGeometry(path, start);
+    result.add(phaseFraction(geometry.firstLength, geometry.secondLength));
+  } else if (path.type === "mirror_after_hold") {
+    result.add(Math.max(0, Math.min(Number(path.hold_fraction) || 0.3, 1)));
+  }
+  return [...result].sort((a, b) => a - b);
+}
+
 export function evaluatePath(path, progress, startOverride = null) {
   const s = Math.min(1, Math.max(0, Number(progress)));
   const pathType = path.type;
@@ -93,13 +175,36 @@ export function evaluatePath(path, progress, startOverride = null) {
     if (!segments.length) {
       throw new Error("Sequential path requires at least one segment");
     }
-    const index = Math.min(Math.floor(s * segments.length), segments.length - 1);
-    const localS = (s - index / segments.length) * segments.length;
-    let segmentStart = startOverride;
-    for (const segment of segments.slice(0, index)) {
+    let segmentStart = startOverride === null ? [...segments[0].start] : [...startOverride];
+    const starts = [];
+    const lengths = [];
+    for (const segment of segments) {
+      starts.push(segmentStart);
+      lengths.push(pathLength(segment, segmentStart));
       segmentStart = evaluatePath(segment, 1, segmentStart);
     }
-    return evaluatePath(segments[index], localS, segmentStart);
+    const total = lengths.reduce((sum, length) => sum + length, 0);
+    let index;
+    let localS;
+    if (total <= EPSILON) {
+      index = Math.min(Math.floor(s * segments.length), segments.length - 1);
+      localS = s * segments.length - index;
+    } else {
+      const distance = s * total;
+      let cumulative = 0;
+      index = segments.length - 1;
+      localS = 1;
+      for (let candidate = 0; candidate < segments.length; candidate += 1) {
+        const length = lengths[candidate];
+        if (distance <= cumulative + length || candidate === segments.length - 1) {
+          index = candidate;
+          localS = length <= EPSILON ? 1 : (distance - cumulative) / length;
+          break;
+        }
+        cumulative += length;
+      }
+    }
+    return evaluatePath(segments[index], localS, starts[index]);
   }
 
   const start = startOverride === null ? [...path.start] : [...startOverride];
@@ -112,12 +217,16 @@ export function evaluatePath(path, progress, startOverride = null) {
   if (pathType === "rotation") {
     return rotateAboutAxis(start, path.axis_point, path.axis_direction, angleRadians(path) * s);
   }
-  if (pathType === "screw") {
-    if (s <= 0.5) {
-      return rotateAboutAxis(start, path.axis_point, path.axis_direction, angleRadians(path) * 2 * s);
+  if (["screw", "glide", "rotoinversion", "rotoreflection"].includes(pathType)) {
+    const geometry = twoPhaseGeometry(path, start);
+    const split = phaseFraction(geometry.firstLength, geometry.secondLength);
+    if (s <= split) {
+      const localS = split > EPSILON ? s / split : 1;
+      if (pathType === "glide") return interpolate(start, geometry.midpoint, localS);
+      return rotateAboutAxis(start, path.axis_point, path.axis_direction, angleRadians(path) * localS);
     }
-    const rotatedEnd = rotateAboutAxis(start, path.axis_point, path.axis_direction, angleRadians(path));
-    return add(rotatedEnd, scale(path.translation, 2 * s - 1));
+    const localS = split < 1 - EPSILON ? (s - split) / (1 - split) : 1;
+    return interpolate(geometry.midpoint, geometry.endpoint, localS);
   }
   if (pathType === "mirror" || pathType === "mirror_after_hold") {
     if (pathType === "mirror_after_hold") {
@@ -130,24 +239,8 @@ export function evaluatePath(path, progress, startOverride = null) {
     }
     return interpolate(start, reflectPoint(start, path.plane_point, path.plane_normal), s);
   }
-  if (pathType === "glide") {
-    const mirrored = reflectPoint(start, path.plane_point, path.plane_normal);
-    return s <= 0.5
-      ? interpolate(start, mirrored, 2 * s)
-      : add(mirrored, scale(path.translation, 2 * s - 1));
-  }
   if (pathType === "inversion") {
     return interpolate(start, subtract(scale(path.center, 2), start), s);
-  }
-  if (pathType === "rotoinversion" || pathType === "rotoreflection") {
-    if (s <= 0.5) {
-      return rotateAboutAxis(start, path.axis_point, path.axis_direction, angleRadians(path) * 2 * s);
-    }
-    const rotatedEnd = rotateAboutAxis(start, path.axis_point, path.axis_direction, angleRadians(path));
-    const transformed = pathType === "rotoinversion"
-      ? subtract(scale(path.center, 2), rotatedEnd)
-      : reflectPoint(rotatedEnd, path.plane_point, path.plane_normal);
-    return interpolate(rotatedEnd, transformed, 2 * s - 1);
   }
 
   let target = [...path.target];

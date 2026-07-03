@@ -322,18 +322,76 @@ def improper_rotation_angle(operation: dict, axis: dict | None, mode: str) -> fl
 def translation_path(start: np.ndarray, target: np.ndarray) -> dict:
     return {"type": "linear", "start": start, "target": target}
 
+
+def rotation_arc_length(path: dict, start: np.ndarray) -> float:
+    axis_point = np.asarray(path["axis_point"], dtype=float)
+    axis_direction = normalize(np.asarray(path["axis_direction"], dtype=float))
+    relative = np.asarray(start, dtype=float) - axis_point
+    radial = relative - np.dot(relative, axis_direction) * axis_direction
+    return float(np.linalg.norm(radial) * abs(float(path["angle"])))
+
+
+def two_phase_geometry(path: dict, start: np.ndarray) -> tuple[np.ndarray, np.ndarray, float, float]:
+    path_type = str(path["type"])
+    start = np.asarray(start, dtype=float)
+    if path_type == "glide":
+        midpoint = reflect_point(start, path["plane_point"], path["plane_normal"])
+        endpoint = midpoint + np.asarray(path["translation"], dtype=float)
+        first_length = float(np.linalg.norm(midpoint - start))
+    else:
+        midpoint = rotate_about_axis(
+            start,
+            path["axis_point"],
+            path["axis_direction"],
+            path["angle"],
+        )
+        first_length = rotation_arc_length(path, start)
+        if path_type == "screw":
+            endpoint = midpoint + np.asarray(path["translation"], dtype=float)
+        elif path_type == "rotoinversion":
+            endpoint = 2.0 * np.asarray(path["center"], dtype=float) - midpoint
+        else:
+            endpoint = reflect_point(midpoint, path["plane_point"], path["plane_normal"])
+    second_length = float(np.linalg.norm(endpoint - midpoint))
+    return midpoint, endpoint, first_length, second_length
+
+
+def phase_fraction(first_length: float, second_length: float) -> float:
+    total = first_length + second_length
+    return first_length / total if total > 1e-12 else 0.5
+
+
 def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None) -> np.ndarray:
     s = float(np.clip(s, 0.0, 1.0))
     path_type = path["type"]
     if path_type == "sequential":
         segments = path["segments"]
-        segment_count = len(segments)
-        index = min(int(s * segment_count), segment_count - 1)
-        local_s = (s - index / segment_count) * segment_count
-        segment_start = start_override
-        for segment in segments[:index]:
+        if not segments:
+            raise ValueError("sequential path requires at least one segment")
+        initial_start = segments[0]["start"] if start_override is None else start_override
+        segment_start = np.asarray(initial_start, dtype=float)
+        starts = []
+        lengths = []
+        for segment in segments:
+            starts.append(segment_start)
+            lengths.append(animation_path_length(segment, start_override=segment_start))
             segment_start = evaluate_path(segment, 1.0, start_override=segment_start)
-        return evaluate_path(segments[index], local_s, start_override=segment_start)
+        total = sum(lengths)
+        if total <= 1e-12:
+            index = min(int(s * len(segments)), len(segments) - 1)
+            local_s = (s * len(segments)) - index
+        else:
+            distance = s * total
+            cumulative = 0.0
+            index = len(segments) - 1
+            local_s = 1.0
+            for candidate, length in enumerate(lengths):
+                if distance <= cumulative + length or candidate == len(segments) - 1:
+                    index = candidate
+                    local_s = 1.0 if length <= 1e-12 else (distance - cumulative) / length
+                    break
+                cumulative += length
+        return evaluate_path(segments[index], local_s, start_override=starts[index])
     start = np.asarray(path["start"], dtype=float) if start_override is None else np.asarray(start_override, dtype=float)
     if path_type == "affine_linear":
         if start_override is not None:
@@ -351,21 +409,21 @@ def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None
             path["angle"] * s,
         )
         return rotated
-    if path_type == "screw":
-        if s <= 0.5:
+    if path_type in ("screw", "glide", "rotoinversion", "rotoreflection"):
+        midpoint, endpoint, first_length, second_length = two_phase_geometry(path, start)
+        split = phase_fraction(first_length, second_length)
+        if s <= split:
+            local_s = s / split if split > 1e-12 else 1.0
+            if path_type == "glide":
+                return interpolate(start, midpoint, local_s)
             return rotate_about_axis(
                 start,
                 path["axis_point"],
                 path["axis_direction"],
-                path["angle"] * (2.0 * s),
+                path["angle"] * local_s,
             )
-        rotated_end = rotate_about_axis(
-            start,
-            path["axis_point"],
-            path["axis_direction"],
-            path["angle"],
-        )
-        return rotated_end + np.asarray(path["translation"], dtype=float) * (2.0 * s - 1.0)
+        local_s = (s - split) / (1.0 - split) if split < 1.0 - 1e-12 else 1.0
+        return interpolate(midpoint, endpoint, local_s)
     if path_type == "mirror":
         mirrored = reflect_point(start, path["plane_point"], path["plane_normal"])
         return interpolate(start, mirrored, s)
@@ -376,46 +434,9 @@ def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None
         local_s = (s - hold_fraction) / max(1.0 - hold_fraction, 1e-9)
         mirrored = reflect_point(start, path["plane_point"], path["plane_normal"])
         return interpolate(start, mirrored, local_s)
-    if path_type == "glide":
-        mirrored = reflect_point(start, path["plane_point"], path["plane_normal"])
-        if s <= 0.5:
-            return interpolate(start, mirrored, 2.0 * s)
-        return mirrored + np.asarray(path["translation"], dtype=float) * (2.0 * s - 1.0)
     if path_type == "inversion":
         inverted = 2.0 * path["center"] - start
         return interpolate(start, inverted, s)
-    if path_type == "rotoinversion":
-        if s <= 0.5:
-            return rotate_about_axis(
-                start,
-                path["axis_point"],
-                path["axis_direction"],
-                path["angle"] * (2.0 * s),
-            )
-        rotated_end = rotate_about_axis(
-            start,
-            path["axis_point"],
-            path["axis_direction"],
-            path["angle"],
-        )
-        inverted = 2.0 * path["center"] - rotated_end
-        return interpolate(rotated_end, inverted, 2.0 * s - 1.0)
-    if path_type == "rotoreflection":
-        if s <= 0.5:
-            return rotate_about_axis(
-                start,
-                path["axis_point"],
-                path["axis_direction"],
-                path["angle"] * (2.0 * s),
-            )
-        rotated_end = rotate_about_axis(
-            start,
-            path["axis_point"],
-            path["axis_direction"],
-            path["angle"],
-        )
-        mirrored = reflect_point(rotated_end, path["plane_point"], path["plane_normal"])
-        return interpolate(rotated_end, mirrored, 2.0 * s - 1.0)
     target = np.asarray(path["target"], dtype=float)
     if start_override is not None:
         target = target + (start - np.asarray(path["start"], dtype=float))
@@ -429,31 +450,31 @@ def animation_path_length(
 ) -> float:
     """Return the exact Cartesian arc length for a supported animation path."""
     path_type = str(path["type"])
+    if path_type == "sequential":
+        length = 0.0
+        segments = path.get("segments", [])
+        if not segments:
+            return 0.0
+        segment_start = np.asarray(
+            segments[0]["start"] if start_override is None else start_override,
+            dtype=float,
+        )
+        for segment in segments:
+            length += animation_path_length(segment, start_override=segment_start)
+            segment_start = evaluate_path(segment, 1.0, start_override=segment_start)
+        return length
     start = np.asarray(
         path["start"] if start_override is None else start_override,
         dtype=float,
     )
-    if path_type == "sequential":
-        length = 0.0
-        segment_start = start
-        for segment in path.get("segments", []):
-            length += animation_path_length(segment, start_override=segment_start)
-            segment_start = evaluate_path(segment, 1.0, start_override=segment_start)
-        return length
     if path_type in ("rotation", "screw", "rotoinversion", "rotoreflection"):
-        axis_point = np.asarray(path["axis_point"], dtype=float)
-        axis_direction = normalize(np.asarray(path["axis_direction"], dtype=float))
-        relative = start - axis_point
-        radial = relative - np.dot(relative, axis_direction) * axis_direction
-        rotation_length = float(np.linalg.norm(radial) * abs(float(path["angle"])))
+        rotation_length = rotation_arc_length(path, start)
         if path_type == "rotation":
             return rotation_length
-        midpoint = np.asarray(evaluate_path(path, 0.5, start_override=start), dtype=float)
-        endpoint = np.asarray(evaluate_path(path, 1.0, start_override=start), dtype=float)
-        return rotation_length + float(np.linalg.norm(endpoint - midpoint))
+        _, _, _, second_length = two_phase_geometry(path, start)
+        return rotation_length + second_length
     if path_type == "glide":
-        midpoint = np.asarray(evaluate_path(path, 0.5, start_override=start), dtype=float)
-        endpoint = np.asarray(evaluate_path(path, 1.0, start_override=start), dtype=float)
-        return float(np.linalg.norm(midpoint - start) + np.linalg.norm(endpoint - midpoint))
+        _, _, first_length, second_length = two_phase_geometry(path, start)
+        return first_length + second_length
     endpoint = np.asarray(evaluate_path(path, 1.0, start_override=start), dtype=float)
     return float(np.linalg.norm(endpoint - start))

@@ -70,6 +70,23 @@ class DisplayRenderApiItemsTest(unittest.TestCase):
         for item in items:
             self.assertTrue(all(-2.81 - 1e-8 <= value < 2.81 + 1e-8 for value in item["cart"]))
 
+    def test_boundary_atom_option_adds_opposite_cell_faces(self):
+        regular = display_atom_api_items(
+            self.render_data,
+            display_mode="source",
+            cell_origin_mode="center",
+        )
+        with_boundaries = display_atom_api_items(
+            self.render_data,
+            display_mode="source",
+            cell_origin_mode="center",
+            include_boundary_images=True,
+        )
+
+        self.assertEqual(len(regular), 8)
+        self.assertEqual(len(with_boundaries), 27)
+        self.assertEqual(sum(bool(item["is_primary_image"]) for item in with_boundaries), 8)
+
     def test_all_cell_ranges_match_shared_pyvista_display_instances(self):
         expected_counts = {
             "source": 8,

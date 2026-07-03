@@ -33,6 +33,7 @@ def element_instance_batches(
     *,
     display_mode: str,
     cell_origin_mode: str = "center",
+    include_boundary_images: bool = False,
     item_filter=None,
 ) -> tuple[ElementInstanceBatch, ...]:
     grouped: dict[str, list[dict]] = {}
@@ -40,6 +41,7 @@ def element_instance_batches(
         render_data,
         display_mode=display_mode,
         cell_origin_mode=cell_origin_mode,
+        include_boundary_images=include_boundary_images,
     ):
         if item_filter is not None and not item_filter(item):
             continue

@@ -23,6 +23,7 @@ def display_atom_instances(
     *,
     display_mode: str = "expanded",
     cell_origin_mode: str = "center",
+    include_boundary_images: bool = False,
 ) -> list[dict]:
     unit_cell = render_data.get("unit_cell")
     if unit_cell is None:
@@ -58,6 +59,7 @@ def display_atom_instances(
             frac,
             display_mode=display_mode,
             cell_origin_mode=cell_origin_mode,
+            include_boundary_images=include_boundary_images,
         ):
             shift_cart = shift @ lattice
             is_primary = is_primary_display_image(frac, shift, cell_origin_mode=cell_origin_mode)
@@ -78,13 +80,19 @@ def display_fractional_shifts(
     *,
     display_mode: str = "expanded",
     cell_origin_mode: str = "center",
+    include_boundary_images: bool = False,
 ) -> list[np.ndarray]:
     margin = display_mode_margin(display_mode)
     shifts = []
     lower, upper = display_fractional_bounds(display_mode, cell_origin_mode)
     for shift in periodic_shifts(max(int(np.ceil(margin + 1.0)), 1)):
         image_frac = frac + shift
-        if np.all(image_frac >= lower - 1e-9) and np.all(image_frac < upper - 1e-9):
+        within_upper = (
+            np.all(image_frac <= upper + 1e-9)
+            if include_boundary_images
+            else np.all(image_frac < upper - 1e-9)
+        )
+        if np.all(image_frac >= lower - 1e-9) and within_upper:
             shifts.append(shift)
     return shifts
 

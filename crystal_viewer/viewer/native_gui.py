@@ -95,6 +95,7 @@ class NativePyVistaViewer:
         self.legend_actor = None
         self.background_mode = "dark"
         self.cell_origin_mode = "center"
+        self.include_boundary_images = False
 
         self.plotter = pv.Plotter()
         setup_viewer_lighting(self.plotter, background_mode=self.background_mode)
@@ -275,6 +276,7 @@ class NativePyVistaViewer:
                 self.render_data,
                 display_mode=self.display_mode,
                 cell_origin_mode=self.cell_origin_mode,
+                include_boundary_images=self.include_boundary_images,
             ):
                 if not self.display_atom_visible(display_item):
                     continue
@@ -361,6 +363,7 @@ class NativePyVistaViewer:
                 self.render_data,
                 display_mode=display_mode,
                 cell_origin_mode=self.cell_origin_mode,
+                include_boundary_images=self.include_boundary_images,
                 item_filter=self.display_atom_visible,
             ):
                 glyph = build_element_glyph_mesh(batch, self.render_data)
@@ -438,7 +441,7 @@ class NativePyVistaViewer:
         if mapping is None:
             self.paths = {}
             return
-        selected_atoms = self.selected_atoms if self.scope == "selected" else ()
+        selected_atoms = self.selected_atoms if self.scope in ("selected", "selected_displayed") else ()
         animation_scope = self.scope
         unit_cell_only = self.scope in ("selected", "unit_cell", "representative")
         if self.scope == "displayed":
@@ -447,7 +450,9 @@ class NativePyVistaViewer:
         elif self.scope == "unit_cell":
             animation_scope = "selected"
             selected_atoms = tuple(atom["index"] for atom in self.render_data["atoms"])
-        representative_atom = selected_atoms[0] if self.scope == "selected" and selected_atoms else None
+        elif self.scope == "selected_displayed":
+            animation_scope = "selected"
+        representative_atom = selected_atoms[0] if self.scope in ("selected", "selected_displayed") and selected_atoms else None
         self.paths = animation_paths(
             self.render_data,
             operation,
