@@ -14,6 +14,12 @@ from crystal_viewer.geometry import (
 )
 
 
+NORMALIZED_TRAVEL_SPEED_PER_SECOND = 0.525
+MINIMUM_ANIMATION_SECONDS = 1.0
+MAXIMUM_ANIMATION_SECONDS = 16.0 / 3.0
+STATIONARY_ANIMATION_SECONDS = 0.4
+
+
 def effective_rotation_axis(operation: dict, axis: dict | None, center: dict | None) -> dict | None:
     if axis is not None:
         return axis
@@ -507,3 +513,13 @@ def animation_path_length(
         return first_length + second_length
     endpoint = np.asarray(evaluate_path(path, 1.0, start_override=start), dtype=float)
     return float(np.linalg.norm(endpoint - start))
+
+
+def normalized_animation_duration_seconds(maximum_travel_distance: float, scene_span: float) -> float:
+    """Return a scale-independent base duration for the displayed structure."""
+    distance = max(float(maximum_travel_distance), 0.0)
+    if distance <= 1e-9:
+        return STATIONARY_ANIMATION_SECONDS
+    span = max(float(scene_span), 1e-9)
+    duration = distance / span / NORMALIZED_TRAVEL_SPEED_PER_SECOND
+    return float(np.clip(duration, MINIMUM_ANIMATION_SECONDS, MAXIMUM_ANIMATION_SECONDS))

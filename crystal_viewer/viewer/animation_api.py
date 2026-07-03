@@ -7,8 +7,8 @@ import numpy as np
 from crystal_viewer.json_export import to_jsonable
 from crystal_viewer.source_kinds import SOURCE_KIND_MOLECULE, normalize_source_kind
 from crystal_viewer.viewer.animation_context import animation_paths, display_equivalent_operation_context
-from crystal_viewer.viewer.animation_path import animation_path_length
-from crystal_viewer.viewer.display_atoms import display_atom_instances
+from crystal_viewer.viewer.animation_path import animation_path_length, normalized_animation_duration_seconds
+from crystal_viewer.viewer.display_atoms import display_atom_instances, display_scene_span
 from crystal_viewer.viewer.operation_lookup import operation_by_index, selected_mapping
 from crystal_viewer.viewer.operation_labels import (
     is_pure_translation_operation,
@@ -108,6 +108,10 @@ def animation_path_response(
         ),
         "operation_index": int(operation_index),
         "maximum_travel_distance": maximum_travel_distance,
+        "animation_duration_seconds": normalized_animation_duration_seconds(
+            maximum_travel_distance,
+            display_scene_span(render_data, display_mode, cell_origin_mode),
+        ),
         "boundary": animation_boundary_context(
             render_data,
             animation_boundary_mode=animation_boundary_mode,

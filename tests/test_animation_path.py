@@ -7,12 +7,24 @@ from crystal_viewer.viewer.animation import apply_boundary_mode, update_animated
 from crystal_viewer.viewer.animation_path import (
     animation_path_length,
     evaluate_path,
+    normalized_animation_duration_seconds,
     synchronize_compound_path_phases,
 )
 from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 
 
 class AnimationPathTest(unittest.TestCase):
+    def test_normalized_duration_is_invariant_to_structure_scale(self):
+        small = normalized_animation_duration_seconds(2.0, 4.0)
+        large = normalized_animation_duration_seconds(20.0, 40.0)
+
+        self.assertAlmostEqual(small, large)
+
+    def test_normalized_duration_has_stationary_and_safety_limits(self):
+        self.assertAlmostEqual(normalized_animation_duration_seconds(0.0, 4.0), 0.4)
+        self.assertAlmostEqual(normalized_animation_duration_seconds(0.001, 100.0), 1.0)
+        self.assertAlmostEqual(normalized_animation_duration_seconds(100.0, 1.0), 16.0 / 3.0)
+
     def test_compound_paths_share_phase_boundary_across_different_radii(self):
         paths = {
             0: {

@@ -70,7 +70,8 @@ function optionText(operation) {
 
 function molecularSchoenfliesSymbol(operation) {
   const symbol = String(operation.symbol || operation.display_symbol || "?");
-  if (symbol === "sigma") return "σ";
+  const mirror = symbol.match(/^sigma(?:_([vhd]))?$/);
+  if (mirror) return mirror[1] ? `σ<sub>${mirror[1]}</sub>` : "σ";
   const match = symbol.match(/^([CS])(\\d+|∞)$/);
   return match ? `${match[1]}<sub>${match[2]}</sub>` : formatSymbol(symbol);
 }

@@ -116,11 +116,15 @@ def convert_point_group(analyzer: PointGroupAnalyzer, operations: tuple) -> Mole
     equivalent = analyzer.get_equivalent_atoms()
     eq_sets = equivalent.get("eq_sets", {})
     return MoleculePointGroupInfo(
-        symbol=str(analyzer.get_pointgroup()),
+        symbol=schoenflies_point_group_symbol(str(analyzer.get_pointgroup())),
         operation_count=len(operations),
         rotational_symmetry_number=int(analyzer.get_rotational_symmetry_number()),
         equivalent_atom_sets=tuple(tuple(sorted(indices)) for indices in eq_sets.values()),
     )
+
+
+def schoenflies_point_group_symbol(symbol: str) -> str:
+    return {"C*v": "C∞v", "D*h": "D∞h"}.get(symbol, symbol)
 
 
 def convert_operation(
@@ -136,6 +140,11 @@ def convert_operation(
     order = matrix_order(rotation)
     kind = classify_molecular_operation(rotation, det, trace, order)
     if kind == "mirror" and order is None:
+        order = 2
+    if kind == "mirror":
+        rotation = canonical_reflection_matrix(rotation)
+        det = -1
+        trace = 1.0
         order = 2
     angle = rotation_angle_deg(rotation) if det == 1 and kind != "identity" else None
 
@@ -376,6 +385,15 @@ def operation_symbol(kind: str, order: int | None) -> str:
     if kind.startswith("improper_"):
         return f"S{order}" if order is not None else "S∞"
     return kind
+
+
+def canonical_reflection_matrix(matrix: np.ndarray) -> np.ndarray:
+    """Remove small rotational noise from an approximate mirror operation."""
+    matrix = np.asarray(matrix, dtype=float)
+    values, vectors = np.linalg.eigh(0.5 * (matrix + matrix.T))
+    normal = canonical_direction(vectors[:, int(np.argmin(values))])
+    reflection = np.eye(3) - 2.0 * np.outer(normal, normal)
+    return clean_matrix(reflection)
 
 
 def matrix_order(matrix: np.ndarray, max_order: int = 24) -> int | None:

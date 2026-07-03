@@ -138,6 +138,7 @@ class AnimationPathResponseTest(unittest.TestCase):
         self.assertEqual(result["periodic_image_policy"], "not_applicable")
         self.assertEqual(result["operation_index"], 3)
         self.assertGreater(result["maximum_travel_distance"], 0.0)
+        self.assertGreaterEqual(result["animation_duration_seconds"], 1.0)
         self.assertEqual(result["boundary"], {"mode": "continuous"})
         self.assertEqual(result["paths"][0]["source_atom"], 0)
         self.assertEqual(result["paths"][0]["target_atom"], 1)

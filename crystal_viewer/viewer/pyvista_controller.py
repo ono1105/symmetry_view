@@ -14,7 +14,11 @@ from PIL import Image, ImageDraw, ImageFont
 from crystal_viewer.geometry import normalize, signed_rotation_angle_from_matrix
 from crystal_viewer.viewer.native_gui import NativePyVistaViewer
 from crystal_viewer.viewer.animation_context import display_equivalent_operation_context
-from crystal_viewer.viewer.animation_path import animation_path_length, build_operation_path
+from crystal_viewer.viewer.animation_path import (
+    animation_path_length,
+    build_operation_path,
+    normalized_animation_duration_seconds,
+)
 from crystal_viewer.viewer.atom_style import HIGHLIGHT_RADIUS_SCALE, atom_color, color_to_rgb
 from crystal_viewer.viewer.display_atoms import (
     display_atom_instances,
@@ -44,10 +48,6 @@ from crystal_viewer.viewer.symmetry_elements import (
     add_symmetry_elements,
     display_symmetry_elements,
 )
-
-
-ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND = 6.0
-STATIONARY_ANIMATION_SECONDS = 0.6
 
 
 class BrowserControlledViewer(NativePyVistaViewer):
@@ -1283,9 +1283,11 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 )
             self._path_length_cache_paths = self.paths
         speed_multiplier = max(float(self.speed), 0.1)
-        if self._maximum_path_length <= 1e-9:
-            return STATIONARY_ANIMATION_SECONDS / speed_multiplier
-        return self._maximum_path_length / ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND / speed_multiplier
+        base_duration = normalized_animation_duration_seconds(
+            self._maximum_path_length,
+            display_scene_span(self.render_data, self.display_mode, self.cell_origin_mode),
+        )
+        return base_duration / speed_multiplier
 
     def custom_sequence_step_contexts(self, sequence_items: list[dict], lattice: np.ndarray) -> list[dict]:
         operations_by_index = {int(operation["index"]): operation for operation in self.operations}

@@ -6,9 +6,9 @@
       "mode": "molecule",
       "source_file": "examples/molecules/carbon_dioxide.xyz",
       "formula": "CO2",
-      "symmetry_label": "D*h",
+      "symmetry_label": "D∞h",
       "operation_count": 5,
-      "point_group_label": "D*h",
+      "point_group_label": "D∞h",
       "lattice_parameters": null,
       "space_group_generators": [],
       "point_group_generators": [

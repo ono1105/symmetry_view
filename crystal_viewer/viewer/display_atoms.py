@@ -124,8 +124,15 @@ def display_mode_margin(display_mode: str) -> float:
 
 
 def scene_span(render_data: dict) -> float:
-    bounds_min = np.asarray(render_data["bounds_min"], dtype=float)
-    bounds_max = np.asarray(render_data["bounds_max"], dtype=float)
+    if render_data.get("bounds_min") is None or render_data.get("bounds_max") is None:
+        points = np.asarray([atom["cart"] for atom in render_data.get("atoms", [])], dtype=float)
+        if not len(points):
+            return 1.0
+        bounds_min = points.min(axis=0)
+        bounds_max = points.max(axis=0)
+    else:
+        bounds_min = np.asarray(render_data["bounds_min"], dtype=float)
+        bounds_max = np.asarray(render_data["bounds_max"], dtype=float)
     span = np.linalg.norm(bounds_max - bounds_min)
     return float(span if span > 1e-9 else 1.0)
 

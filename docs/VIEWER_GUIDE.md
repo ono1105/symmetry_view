@@ -138,6 +138,10 @@ GET /api/animation_path?operation_index=<index>
 Animation path responses use their own `schema_version`, independently of the
 analysis export schema. Version 1 declares `source_kind`,
 `coordinate_space: "cartesian"`, and uses `angle_deg` for all public angles.
+Python also supplies `animation_duration_seconds`. It normalizes the maximum
+Cartesian path length by the displayed structure span, then clamps the normal
+speed duration to 1.0–5.33 seconds. Three.js and PyVista apply the shared
+Slow/Normal/Fast multiplier to that same base duration.
 For crystals, `periodic_image_policy` is `"transform_with_source"`: a periodic
 display image is evaluated from its displayed start position with the same
 operation, rather than being held fixed or retaining a constant Cartesian

@@ -10,8 +10,7 @@ import {
 
 const CAMERA_FOV = 42;
 const ORTHOGRAPHIC_HEIGHT = 10;
-const ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND = 6.0;
-const STATIONARY_ANIMATION_SECONDS = 0.6;
+const STATIONARY_ANIMATION_SECONDS = 0.4;
 
 
 class StaticStructureView {
@@ -64,6 +63,7 @@ class StaticStructureView {
     this.animationStartedAt = null;
     this.playing = false;
     this.maximumTravelDistance = 0;
+    this.baseAnimationDurationSeconds = STATIONARY_ANIMATION_SECONDS;
     this.baseStatus = "Three.js comparison";
     this.lastProgressBucket = -1;
     this.lastPublishedProgressBucket = -1;
@@ -455,6 +455,10 @@ class StaticStructureView {
     this.boundaryContext = payload.boundary || {mode: "continuous"};
     this.animationOperationIndex = operationIndex;
     this.maximumTravelDistance = Math.max(Number(payload.maximum_travel_distance) || 0, 0);
+    this.baseAnimationDurationSeconds = Math.max(
+      Number(payload.animation_duration_seconds) || STATIONARY_ANIMATION_SECONDS,
+      0.01,
+    );
   }
 
   async loadSymmetryElements(operationIndex, generation) {
@@ -758,8 +762,7 @@ class StaticStructureView {
 
   animationDurationMs() {
     const speed = Math.max(Number(this.state.speed) || 1, 0.1);
-    if (this.maximumTravelDistance <= 1e-9) return STATIONARY_ANIMATION_SECONDS * 1000 / speed;
-    return this.maximumTravelDistance / ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND * 1000 / speed;
+    return this.baseAnimationDurationSeconds * 1000 / speed;
   }
 
   setAtomPosition(instanceId, position) {
