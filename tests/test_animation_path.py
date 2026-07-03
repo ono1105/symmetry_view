@@ -173,21 +173,6 @@ class AnimationPathTest(unittest.TestCase):
         self.assertEqual(paths[0]["segments"][0]["type"], "affine_linear")
         np.testing.assert_allclose(evaluate_path(paths[0], 0.5), [0.5, 0.5, 0.0], atol=1e-8)
 
-    def test_sequence_speed_multiplier_slows_down_with_segment_count(self):
-        viewer = sequence_test_viewer()
-        paths = {
-            0: {
-                "type": "sequential",
-                "segments": [
-                    {"type": "linear"},
-                    {"type": "rotation"},
-                    {"type": "mirror"},
-                ],
-            }
-        }
-
-        self.assertAlmostEqual(viewer.custom_sequence_speed_multiplier(paths), 1.0 / 3.0)
-
     def test_apply_boundary_mode_wraps_to_centered_cell(self):
         render_data = {"unit_cell": {"lattice": np.eye(3).tolist()}}
 

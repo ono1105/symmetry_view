@@ -9,7 +9,29 @@ import {
 
 const CAMERA_FOV = 42;
 const ORTHOGRAPHIC_HEIGHT = 10;
-const BASE_ANIMATION_SECONDS = 3.15;
+const ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND = 6.0;
+const STATIONARY_ANIMATION_SECONDS = 0.6;
+
+
+function collectPathBreakpoints(path, offset, scale, result) {
+  if (!path) return;
+  if (path.type === "sequential") {
+    const segments = path.segments || [];
+    const count = Math.max(segments.length, 1);
+    segments.forEach((segment, index) => {
+      const segmentOffset = offset + scale * index / count;
+      result.add(segmentOffset);
+      collectPathBreakpoints(segment, segmentOffset, scale / count, result);
+    });
+    result.add(offset + scale);
+    return;
+  }
+  if (["screw", "glide", "rotoinversion", "rotoreflection"].includes(path.type)) {
+    result.add(offset + scale * 0.5);
+  } else if (path.type === "mirror_after_hold") {
+    result.add(offset + scale * Math.max(0, Math.min(Number(path.hold_fraction) || 0.3, 1)));
+  }
+}
 
 
 class StaticStructureView {
@@ -52,12 +74,16 @@ class StaticStructureView {
     this.boundaryContext = {mode: "continuous"};
     this.animationOperationIndex = null;
     this.symmetryOperationIndex = null;
+    this.operationViewDirection = null;
+    this.operationFocusPoint = null;
     this.symmetryObjects = [];
     this.startMarkerObjects = [];
+    this.selectionMarkers = new Map();
+    this.selectionSignature = null;
     this.animationProgress = 0;
     this.animationStartedAt = null;
     this.playing = false;
-    this.playbackSpeedMultiplier = 1;
+    this.maximumTravelDistance = 0;
     this.baseStatus = "Three.js comparison";
     this.lastProgressBucket = -1;
     this.pathGeneration = 0;
@@ -72,6 +98,9 @@ class StaticStructureView {
     this.handlePointerUp = this.handlePointerUp.bind(this);
     this.canvas.addEventListener("pointerdown", this.handlePointerDown);
     this.canvas.addEventListener("pointerup", this.handlePointerUp);
+    window.addEventListener("symmetry-animation-progress", event => {
+      this.setAnimationProgress(event.detail?.progress);
+    });
     requestAnimationFrame(this.animate);
   }
 
@@ -147,6 +176,7 @@ class StaticStructureView {
           isPrimaryImage: atom.is_primary_image !== false,
           radius: group.radius,
           start: [...atom.cart],
+          current: [...atom.cart],
           baseColor: new THREE.Color(group.style.color),
         };
         mesh.userData.atomInstances[instanceIndex] = instance;
@@ -177,6 +207,8 @@ class StaticStructureView {
   clearContent() {
     this.symmetryObjects = [];
     this.startMarkerObjects = [];
+    this.selectionMarkers.clear();
+    this.selectionSignature = null;
     this.atomInstances.clear();
     this.instanceMeshes.clear();
     for (const child of [...this.content.children]) {
@@ -258,8 +290,8 @@ class StaticStructureView {
     this.pointerDown = null;
     if (movement > 5 || elapsed > 500) return;
     const hit = this.pickAtomInstance(event);
-    if (!hit) return;
-    this.selectAtom(hit.sourceAtom, event);
+    if (!hit && this.state.scope !== "selected") return;
+    this.selectAtom(hit ? hit.sourceAtom : null, event);
   }
 
   pickAtomInstance(event) {
@@ -281,16 +313,18 @@ class StaticStructureView {
   async selectAtom(sourceAtom, event) {
     const current = new Set((this.state.selected_atoms || []).map(Number));
     let selected;
-    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+    if (sourceAtom === null) {
+      selected = [];
+    } else if (event.shiftKey || event.ctrlKey || event.metaKey) {
       if (current.has(sourceAtom)) current.delete(sourceAtom);
       else current.add(sourceAtom);
       selected = [...current].sort((a, b) => a - b);
     } else {
-      selected = [sourceAtom];
+      selected = current.size === 1 && current.has(sourceAtom) ? [] : [sourceAtom];
     }
     const update = {
       selected_atoms: selected,
-      scope: selected.length ? "selected" : "representative",
+      scope: selected.length ? "selected" : "displayed",
       playing: false,
       reset: true,
     };
@@ -318,17 +352,45 @@ class StaticStructureView {
     const selected = this.state.scope === "selected"
       ? new Set((this.state.selected_atoms || []).map(Number))
       : new Set();
+    const signature = JSON.stringify([...selected].sort((a, b) => a - b));
+    if (signature === this.selectionSignature) return;
+    this.selectionSignature = signature;
     for (const mesh of this.instanceMeshes) {
       const instances = mesh.userData.atomInstances || [];
       instances.forEach((instance, index) => {
-        const color = selected.has(instance.sourceAtom)
-          ? instance.baseColor.clone().lerp(new THREE.Color(0xf7dc6f), 0.58)
-          : instance.baseColor;
-        mesh.setColorAt(index, color);
+        mesh.setColorAt(index, instance.baseColor);
       });
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
+    this.updateSelectionMarkers(selected);
     this.render();
+  }
+
+  updateSelectionMarkers(selected) {
+    for (const marker of this.selectionMarkers.values()) {
+      this.content.remove(marker);
+      marker.geometry.dispose();
+      marker.material.dispose();
+    }
+    this.selectionMarkers.clear();
+    for (const [instanceId, instance] of this.atomInstances) {
+      if (!selected.has(instance.sourceAtom)) continue;
+      const outerRadius = instance.radius * 1.36;
+      const geometry = new THREE.RingGeometry(outerRadius * 0.94, outerRadius, 48);
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xffe45c,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.58,
+        depthTest: true,
+        depthWrite: false,
+      });
+      const marker = new THREE.Mesh(geometry, material);
+      marker.position.fromArray(instance.current);
+      marker.renderOrder = 10;
+      this.selectionMarkers.set(instanceId, marker);
+      this.content.add(marker);
+    }
   }
 
   syncState(state, update = {}) {
@@ -370,6 +432,12 @@ class StaticStructureView {
     if (update.reset) {
       this.resetAnimation();
     }
+    if (Object.prototype.hasOwnProperty.call(update, "camera_request_id")) {
+      this.rotateCamera(update.camera_direction, update.camera_angle);
+    }
+    if (Object.prototype.hasOwnProperty.call(update, "view_request_id")) {
+      this.viewAlongCurrentOperation();
+    }
     const nextServerPlaying = Boolean(state.playing) && state.active_mode !== "custom";
     const starting = nextServerPlaying && !this.serverPlaying;
     if (starting && this.animationProgress >= 1) {
@@ -396,9 +464,16 @@ class StaticStructureView {
     this.animationPaths = new Map(
       (payload.paths || []).map(item => [Number(item.source_atom), item.path]),
     );
+    const breakpoints = new Set([0, 1]);
+    for (const path of this.animationPaths.values()) {
+      collectPathBreakpoints(path, 0, 1, breakpoints);
+    }
+    window.dispatchEvent(new CustomEvent("symmetry-animation-breakpoints", {
+      detail: {breakpoints: [...breakpoints].sort((a, b) => a - b)},
+    }));
     this.boundaryContext = payload.boundary || {mode: "continuous"};
     this.animationOperationIndex = operationIndex;
-    this.playbackSpeedMultiplier = Math.max(Number(payload.playback_speed_multiplier) || 1, 0.01);
+    this.maximumTravelDistance = Math.max(Number(payload.maximum_travel_distance) || 0, 0);
   }
 
   async loadSymmetryElements(operationIndex, generation) {
@@ -418,6 +493,64 @@ class StaticStructureView {
       this.addGlideArrow(payload.planes[0], payload.glide_translation_cart, span);
     }
     this.symmetryOperationIndex = operationIndex;
+    this.operationViewDirection = Array.isArray(payload.view_direction_cart)
+      ? [...payload.view_direction_cart]
+      : null;
+    this.operationFocusPoint = Array.isArray(payload.focus_point_cart)
+      ? [...payload.focus_point_cart]
+      : null;
+  }
+
+  rotateCamera(direction, angleDegrees) {
+    const angle = THREE.MathUtils.degToRad(Math.max(0, Math.min(Number(angleDegrees) || 0, 180)));
+    if (angle <= 1e-10 || !this.controls) return;
+    const target = this.controls.target.clone();
+    const radius = this.activeCamera.position.clone().sub(target);
+    if (radius.lengthSq() <= 1e-12) return;
+    const up = this.activeCamera.up.clone().normalize();
+    const viewDirection = target.clone().sub(this.activeCamera.position).normalize();
+    const screenRight = new THREE.Vector3().crossVectors(viewDirection, up).normalize();
+    let axis;
+    let signedAngle;
+    if (direction === "right") [axis, signedAngle] = [up, angle];
+    else if (direction === "left") [axis, signedAngle] = [up, -angle];
+    else if (direction === "up") [axis, signedAngle] = [screenRight, -angle];
+    else if (direction === "down") [axis, signedAngle] = [screenRight, angle];
+    else if (direction === "roll-left") [axis, signedAngle] = [viewDirection, -angle];
+    else if (direction === "roll-right") [axis, signedAngle] = [viewDirection, angle];
+    else return;
+    const rotation = new THREE.Quaternion().setFromAxisAngle(axis, signedAngle);
+    this.activeCamera.up.applyQuaternion(rotation).normalize();
+    if (!String(direction).startsWith("roll-")) {
+      radius.applyQuaternion(rotation);
+      this.activeCamera.position.copy(target).add(radius);
+    }
+    this.activeCamera.lookAt(target);
+    this.controls.update();
+    this.render();
+  }
+
+  viewAlongCurrentOperation() {
+    if (!Array.isArray(this.operationViewDirection) || !this.controls) return;
+    const direction = new THREE.Vector3(...this.operationViewDirection);
+    if (direction.lengthSq() <= 1e-12) return;
+    direction.normalize();
+    const focus = Array.isArray(this.operationFocusPoint)
+      ? new THREE.Vector3(...this.operationFocusPoint)
+      : this.controls.target.clone();
+    const currentDistance = this.activeCamera.position.distanceTo(this.controls.target);
+    const distance = Math.max(currentDistance, this.sceneSpan() * 1.2, 1);
+    const referenceUp = Math.abs(direction.z) < 0.92
+      ? new THREE.Vector3(0, 0, 1)
+      : new THREE.Vector3(0, 1, 0);
+    const screenRight = new THREE.Vector3().crossVectors(direction, referenceUp).normalize();
+    const up = new THREE.Vector3().crossVectors(screenRight, direction).normalize();
+    this.controls.target.copy(focus);
+    this.activeCamera.position.copy(focus).addScaledVector(direction, distance);
+    this.activeCamera.up.copy(up);
+    this.activeCamera.lookAt(focus);
+    this.controls.update();
+    this.render();
   }
 
   addAxis(axis, span) {
@@ -542,6 +675,44 @@ class StaticStructureView {
     this.markInstanceMatricesDirty();
     if (this.baseStatus) this.setStatus(`${this.baseStatus}, animation ready`);
     this.render();
+    this.publishAnimationProgress();
+  }
+
+  setAnimationProgress(progress) {
+    this.playing = false;
+    this.serverPlaying = false;
+    this.animationStartedAt = null;
+    this.animationProgress = Math.max(0, Math.min(Number(progress) || 0, 1));
+    if (this.animationProgress > 0) {
+      if (!this.startMarkerObjects.length) this.showStartMarkers();
+    } else {
+      this.clearStartMarkers();
+    }
+    this.applyAnimationProgress();
+    this.setStatus(`${this.baseStatus}, movement ${Math.round(this.animationProgress * 100)}%`);
+    this.publishAnimationProgress();
+    this.render();
+  }
+
+  applyAnimationProgress() {
+    for (const [instanceId, instance] of this.atomInstances) {
+      const path = this.animationPaths.get(instance.sourceAtom);
+      const applies = pathAppliesToDisplayInstance(path, instance);
+      const evaluated = applies
+        ? evaluatePath(path, this.animationProgress, instance.start)
+        : instance.start;
+      const position = applies
+        ? applyBoundaryContext(evaluated, this.boundaryContext)
+        : evaluated;
+      this.setAtomPosition(instanceId, position);
+    }
+    this.markInstanceMatricesDirty();
+  }
+
+  publishAnimationProgress() {
+    window.dispatchEvent(new CustomEvent("symmetry-animation-progress-update", {
+      detail: {progress: this.animationProgress},
+    }));
   }
 
   showStartMarkers() {
@@ -585,18 +756,8 @@ class StaticStructureView {
       (timestamp - this.animationStartedAt) / this.animationDurationMs(),
       1,
     );
-    for (const [instanceId, instance] of this.atomInstances) {
-      const path = this.animationPaths.get(instance.sourceAtom);
-      const applies = pathAppliesToDisplayInstance(path, instance);
-      const evaluated = applies
-        ? evaluatePath(path, this.animationProgress, instance.start)
-        : instance.start;
-      const position = applies
-        ? applyBoundaryContext(evaluated, this.boundaryContext)
-        : evaluated;
-      this.setAtomPosition(instanceId, position);
-    }
-    this.markInstanceMatricesDirty();
+    this.applyAnimationProgress();
+    this.publishAnimationProgress();
     const progressBucket = Math.floor(this.animationProgress * 20);
     if (progressBucket !== this.lastProgressBucket) {
       this.lastProgressBucket = progressBucket;
@@ -612,7 +773,8 @@ class StaticStructureView {
 
   animationDurationMs() {
     const speed = Math.max(Number(this.state.speed) || 1, 0.1);
-    return BASE_ANIMATION_SECONDS * 1000 / speed / this.playbackSpeedMultiplier;
+    if (this.maximumTravelDistance <= 1e-9) return STATIONARY_ANIMATION_SECONDS * 1000 / speed;
+    return this.maximumTravelDistance / ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND * 1000 / speed;
   }
 
   setAtomPosition(instanceId, position) {
@@ -622,6 +784,8 @@ class StaticStructureView {
     this.tempScale.setScalar(instance.radius);
     this.tempMatrix.compose(this.tempPosition, this.tempQuaternion, this.tempScale);
     instance.mesh.setMatrixAt(instance.instanceIndex, this.tempMatrix);
+    instance.current = [...position];
+    this.selectionMarkers.get(Number(instanceId))?.position.fromArray(position);
   }
 
   markInstanceMatricesDirty() {
@@ -647,6 +811,9 @@ class StaticStructureView {
   }
 
   render() {
+    for (const marker of this.selectionMarkers.values()) {
+      marker.quaternion.copy(this.activeCamera.quaternion);
+    }
     this.renderer.render(this.scene, this.activeCamera);
   }
 

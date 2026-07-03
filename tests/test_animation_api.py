@@ -7,6 +7,7 @@ import numpy as np
 from crystal_viewer.viewer.animation_api import (
     ANIMATION_PATH_SCHEMA_VERSION,
     animation_boundary_context,
+    animation_path_length,
     animation_path_response,
     serialize_animation_path,
     symmetry_elements_response,
@@ -16,6 +17,25 @@ from crystal_viewer.viewer.animation_path import evaluate_path
 
 
 class SerializeAnimationPathTest(unittest.TestCase):
+    def test_animation_path_length_uses_cartesian_travel_distance(self):
+        path = {
+            "type": "translation",
+            "start": np.array([0.0, 0.0, 0.0]),
+            "target": np.array([3.0, 4.0, 0.0]),
+        }
+        self.assertAlmostEqual(animation_path_length(path), 5.0)
+
+    def test_animation_path_length_uses_exact_rotation_arc(self):
+        path = {
+            "type": "rotation",
+            "start": np.array([2.0, 0.0, 0.0]),
+            "target": np.array([0.0, 2.0, 0.0]),
+            "axis_point": np.zeros(3),
+            "axis_direction": np.array([0.0, 0.0, 1.0]),
+            "angle": np.pi / 2,
+        }
+        self.assertAlmostEqual(animation_path_length(path), np.pi)
+
     def test_converts_numpy_values_and_radians_recursively(self):
         path = {
             "type": "sequential",
@@ -91,7 +111,7 @@ class AnimationPathResponseTest(unittest.TestCase):
         self.assertEqual(result["coordinate_space"], "cartesian")
         self.assertEqual(result["periodic_image_policy"], "not_applicable")
         self.assertEqual(result["operation_index"], 3)
-        self.assertEqual(result["playback_speed_multiplier"], 1.0)
+        self.assertGreater(result["maximum_travel_distance"], 0.0)
         self.assertEqual(result["boundary"], {"mode": "continuous"})
         self.assertEqual(result["paths"][0]["source_atom"], 0)
         self.assertEqual(result["paths"][0]["target_atom"], 1)
@@ -242,6 +262,21 @@ class SymmetryElementsResponseTest(unittest.TestCase):
         self.assertEqual(result["axes"], [])
         self.assertEqual(result["planes"], [])
         self.assertEqual(result["centers"], [{"point_cart": [0.0, 0.0, 0.0]}])
+        self.assertEqual(result["focus_point_cart"], [0.0, 0.0, 0.0])
+
+    def test_supplies_three_view_camera_basis(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+        result = symmetry_elements_response(
+            payload["render_data"],
+            payload["atom_mappings"],
+            2,
+            display_mode="source",
+            cell_origin_mode="center",
+        )
+
+        self.assertEqual(len(result["view_direction_cart"]), 3)
+        self.assertEqual(len(result["focus_point_cart"]), 3)
+        self.assertAlmostEqual(np.linalg.norm(result["view_direction_cart"]), 1.0)
 
     def test_displayed_elements_match_animation_path_geometry(self):
         payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
@@ -297,6 +332,22 @@ class SymmetryElementsResponseTest(unittest.TestCase):
                 np.testing.assert_allclose(evaluate_path(path, 1.0), start, atol=1e-8)
 
         self.assertEqual(stationary_on_plane, [2, 7])
+
+    def test_halite_rotoinversion_duration_uses_displayed_instance_paths(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+        distances = {}
+        for operation_index in (131, 147):
+            animation = animation_path_response(
+                payload["render_data"],
+                payload["atom_mappings"],
+                operation_index,
+                display_mode="source",
+                cell_origin_mode="center",
+            )
+            distances[operation_index] = animation["maximum_travel_distance"]
+
+        self.assertAlmostEqual(distances[131], 16.2987639176, places=6)
+        self.assertAlmostEqual(distances[147], 23.9645641000, places=6)
 
     def test_all_halite_displayed_elements_match_their_animation_paths(self):
         payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))

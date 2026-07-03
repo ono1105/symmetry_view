@@ -1,5 +1,22 @@
 # コードレビューメモ（Codex向け共有）
 
+## 2026-07-03: アニメ速度正規化・スクラバー・選択マーカーのレビュー（Claude, 未コミット差分）
+
+対象は作業ツリーの未コミット差分（`animation_api.py`, `animation_path.py`, `pyvista_controller.py`, `three_view.js`, `browser_ui.py`）。速度正規化の修正で「同じ4回回反(Halite op131/op147)で見かけ速度が違う」問題は解消される方向。原因は Three.js が再生時間を固定値`BASE_ANIMATION_SECONDS=3.15s`にしていたため（op131≈19.2Å/op147≈8.0Åと移動距離が違うのに同じ時間→速度2.4倍差）。修正は PyVista と同じ定速 6 Å/s（`ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND`）へ統一。テスト17件＋JSパリティ4件パス、JS構文OK、致命的バグなし。以下は効率・重複・デッドコードの指摘。
+
+### 非効率（要対応）
+
+1. **`maximum_travel_distance` を毎リクエスト無キャッシュで再計算** — `animation_api.py` `animation_path_response`。表示インスタンス毎に `animation_path_length` が `evaluate_path` を120回サンプルする。Halite(8インスタンス)で約24ms、56原子セルで約170ms、周期像展開表示(≈478)で1秒超。`/api/animation_path` は操作切替・原子選択の度に走るためUIが引っかかる。PyVistaは `self.paths` 同一性でキャッシュするがAPIはしない。→ (operation_index＋表示パラメータ)でキャッシュ／サンプル数削減／経路タイプ別の解析的弧長へ。
+2. **選択ハイライトの色再書き込みが無駄** — `three_view.js` `updateAtomSelectionHighlight`。ハイライトはリングマーカー方式に変わったのに、全インスタンスを毎回 `baseColor` に再設定し `instanceColor.needsUpdate=true`（GPU再アップロード）を syncState 毎（1秒ポーリング含む）に実行。色は生成時固定で変わらないため純粋な無駄。→ 色は `addAtoms` で一度だけ設定し、この関数は `updateSelectionMarkers` のみ残す。
+3. **アニメ進捗イベントを毎フレーム(60fps)発火** — `three_view.js` `publishAnimationProgress()` → `browser_ui.py` の `symmetry-animation-progress-update` listener が毎回 slider.value/textContent を更新（60回/秒のDOM更新）。→ 既存 `lastProgressBucket`（5%刻み）でスロットル、または rAF で束ねる。
+4. **選択マーカーのジオメトリを毎回破棄・再生成** — `three_view.js` `updateSelectionMarkers`。syncState 毎に全 `RingGeometry` を dispose→再生成。選択不変でも毎秒作り直し。→ instanceId でキャッシュし増減時のみ add/remove。
+
+### 保守性・デッドコード
+
+5. **`maximum_animation_path_length` は未使用（デッドコード）** — `animation_path.py`。新規追加だが呼び出しゼロ（API・PyVistaとも独自の inline ループ）。
+6. **最大移動距離ループが2箇所に重複** — `animation_api.animation_path_response` と `pyvista_controller.animation_duration_seconds`。「display_atom_instances を回す→クローンskip→`animation_path_length(start_override=)`→max」が同一。共有ヘルパへ抽出推奨。クローンskip条件が API=応答レベル変数／PyVista=path内キー(`unit_cell_only`)と別実装（現状はどちらも正しく動作を確認済みだが将来ずれる火種）。
+7. **モジュール定数がimportブロック内に挟まる** — `animation_path.py` の `PATH_LENGTH_SAMPLE_COUNT=120` が `import numpy` と `from crystal_viewer.geometry import ...` の間。import群の後へ移動（PEP8）。
+
 ## 2026-07-01: UI統合時の結晶・分子共通契約
 
 - 描画・経路JSONは結晶用と分子用に分割せず、`source_kind: "crystal" | "molecule"`を必須判別子とする。
@@ -61,6 +78,20 @@
 - op77/op88の表示ずれ: 対称要素はcenterセルへ移されていた一方、Three.js原子・単位胞だけcornerセルのままだったことが原因。`/api/render_data`からPython生成のdisplay atom instancesとdisplay unit cellを返してPyVistaと統一した。
 - Three.jsの開始位置マーカー: 再生開始時にアニメーション対象display instanceの開始位置へ黄色の半透明球を置き、Displayed allでは周期像も含める。Stop・完了後も保持し、Reset・操作変更・構造変更で削除する。PyVistaの既存挙動と統一する。
 - Three.js原子選択: 左クリックでsource atomを選択し、Shift/Ctrl/Metaクリックで複数選択をtoggleする。既存`postState()`を通して`selected_atoms`/`scope`を更新するため、左パネル・PyVista・アニメーション経路生成と同じ状態を共有する。
+- Beginnerモードでは原子本体の色を変えず、選択原子の外側に画面正面を向くリングを表示する。原子種・移動前座標・対称操作後座標もAtom movementパネルに表示する。結晶はfractional、分子はCartesian（Å）を使用する。
+- Three.js再生時間は操作種別の固定倍率ではなく、Pythonが経路をサンプリングして返す`maximum_travel_distance`（Å）から決める。通常速度は最大移動原子が6.0 Å/sとなり、Slow/Normal/Fastはこの速度への一様な倍率として扱う。
+- Atom movementの0–100%スライダーはPython由来の経路を任意の進捗で評価する。ドラッグ開始時に自動再生を停止し、再生中はスライダー表示を追従させる。
+- PyVistaブラウザコントローラもThree.jsと同じ最大経路長・6.0 Å/sから進捗量を計算する。PyVistaが旧固定時間で先に完了して共有`playing=false`を書き戻し、Three.jsが途中停止する競合を防ぐ。
+- 選択解除時のscopeは`representative`ではなく`displayed`へ戻し、解除後に代表原子だけが動き続ける状態を避ける。元素チップで同一原子種を一括選択でき、修飾キー併用で複数元素を追加・解除できる。
+- 複合経路はsequential segment境界、screw/glide/rotoinversion/rotoreflectionの前半・後半境界、mirror hold境界をThree.js側で抽出する。スライダーに目盛りを表示し、近傍で操作を終えた場合は境界へsnapする。
+- 分子モードの操作一覧は結晶向けBeginner記号へ変換せず、`E`, `Cₙ`, `σ`, `i`, `Sₙ`のSchoenflies操作記号を使う。
+- 結晶の原子一括選択は元素だけでなく`asymmetric_index`でグループ化し、同一元素内の非対称単位サイト順にO1/O2などのラベルを付ける。分子は従来どおり元素単位とする。
+- 再生時間の最大経路長はsource atomの`path.start`ではなく、現在のCell Range・原点規約で生成した全表示インスタンスの`cart`を`start_override`として評価する。halite center/sourceではop131が16.30 Å、op147が23.96 Åであり、旧計算値19.23 Å/7.99 Åによるop147の約3倍速を解消する。PyVistaも同じ表示インスタンス基準を使う。
+- 結晶サイトラベルは同一元素に複数の`asymmetric_index`がある場合だけO1/O2形式にし、1種類だけならOと表示する。操作一覧の常設フィルターは表示記号単位（`g`, `4̅`など）とし、Advancedの方向フィルターと併用可能にする。
+- Atom positionsは現在座標だけでなく選択操作の`target_frac`/`target_cart`を矢印で併記する。Beginnerの結晶座標はfractional値を使うが、`fractional`という単位注記は表示しない。
+- Beginnerのカメラ矢印・roll操作は共有`camera_request`をThree.jsでも処理する。`View along direction`用にPythonが選択操作の`view_direction_cart`と`focus_point_cart`を対称要素APIへ追加し、Three.jsは計算済みCartesian基準へカメラを合わせる。
+- 公開前レビュー: 経路長の120点サンプリングを各path型の解析的な弧長・直線長計算へ置換。128原子・Cell Range ±1のAPI応答を約8.1秒から約0.08秒へ短縮した。PyVistaはCell Range変更時に標準経路を再構築し、カスタム経路でも表示インスタンス基準の経路長キャッシュを無効化する。
+- 公開前レビュー: Three.jsの選択リングは選択集合が変わった場合だけ再生成する。旧`playback_speed_multiplier`/`custom_speed_multiplier`と未使用helperを削除し、分子Beginnerのop番号重複も解消した。
 
 ## 2026-07-01: 初学者モードのUI方針
 

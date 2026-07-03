@@ -13,9 +13,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from crystal_viewer.geometry import normalize, signed_rotation_angle_from_matrix
 from crystal_viewer.viewer.native_gui import NativePyVistaViewer
-from crystal_viewer.viewer.animation import custom_operation_speed_multiplier, operation_speed_multiplier
 from crystal_viewer.viewer.animation_context import display_equivalent_operation_context
-from crystal_viewer.viewer.animation_path import build_operation_path
+from crystal_viewer.viewer.animation_path import animation_path_length, build_operation_path
 from crystal_viewer.viewer.atom_style import HIGHLIGHT_RADIUS_SCALE, atom_color, color_to_rgb
 from crystal_viewer.viewer.display_atoms import (
     display_atom_instances,
@@ -45,6 +44,10 @@ from crystal_viewer.viewer.symmetry_elements import (
     add_symmetry_elements,
     display_symmetry_elements,
 )
+
+
+ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND = 6.0
+STATIONARY_ANIMATION_SECONDS = 0.6
 
 
 class BrowserControlledViewer(NativePyVistaViewer):
@@ -103,7 +106,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.legend_actor = None
         self.custom_view_direction_cart: np.ndarray | None = None
         self.custom_focus_cart: np.ndarray | None = None
-        self.custom_speed_multiplier: float = 1.0
+        self._path_length_cache_paths: dict[int, dict] | None = None
+        self._maximum_path_length: float = 0.0
         self.last_custom_op_animate_id: object = None
         self.using_custom_paths: bool = False
         self.debug_timer = os.environ.get("CRYSTAL_VIEWER_DEBUG_TIMER") == "1"
@@ -283,6 +287,9 @@ class BrowserControlledViewer(NativePyVistaViewer):
             self.clear_element_actor_cache()
             old_display_mode = self.display_mode
             self.rebuild_display_atoms(display_mode)
+            self._path_length_cache_paths = None
+            if active_mode == "standard":
+                self.build_paths()
             self.last_display_mode = display_mode
             self.recenter_camera_for_display_mode(old_display_mode, display_mode)
             if active_mode == "standard":
@@ -407,7 +414,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
                         sequence_items,
                         unit_cell_only=unit_cell_only,
                     )
-                    self.custom_speed_multiplier = self.custom_sequence_speed_multiplier(self.paths)
                 else:
                     self.paths = self.build_custom_animation_paths(
                         atom_indices,
@@ -417,7 +423,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
                         op_params=op_params,
                         unit_cell_only=unit_cell_only,
                     )
-                    self.custom_speed_multiplier = custom_operation_speed_multiplier(op_type)
                 self.using_custom_paths = True
                 self.last_custom_op_animate_id = animate_id
                 self.last_custom_sequence_segment_index = None
@@ -433,8 +438,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
             should_update_status = True
         self.playing = requested_playing
         if self.playing and self.paths:
-            multiplier = self.custom_speed_multiplier if self.using_custom_paths else operation_speed_multiplier(self.current_operation())
-            frame_step = self.speed * multiplier * (self.timer_interval_ms / 33.0)
+            duration = self.animation_duration_seconds()
+            frame_step = (self.timer_interval_ms / 1000.0) / duration * max(self.frame_count - 1, 1)
             self.frame_position = min(self.frame_position + frame_step, self.frame_count - 1)
             s = self.frame_position / max(self.frame_count - 1, 1)
             self.update_atoms(s)
@@ -527,7 +532,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.custom_check_actors = []
         self.custom_view_direction_cart = None
         self.custom_focus_cart = None
-        self.custom_speed_multiplier = 1.0
         self.last_custom_op_animate_id = None
         self.using_custom_paths = False
 
@@ -930,8 +934,8 @@ class BrowserControlledViewer(NativePyVistaViewer):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         original_frame = float(self.frame_position)
         frames = max(self.frame_count // 2, 24)
-        multiplier = self.custom_speed_multiplier if self.using_custom_paths else operation_speed_multiplier(operation)
-        fps = 10.0 * max(self.speed, 0.1) * multiplier
+        duration = self.animation_duration_seconds()
+        fps = max((frames - 1) / duration, 1.0)
         last_image = None
         saved = False
         self.set_gif_status(f"writing {output_path}")
@@ -1242,15 +1246,26 @@ class BrowserControlledViewer(NativePyVistaViewer):
             paths[atom["index"]] = path
         return paths
 
-    def custom_sequence_speed_multiplier(self, paths: dict[int, dict]) -> float:
-        """Keep each sequence segment near the normal single-operation duration."""
-        segment_counts = [
-            len(path.get("segments", ()))
-            for path in paths.values()
-            if path.get("type") == "sequential"
-        ]
-        segment_count = max(segment_counts, default=1)
-        return 1.0 / max(segment_count, 1)
+    def animation_duration_seconds(self) -> float:
+        if self.paths is not self._path_length_cache_paths:
+            self._maximum_path_length = 0.0
+            for instance in display_atom_instances(
+                self.render_data,
+                display_mode=self.display_mode,
+                cell_origin_mode=self.cell_origin_mode,
+            ):
+                path = self.paths.get(int(instance["atom"]["index"]))
+                if path is None or (path.get("unit_cell_only") and not instance["is_primary_image"]):
+                    continue
+                self._maximum_path_length = max(
+                    self._maximum_path_length,
+                    animation_path_length(path, start_override=instance["cart"]),
+                )
+            self._path_length_cache_paths = self.paths
+        speed_multiplier = max(float(self.speed), 0.1)
+        if self._maximum_path_length <= 1e-9:
+            return STATIONARY_ANIMATION_SECONDS / speed_multiplier
+        return self._maximum_path_length / ATOM_TRAVEL_SPEED_ANGSTROM_PER_SECOND / speed_multiplier
 
     def custom_sequence_step_contexts(self, sequence_items: list[dict], lattice: np.ndarray) -> list[dict]:
         operations_by_index = {int(operation["index"]): operation for operation in self.operations}
@@ -1474,7 +1489,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.custom_check_actors = []
         self.custom_view_direction_cart = None
         self.custom_focus_cart = None
-        self.custom_speed_multiplier = 1.0
 
 
 

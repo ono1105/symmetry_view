@@ -420,3 +420,40 @@ def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None
     if start_override is not None:
         target = target + (start - np.asarray(path["start"], dtype=float))
     return interpolate(start, target, s)
+
+
+def animation_path_length(
+    path: dict,
+    *,
+    start_override: np.ndarray | None = None,
+) -> float:
+    """Return the exact Cartesian arc length for a supported animation path."""
+    path_type = str(path["type"])
+    start = np.asarray(
+        path["start"] if start_override is None else start_override,
+        dtype=float,
+    )
+    if path_type == "sequential":
+        length = 0.0
+        segment_start = start
+        for segment in path.get("segments", []):
+            length += animation_path_length(segment, start_override=segment_start)
+            segment_start = evaluate_path(segment, 1.0, start_override=segment_start)
+        return length
+    if path_type in ("rotation", "screw", "rotoinversion", "rotoreflection"):
+        axis_point = np.asarray(path["axis_point"], dtype=float)
+        axis_direction = normalize(np.asarray(path["axis_direction"], dtype=float))
+        relative = start - axis_point
+        radial = relative - np.dot(relative, axis_direction) * axis_direction
+        rotation_length = float(np.linalg.norm(radial) * abs(float(path["angle"])))
+        if path_type == "rotation":
+            return rotation_length
+        midpoint = np.asarray(evaluate_path(path, 0.5, start_override=start), dtype=float)
+        endpoint = np.asarray(evaluate_path(path, 1.0, start_override=start), dtype=float)
+        return rotation_length + float(np.linalg.norm(endpoint - midpoint))
+    if path_type == "glide":
+        midpoint = np.asarray(evaluate_path(path, 0.5, start_override=start), dtype=float)
+        endpoint = np.asarray(evaluate_path(path, 1.0, start_override=start), dtype=float)
+        return float(np.linalg.norm(midpoint - start) + np.linalg.norm(endpoint - midpoint))
+    endpoint = np.asarray(evaluate_path(path, 1.0, start_override=start), dtype=float)
+    return float(np.linalg.norm(endpoint - start))

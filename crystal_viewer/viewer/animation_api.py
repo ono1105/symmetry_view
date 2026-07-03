@@ -6,9 +6,16 @@ import numpy as np
 
 from crystal_viewer.json_export import to_jsonable
 from crystal_viewer.source_kinds import SOURCE_KIND_MOLECULE, normalize_source_kind
-from crystal_viewer.viewer.animation import operation_speed_multiplier
 from crystal_viewer.viewer.animation_context import animation_paths, display_equivalent_operation_context
+from crystal_viewer.viewer.animation_path import animation_path_length
+from crystal_viewer.viewer.display_atoms import display_atom_instances
 from crystal_viewer.viewer.operation_lookup import operation_by_index, selected_mapping
+from crystal_viewer.viewer.operation_labels import (
+    is_pure_translation_operation,
+    operation_focus_point_cart,
+    operation_view_direction_cart,
+    visual_translation_direction_cart,
+)
 from crystal_viewer.viewer.symmetry_elements import display_symmetry_elements, glide_translation_cart
 
 
@@ -74,6 +81,20 @@ def animation_path_response(
             }
         )
 
+    maximum_travel_distance = 0.0
+    for instance in display_atom_instances(
+        render_data,
+        display_mode=display_mode,
+        cell_origin_mode=cell_origin_mode,
+    ):
+        path = paths.get(int(instance["atom"]["index"]))
+        if path is None or (unit_cell_only and not instance["is_primary_image"]):
+            continue
+        maximum_travel_distance = max(
+            maximum_travel_distance,
+            animation_path_length(path, start_override=instance["cart"]),
+        )
+
     return {
         "schema_version": ANIMATION_PATH_SCHEMA_VERSION,
         "source_kind": source_kind,
@@ -84,7 +105,7 @@ def animation_path_response(
             else CRYSTAL_PERIODIC_IMAGE_POLICY
         ),
         "operation_index": int(operation_index),
-        "playback_speed_multiplier": operation_speed_multiplier(operation),
+        "maximum_travel_distance": maximum_travel_distance,
         "boundary": animation_boundary_context(
             render_data,
             animation_boundary_mode=animation_boundary_mode,
@@ -166,6 +187,22 @@ def symmetry_elements_response(
         display_mode,
         cell_origin_mode,
     )
+    view_direction = (
+        visual_translation_direction_cart(render_data, operation, atom_mappings)
+        if is_pure_translation_operation(operation)
+        else None
+    )
+    if view_direction is None:
+        view_direction = operation_view_direction_cart(render_data, operation, axes, planes, centers)
+    focus_point = operation_focus_point_cart(
+        render_data,
+        operation,
+        axes,
+        planes,
+        centers,
+        display_mode,
+        cell_origin_mode,
+    )
     return {
         "schema_version": ANIMATION_PATH_SCHEMA_VERSION,
         "coordinate_space": ANIMATION_COORDINATE_SPACE,
@@ -174,6 +211,8 @@ def symmetry_elements_response(
         "planes": to_jsonable([plane] if plane is not None else []),
         "centers": to_jsonable([center] if center is not None else []),
         "glide_translation_cart": to_jsonable(glide_translation),
+        "view_direction_cart": to_jsonable(view_direction),
+        "focus_point_cart": to_jsonable(focus_point),
     }
 
 

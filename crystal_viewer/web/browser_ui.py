@@ -349,6 +349,63 @@ HTML = """<!doctype html>
       font-size: 11px;
       pointer-events: none;
     }
+    .movement-slider-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 48px;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+    }
+    .movement-slider-row input[type="range"] {
+      width: 100%;
+      padding: 0;
+      accent-color: #7dd3fc;
+    }
+    .movement-progress-value {
+      color: #cbd5e1;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    .selected-atom-summary {
+      display: grid;
+      gap: 7px;
+      margin-top: 12px;
+    }
+    .atom-element-selectors {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .atom-element-selector {
+      padding: 4px 9px;
+      border-radius: 999px;
+      border: 1px solid #475569;
+      background: #1b2027;
+      color: #cbd5e1;
+      font-size: 12px;
+    }
+    .atom-element-selector.selected {
+      border-color: #d6c65f;
+      color: #fff3a6;
+    }
+    .selected-atom-card {
+      border: 1px solid #665d2e;
+      border-left: 4px solid #f7dc6f;
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: rgba(247, 220, 111, 0.08);
+    }
+    .selected-atom-name {
+      color: #fff3a6;
+      font-weight: 700;
+      margin-bottom: 3px;
+    }
+    .selected-atom-coordinates {
+      color: #cbd5e1;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
     .side-stack {
       display: grid;
       gap: 16px;
@@ -595,6 +652,9 @@ HTML = """<!doctype html>
     body.beginner-mode .advanced-only {
       display: none !important;
     }
+    body.advanced-mode .beginner-only {
+      display: none !important;
+    }
     .operation-details {
       max-height: 260px;
       overflow: auto;
@@ -764,7 +824,6 @@ HTML = """<!doctype html>
       <canvas aria-label="Interactive three-dimensional structure view"></canvas>
       <div class="three-view-status" data-three-status>Loading Three.js view…</div>
     </div>
-    <p class="hint">Left-click an atom to select it, Shift/Ctrl-click to add or remove atoms, left-drag to rotate, scroll to zoom, and right-drag to pan. PyVista remains the reference view.</p>
   </section>
   <div class="grid" id="workspace">
     <div class="left-stack">
@@ -786,6 +845,10 @@ HTML = """<!doctype html>
             <option value="itc_like" selected>ITC operation</option>
             <option value="standard">Element</option>
           </select>
+        </div>
+        <div>
+          <label>Operation symbol</label>
+          <div class="direction-filter-list" id="operation-type-filter"></div>
         </div>
         <div class="advanced-only">
           <label id="operation-filter-label">Direction</label>
@@ -973,7 +1036,7 @@ HTML = """<!doctype html>
     </div>
     <div class="side-stack">
       <section class="panel">
-        <h2 class="section-title" id="animation-title">Animation</h2>
+        <h2 class="section-title" id="animation-title">Atom movement</h2>
         <div class="button-row flush">
           <button id="play-toggle">Start</button>
           <button id="reset" class="secondary">Reset</button>
@@ -981,6 +1044,12 @@ HTML = """<!doctype html>
           <button id="save-gif-3view" class="secondary advanced-only">Save 3-view GIFs</button>
           <button id="save-gif-3view-current" class="secondary advanced-only">Save 3-view GIFs (current view)</button>
         </div>
+        <label class="movement-slider-row" for="movement-progress">
+          <input id="movement-progress" type="range" min="0" max="1000" value="0" step="1" list="movement-stops">
+          <datalist id="movement-stops"></datalist>
+          <span id="movement-progress-value" class="movement-progress-value">0%</span>
+        </label>
+        <div id="selected-atom-summary" class="selected-atom-summary beginner-only"></div>
         <h3 class="subsection-title advanced-only">Speed</h3>
         <div class="button-row flush advanced-only" id="speed-controls">
           <button class="secondary speed-button" data-speed="0.5">Slow</button>
@@ -1129,6 +1198,7 @@ let lastAtomRenderSignature = "";
 let lastStructureInfoSignature = "";
 let state = {};
 let directionFilterValue = "";
+let operationTypeFilterValue = "";
 let atomElementFilterValue = "";
 let operationLabelMode = "itc_like";
 let customOperationSequence = [];
@@ -1143,6 +1213,7 @@ let refreshInProgress = false;
 let importRequestId = 0;
 let exampleCatalog = {crystal: [], molecule: []};
 let selectedExamplePath = "";
+let movementBreakpoints = [0, 1];
 const STRUCTURE_KIND_UI = __STRUCTURE_KIND_CONFIG__;
 
 async function api(path, options) {
@@ -1165,11 +1236,12 @@ async function api(path, options) {
 }
 
 function optionText(operation) {
+  if (sourceKind === "molecule") {
+    const symbol = molecularSchoenfliesSymbol(operation);
+    return experienceMode === "beginner" ? symbol : `op ${operation.index}: ${symbol}`;
+  }
   if (experienceMode === "beginner") {
     return beginnerOperationText(operation);
-  }
-  if (sourceKind === "molecule") {
-    return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
   }
   if (operationLabelMode === "itc_like") {
     const itc = operation.itc_like_summary || operation.itc_coordinate_summary;
@@ -1180,6 +1252,13 @@ function optionText(operation) {
   const summary = operation.element_summary || "";
   const element = summary ? ` | ${formatSymbol(summary)}` : "";
   return `op ${operation.index}: ${symbol}${element}`;
+}
+
+function molecularSchoenfliesSymbol(operation) {
+  const symbol = String(operation.symbol || operation.display_symbol || "?");
+  if (symbol === "sigma") return "σ";
+  const match = symbol.match(/^([CS])(\\d+|∞)$/);
+  return match ? `${match[1]}<sub>${match[2]}</sub>` : formatSymbol(symbol);
 }
 
 function beginnerOperationText(operation) {
@@ -1295,10 +1374,17 @@ function displayOperationSymbol(operation) {
 }
 
 function atomDisplayLabel(atom) {
-  if (atom.asymmetric_index === null || atom.asymmetric_index === undefined) {
+  if (sourceKind !== "crystal" || atom.asymmetric_index === null || atom.asymmetric_index === undefined) {
     return atom.element;
   }
-  return `${atom.element}${Number(atom.asymmetric_index) + 1}`;
+  const siteIndices = [...new Set(
+    atoms
+      .filter(item => item.element === atom.element && item.asymmetric_index !== null && item.asymmetric_index !== undefined)
+      .map(item => Number(item.asymmetric_index))
+  )].sort((a, b) => a - b);
+  const ordinal = siteIndices.indexOf(Number(atom.asymmetric_index));
+  if (siteIndices.length <= 1) return atom.element;
+  return ordinal >= 0 ? `${atom.element}${ordinal + 1}` : atom.element;
 }
 
 function atomMotionParts(atom) {
@@ -1365,10 +1451,12 @@ function visibilityButton(visible, title, onToggle) {
 }
 
 function renderOperations() {
+  renderOperationTypeFilter();
   const root = document.getElementById("operations");
   const sorted = sortedOperations();
   root.innerHTML = "";
   for (const operation of sorted) {
+    if (operationTypeFilterValue && operationSymbolFilterKey(operation) !== operationTypeFilterValue) continue;
     if (directionFilterValue && operationFilterKey(operation) !== directionFilterValue) continue;
     const text = optionText(operation);
     const row = document.createElement("button");
@@ -1392,6 +1480,46 @@ function renderOperations() {
     root.appendChild(row);
   }
   if (activeMode === "custom") renderCustomSequenceControls(sorted);
+}
+
+function operationSymbolFilterKey(operation) {
+  if (sourceKind === "molecule") return stripHtml(molecularSchoenfliesSymbol(operation));
+  const kind = String(operation.kind || "").toLowerCase();
+  if (kind.includes("glide")) return "g";
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) {
+    return `bar-${improperNotationOrder(operation)}`;
+  }
+  if (kind.includes("inversion")) return "bar-1";
+  return sortableSymbol(operation);
+}
+
+function operationSymbolFilterLabel(operation) {
+  if (sourceKind === "molecule") return molecularSchoenfliesSymbol(operation);
+  return beginnerOperationSymbol(operation);
+}
+
+function renderOperationTypeFilter() {
+  const root = document.getElementById("operation-type-filter");
+  if (!root) return;
+  const symbols = new Map();
+  for (const operation of operations) {
+    const key = operationSymbolFilterKey(operation);
+    if (!symbols.has(key)) symbols.set(key, operationSymbolFilterLabel(operation));
+  }
+  const keys = [...symbols.keys()].sort(compareText);
+  if (operationTypeFilterValue && !keys.includes(operationTypeFilterValue)) operationTypeFilterValue = "";
+  root.innerHTML = "";
+  for (const [key, label] of [["", "All"], ...keys.map(key => [key, symbols.get(key)])]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `direction-chip${key === operationTypeFilterValue ? " selected" : ""}`;
+    button.appendChild(renderHtml(label));
+    button.addEventListener("click", () => {
+      operationTypeFilterValue = key;
+      renderOperations();
+    });
+    root.appendChild(button);
+  }
 }
 
 function renderCustomSequenceControls(sorted = sortedOperations()) {
@@ -1664,6 +1792,9 @@ function renderStructureInfo() {
     displayLatticeParameters: metadata.display_lattice_parameters,
     cellSettingMode: state.cell_setting_mode,
     atoms: atoms.map(atom => [atom.index, atom.element, atom.frac, atom.cart]),
+    atomMotion: [...atomMotionBySource.entries()].map(([index, motion]) => [
+      index, motion.target_frac, motion.target_cart,
+    ]),
   });
   if (signature === lastStructureInfoSignature && !panel.hidden) return;
   const previousDetails = root.querySelector(".atom-position-details");
@@ -1765,12 +1896,18 @@ function appendAtomPositionSummary(root, open = false, scrollTop = 0) {
   const list = document.createElement("div");
   list.className = "atom-position-list";
   for (const atom of atoms) {
-    const coordinates = sourceKind === "crystal" && Array.isArray(atom.frac)
-      ? atom.frac.map(formatFrac).join(", ")
-      : (atom.cart || []).map(formatCoord).join(", ");
-    const unit = sourceKind === "crystal" ? "fractional" : "Å";
+    const isCrystal = sourceKind === "crystal" && Array.isArray(atom.frac);
+    const formatter = isCrystal ? formatFrac : formatCoord;
+    const start = isCrystal ? atom.frac : (atom.cart || []);
+    const motion = atomMotionBySource.get(atom.index);
+    const target = isCrystal ? motion?.target_frac : motion?.target_cart;
+    const coordinates = `(${start.map(formatter).join(", ")})`;
+    const targetCoordinates = Array.isArray(target)
+      ? ` → (${target.map(formatter).join(", ")})`
+      : "";
+    const unit = isCrystal ? (experienceMode === "advanced" ? " fractional" : "") : " Å";
     const row = document.createElement("div");
-    row.textContent = `${atom.index + 1}. ${atom.element}: (${coordinates}) ${unit}`;
+    row.textContent = `${atom.index + 1}. ${atomDisplayLabel(atom)}: ${coordinates}${targetCoordinates}${unit}`;
     list.appendChild(row);
   }
   details.appendChild(list);
@@ -2221,6 +2358,72 @@ function renderAtoms() {
   }
 }
 
+function renderSelectedAtomSummary() {
+  const root = document.getElementById("selected-atom-summary");
+  if (!root) return;
+  root.innerHTML = "";
+  const selected = state.scope === "selected"
+    ? new Set((state.selected_atoms || []).map(Number))
+    : new Set();
+  const selectors = document.createElement("div");
+  selectors.className = "atom-element-selectors";
+  const selectionGroups = new Map();
+  for (const atom of atoms) {
+    const label = sourceKind === "crystal" ? atomDisplayLabel(atom) : atom.element;
+    if (!selectionGroups.has(label)) selectionGroups.set(label, []);
+    selectionGroups.get(label).push(Number(atom.index));
+  }
+  for (const [label, indices] of [...selectionGroups.entries()].sort((a, b) => compareText(a[0], b[0]))) {
+    const allSelected = indices.length > 0 && indices.every(index => selected.has(index));
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `atom-element-selector${allSelected ? " selected" : ""}`;
+    button.textContent = label;
+    button.addEventListener("click", event => {
+      let next;
+      if (event.ctrlKey || event.metaKey || event.shiftKey) {
+        next = new Set(selected);
+        for (const index of indices) {
+          if (allSelected) next.delete(index);
+          else next.add(index);
+        }
+      } else {
+        next = allSelected && selected.size === indices.length ? new Set() : new Set(indices);
+      }
+      postState({
+        selected_atoms: [...next].sort((a, b) => a - b),
+        scope: next.size ? "selected" : "displayed",
+        playing: false,
+        reset: true,
+      });
+    });
+    selectors.appendChild(button);
+  }
+  root.appendChild(selectors);
+  for (const atom of atoms.filter(item => selected.has(Number(item.index)))) {
+    const motion = atomMotionBySource.get(atom.index);
+    const start = sourceKind === "crystal" ? motion?.start_frac : motion?.start_cart;
+    const target = sourceKind === "crystal" ? motion?.target_frac : motion?.target_cart;
+    const formatter = sourceKind === "crystal" ? formatFrac : formatCoord;
+    const unit = sourceKind === "crystal"
+      ? (experienceMode === "advanced" ? " fractional" : "")
+      : " Å";
+    const card = document.createElement("div");
+    card.className = "selected-atom-card";
+    const name = document.createElement("div");
+    name.className = "selected-atom-name";
+    name.textContent = `${atomDisplayLabel(atom)}（atom ${atom.index}）`;
+    const coordinates = document.createElement("div");
+    coordinates.className = "selected-atom-coordinates";
+    coordinates.textContent = Array.isArray(start) && Array.isArray(target)
+      ? `${formatVector(start, formatter)} → ${formatVector(target, formatter)}${unit}`
+      : "座標情報を取得できません";
+    card.appendChild(name);
+    card.appendChild(coordinates);
+    root.appendChild(card);
+  }
+}
+
 function atomListRenderSignature() {
   return JSON.stringify({
     atoms: atoms.map(atom => [
@@ -2330,6 +2533,33 @@ function syncPlayToggleButton() {
   button.classList.toggle("secondary", Boolean(state.playing));
 }
 
+function setMovementProgress(progress) {
+  const value = Math.max(0, Math.min(Number(progress) || 0, 1));
+  const slider = document.getElementById("movement-progress");
+  const output = document.getElementById("movement-progress-value");
+  if (slider) slider.value = String(Math.round(value * 1000));
+  if (output) output.textContent = `${Math.round(value * 100)}%`;
+}
+
+function setMovementBreakpoints(values) {
+  movementBreakpoints = [...new Set((values || [0, 1]).map(Number).filter(Number.isFinite))]
+    .filter(value => value >= 0 && value <= 1)
+    .sort((a, b) => a - b);
+  const list = document.getElementById("movement-stops");
+  if (!list) return;
+  list.innerHTML = "";
+  for (const value of movementBreakpoints) {
+    const option = document.createElement("option");
+    option.value = String(Math.round(value * 1000));
+    list.appendChild(option);
+  }
+}
+
+function dispatchMovementProgress(progress) {
+  setMovementProgress(progress);
+  window.dispatchEvent(new CustomEvent("symmetry-animation-progress", {detail: {progress}}));
+}
+
 function isGifSaving() {
   return String(state.gif_status || "").startsWith("writing ");
 }
@@ -2358,7 +2588,7 @@ function onAtomSelectionChange() {
   const selected = selectedAtomIndices();
   postState({
     selected_atoms: selected,
-    scope: selected.length > 0 ? "selected" : "representative",
+    scope: selected.length > 0 ? "selected" : "displayed",
     playing: false,
     reset: true,
   });
@@ -2500,6 +2730,7 @@ async function postState(update) {
   renderDirectionFilter();
   renderOperations();
   renderAtoms();
+  renderSelectedAtomSummary();
   renderStructureInfo();
   renderStatus();
   renderOperationDetails();
@@ -2549,6 +2780,7 @@ async function applyCellSetting(mode) {
     renderOperations();
     await refreshAtomMotion();
     renderAtoms();
+    renderSelectedAtomSummary();
     renderStructureInfo();
     renderStatus();
     renderOperationDetails();
@@ -2713,6 +2945,7 @@ async function applyLoadedStructure(result, fallbackError, examplePath = "", con
   renderOperations();
   await refreshAtomMotion();
   renderAtoms();
+  renderSelectedAtomSummary();
   renderStructureInfo();
   renderStatus();
   renderOperationDetails();
@@ -2867,6 +3100,28 @@ document.getElementById("play-toggle").addEventListener("click", () => {
   }
 });
 document.getElementById("reset").addEventListener("click", () => postState({playing: false, reset: true}));
+const movementProgress = document.getElementById("movement-progress");
+movementProgress.addEventListener("pointerdown", () => {
+  if (state.playing) postState({playing: false});
+});
+movementProgress.addEventListener("input", () => {
+  const progress = Number(movementProgress.value) / 1000;
+  dispatchMovementProgress(progress);
+});
+movementProgress.addEventListener("change", () => {
+  const progress = Number(movementProgress.value) / 1000;
+  const nearest = movementBreakpoints.reduce(
+    (best, value) => Math.abs(value - progress) < Math.abs(best - progress) ? value : best,
+    movementBreakpoints[0] ?? progress,
+  );
+  if (Math.abs(nearest - progress) <= 0.04) dispatchMovementProgress(nearest);
+});
+window.addEventListener("symmetry-animation-progress-update", event => {
+  setMovementProgress(event.detail?.progress || 0);
+});
+window.addEventListener("symmetry-animation-breakpoints", event => {
+  setMovementBreakpoints(event.detail?.breakpoints);
+});
 for (const button of document.querySelectorAll(".speed-button")) {
   button.addEventListener("click", () => postState({speed: Number(button.dataset.speed)}));
 }
@@ -2992,7 +3247,7 @@ document.getElementById("unit-cell-atoms").addEventListener("click", () => {
   postState({selected_atoms: atoms.map(atom => atom.index), scope: "unit_cell", playing: false, reset: true});
 });
 document.getElementById("clear-atoms").addEventListener("click", () => {
-  postState({selected_atoms: [], scope: "representative", playing: false, reset: true});
+  postState({selected_atoms: [], scope: "displayed", playing: false, reset: true});
 });
 
 // --- Custom Operation Check ---
@@ -3376,6 +3631,7 @@ async function boot() {
   syncGifSavingControls();
   renderOperations();
   renderAtoms();
+  renderSelectedAtomSummary();
   renderStructureInfo();
   renderStatus();
   renderOperationDetails();
