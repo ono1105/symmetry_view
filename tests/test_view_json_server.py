@@ -4,7 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 from crystal_viewer.json_export import EXPORT_SCHEMA_VERSION
+from crystal_viewer.web.browser_ui import HTML
 from crystal_viewer.viewer.animation_api import symmetry_elements_response
 from crystal_viewer.viewer.display_atoms import display_atom_instances
 from tools.view_json_server import (
@@ -21,6 +24,24 @@ from tools.view_json_server import (
     replace_shared_state_for_load,
     resolve_example_path,
 )
+
+
+class BrowserUiAssetsTest(unittest.TestCase):
+    def test_html_references_external_styles_and_scripts(self):
+        self.assertIn('href="/static/browser_ui.css"', HTML)
+        self.assertIn('src="/static/browser_ui.js"', HTML)
+        self.assertIn('src="/static/three_loader.js"', HTML)
+        self.assertIn('id="previous-frame"', HTML)
+        self.assertIn('id="next-frame"', HTML)
+        self.assertNotIn("__STRUCTURE_KIND_CONFIG__", HTML)
+        self.assertNotIn("<style>", HTML)
+        self.assertNotIn("<script>", HTML)
+
+    def test_split_assets_exist(self):
+        web_dir = Path("crystal_viewer/web")
+        for name in ("browser_ui.html", "browser_ui.css", "browser_ui.js", "three_loader.js"):
+            with self.subTest(name=name):
+                self.assertTrue((web_dir / name).is_file())
 
 
 class AtomRenderStyleItemsTest(unittest.TestCase):
@@ -225,9 +246,48 @@ class AtomMotionApiItemsTest(unittest.TestCase):
                     "wrapped_frac": [0.5, 0.5, 0.5],
                     "animation_frac": [0.5, 0.5, 0.5],
                     "distance": 0.0,
+                    "stages": [],
                 }
             ],
         )
+
+    def test_includes_compound_operation_stage_coordinates(self):
+        render_data = {
+            "atoms": [{"index": 0, "frac": [1.0, 0.0, 0.0], "cart": [1.0, 0.0, 0.0]}],
+            "unit_cell": {"lattice": np.eye(3).tolist()},
+        }
+        mappings = {
+            "mappings": [{
+                "operation_index": 4,
+                "entries": [{
+                    "source_atom": 0,
+                    "target_atom": 0,
+                    "transformed_cart": [0.0, 1.0, 2.0],
+                    "transformed_frac": [0.0, 1.0, 2.0],
+                }],
+            }],
+        }
+        path = {
+            "type": "screw",
+            "start": np.array([1.0, 0.0, 0.0]),
+            "target": np.array([0.0, 1.0, 2.0]),
+            "axis_point": np.zeros(3),
+            "axis_direction": np.array([0.0, 0.0, 1.0]),
+            "angle": np.pi / 2,
+            "translation": np.array([0.0, 0.0, 2.0]),
+            "phase_fraction": 0.75,
+        }
+
+        result = atom_motion_api_items(
+            render_data,
+            mappings,
+            4,
+            paths={0: path},
+        )
+
+        self.assertAlmostEqual(result[0]["stages"][0]["progress"], 0.75)
+        np.testing.assert_allclose(result[0]["stages"][0]["cart"], [0.0, 1.0, 0.0], atol=1e-8)
+        np.testing.assert_allclose(result[0]["stages"][0]["frac"], [0.0, 1.0, 0.0], atol=1e-8)
 
     def test_returns_empty_list_without_mapping(self):
         self.assertEqual(atom_motion_api_items({"atoms": []}, None, 1), [])

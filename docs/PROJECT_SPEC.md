@@ -127,7 +127,13 @@ pyvista_controller.py  PyVista state, camera control, animation, and GIF saving
 Browser-facing UI assets live under `crystal_viewer/web/`:
 
 ```text
-browser_ui.py          browser control panel HTML/JS
+browser_ui.py          compatibility loader and structure-kind config injection
+browser_ui.html        browser control panel DOM
+browser_ui.css         browser control panel styles
+browser_ui.js          browser controls and API interaction
+three_loader.js        Three.js dependency bootstrap
+three_view.js          Three.js scene, camera, picking, and animation
+animation_path.js      Cartesian animation-path evaluation
 ```
 
 This split is intentionally coarse: it keeps the current JSON viewer stable while making future CIF loading and molecule-specific controls easier to add without turning the server entry point into the single core file. The browser UI supports structure import, operation filtering/selection, operation sorting, direction filtering, atom visibility controls, color controls, Play, Stop, Reset, GIF saving, and custom operation checks. Operation rows stay compact: operation symbol plus representative axis `[uvw]`, plane normal `(hkl)`, and center/point fractional coordinates.

@@ -47,6 +47,14 @@ test("compound path breakpoint follows phase travel distance", () => {
   assertVectorClose(evaluatePath(screw, breakpoints[1]), [0, 1, 0], "screw phase boundary");
 });
 
+test("explicit compound phase boundary controls evaluation and UI breakpoint", () => {
+  const source = fixture.cases.find(item => item.name === "screw_rotation_then_translation").path;
+  const screw = {...source, phase_fraction: 0.75};
+  const breakpoints = pathBreakpoints(screw);
+  assert.ok(Math.abs(breakpoints[1] - 0.75) <= tolerance);
+  assertVectorClose(evaluatePath(screw, 0.75), [0, 1, 0], "shared screw phase boundary");
+});
+
 test("compound path keeps Python parity for a periodic start override", () => {
   const screw = fixture.cases.find(item => item.name === "screw_rotation_then_translation").path;
   assertVectorClose(

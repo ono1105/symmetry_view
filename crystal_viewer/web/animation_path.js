@@ -159,7 +159,10 @@ export function pathBreakpoints(path, startOverride = null) {
   } else if (["screw", "glide", "rotoinversion", "rotoreflection"].includes(path.type)) {
     const start = startOverride === null ? [...path.start] : [...startOverride];
     const geometry = twoPhaseGeometry(path, start);
-    result.add(phaseFraction(geometry.firstLength, geometry.secondLength));
+    result.add(Math.max(0, Math.min(
+      Number(path.phase_fraction ?? phaseFraction(geometry.firstLength, geometry.secondLength)),
+      1,
+    )));
   } else if (path.type === "mirror_after_hold") {
     result.add(Math.max(0, Math.min(Number(path.hold_fraction) || 0.3, 1)));
   }
@@ -219,7 +222,10 @@ export function evaluatePath(path, progress, startOverride = null) {
   }
   if (["screw", "glide", "rotoinversion", "rotoreflection"].includes(pathType)) {
     const geometry = twoPhaseGeometry(path, start);
-    const split = phaseFraction(geometry.firstLength, geometry.secondLength);
+    const split = Math.max(0, Math.min(
+      Number(path.phase_fraction ?? phaseFraction(geometry.firstLength, geometry.secondLength)),
+      1,
+    ));
     if (s <= split) {
       const localS = split > EPSILON ? s / split : 1;
       if (pathType === "glide") return interpolate(start, geometry.midpoint, localS);

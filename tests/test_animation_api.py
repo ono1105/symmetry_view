@@ -74,6 +74,19 @@ class SerializeAnimationPathTest(unittest.TestCase):
 
 
 class AnimationPathResponseTest(unittest.TestCase):
+    def test_sio2_screw_paths_publish_one_shared_phase_boundary(self):
+        payload = json.loads(Path("exports/json/sio2.json").read_text(encoding="utf-8"))
+
+        result = animation_path_response(
+            payload["render_data"],
+            payload["atom_mappings"],
+            6,
+            scope="displayed",
+        )
+
+        fractions = {round(item["path"]["phase_fraction"], 12) for item in result["paths"]}
+        self.assertEqual(len(fractions), 1)
+
     def test_builds_versioned_cartesian_response(self):
         render_data = {
             "metadata": {"mode": "molecule"},

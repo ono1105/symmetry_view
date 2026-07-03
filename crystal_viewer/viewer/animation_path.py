@@ -361,6 +361,34 @@ def phase_fraction(first_length: float, second_length: float) -> float:
     return first_length / total if total > 1e-12 else 0.5
 
 
+def synchronize_compound_path_phases(paths: dict[int, dict]) -> None:
+    """Give every atom in a compound operation the same phase boundary.
+
+    Rotation/reflection travel depends on the atom's distance from the symmetry
+    element.  Deriving the split independently therefore lets near atoms begin
+    the second phase while farther atoms are still in the first phase.  Use the
+    longest travel in each phase as the operation-wide timing reference.
+    """
+    compound_types = {"screw", "glide", "rotoinversion", "rotoreflection"}
+    phase_lengths = []
+    compound_paths = []
+    for path in paths.values():
+        if path.get("type") not in compound_types:
+            continue
+        start = np.asarray(path["start"], dtype=float)
+        _, _, first_length, second_length = two_phase_geometry(path, start)
+        phase_lengths.append((first_length, second_length))
+        compound_paths.append(path)
+    if not compound_paths:
+        return
+    split = phase_fraction(
+        max(lengths[0] for lengths in phase_lengths),
+        max(lengths[1] for lengths in phase_lengths),
+    )
+    for path in compound_paths:
+        path["phase_fraction"] = split
+
+
 def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None) -> np.ndarray:
     s = float(np.clip(s, 0.0, 1.0))
     path_type = path["type"]
@@ -411,7 +439,8 @@ def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None
         return rotated
     if path_type in ("screw", "glide", "rotoinversion", "rotoreflection"):
         midpoint, endpoint, first_length, second_length = two_phase_geometry(path, start)
-        split = phase_fraction(first_length, second_length)
+        split = float(path.get("phase_fraction", phase_fraction(first_length, second_length)))
+        split = float(np.clip(split, 0.0, 1.0))
         if s <= split:
             local_s = s / split if split > 1e-12 else 1.0
             if path_type == "glide":

@@ -40,6 +40,8 @@ from crystal_viewer.symmetry_operations import (
     find_operation_sequence_bfs,
 )
 from crystal_viewer.viewer.atom_style import atom_color, display_atom_radius
+from crystal_viewer.viewer.animation_context import animation_paths
+from crystal_viewer.viewer.animation_path import evaluate_path, phase_fraction, two_phase_geometry
 from crystal_viewer.viewer.display_atoms import display_atom_instances, display_fractional_bounds
 from crystal_viewer.viewer.animation_api import animation_path_response, symmetry_elements_response
 from crystal_viewer.viewer.custom_operation import (
@@ -235,16 +237,29 @@ def display_unit_cell_api_item(
     }
 
 
-def atom_motion_api_items(render_data: dict, atom_mappings: dict | None, operation_index: int | None) -> list[dict]:
+def atom_motion_api_items(
+    render_data: dict,
+    atom_mappings: dict | None,
+    operation_index: int | None,
+    *,
+    paths: dict[int, dict] | None = None,
+) -> list[dict]:
     mapping = selected_mapping(atom_mappings, operation_index)
     if mapping is None:
         return []
     atoms_by_index = {atom["index"]: atom for atom in render_data.get("atoms", [])}
+    inverse_lattice = None
+    unit_cell = render_data.get("unit_cell")
+    if unit_cell is not None:
+        try:
+            inverse_lattice = np.linalg.inv(np.asarray(unit_cell["lattice"], dtype=float))
+        except np.linalg.LinAlgError:
+            inverse_lattice = None
     items = []
     for entry in mapping.get("entries", []):
         source_index = entry.get("source_atom")
         source_atom = atoms_by_index.get(source_index, {})
-        items.append({
+        item = {
             "source_atom": source_index,
             "target_atom": entry.get("target_atom"),
             "start_frac": source_atom.get("frac"),
@@ -254,8 +269,30 @@ def atom_motion_api_items(render_data: dict, atom_mappings: dict | None, operati
             "wrapped_frac": entry.get("wrapped_frac"),
             "animation_frac": entry.get("animation_frac"),
             "distance": entry.get("distance"),
-        })
+        }
+        path = (paths or {}).get(int(source_index)) if source_index is not None else None
+        item["stages"] = compound_path_stage_items(path, inverse_lattice=inverse_lattice)
+        items.append(item)
     return items
+
+
+def compound_path_stage_items(
+    path: dict | None,
+    *,
+    inverse_lattice: np.ndarray | None,
+) -> list[dict]:
+    if path is None or path.get("type") not in {"screw", "glide", "rotoinversion", "rotoreflection"}:
+        return []
+    start = np.asarray(path["start"], dtype=float)
+    _, _, first_length, second_length = two_phase_geometry(path, start)
+    progress = float(path.get("phase_fraction", phase_fraction(first_length, second_length)))
+    position_cart = evaluate_path(path, progress)
+    position_frac = None if inverse_lattice is None else position_cart @ inverse_lattice
+    return [{
+        "progress": progress,
+        "cart": position_cart.tolist(),
+        "frac": None if position_frac is None else position_frac.tolist(),
+    }]
 
 
 def compose_operation_indices(
@@ -505,6 +542,18 @@ def make_handler(
                 module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "animation_path.js"
                 self.send_javascript_file(module_path)
                 return
+            if path == "/static/browser_ui.css":
+                stylesheet_path = PROJECT_ROOT / "crystal_viewer" / "web" / "browser_ui.css"
+                self.send_stylesheet_file(stylesheet_path)
+                return
+            if path == "/static/browser_ui.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "browser_ui.js"
+                self.send_javascript_file(module_path)
+                return
+            if path == "/static/three_loader.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "three_loader.js"
+                self.send_javascript_file(module_path)
+                return
             if path == "/static/three_view.js":
                 module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "three_view.js"
                 self.send_javascript_file(module_path)
@@ -642,9 +691,38 @@ def make_handler(
                     render_data = session.render_data
                     atom_mappings = session.atom_mappings
                     operation_index = int(shared_state.get("operation_index", 0))
+                    improper_mode = str(shared_state.get("improper_mode", "auto"))
+                    display_mode = str(shared_state.get("display_mode", "source"))
+                    cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                operation = operation_by_index(render_data.get("operations", []), operation_index)
+                mapping = selected_mapping(atom_mappings, operation_index)
+                paths = {}
+                kind = str((operation or {}).get("kind", ""))
+                compound_operation = (
+                    kind.startswith("screw")
+                    or "glide" in kind
+                    or "rotoinversion" in kind
+                    or "rotoreflection" in kind
+                    or "improper" in kind
+                )
+                if operation is not None and mapping is not None and compound_operation:
+                    paths = animation_paths(
+                        render_data,
+                        operation,
+                        mapping,
+                        animation_scope="all",
+                        improper_mode=improper_mode,
+                        display_mode=display_mode,
+                        cell_origin_mode=cell_origin_mode,
+                    )
                 body = {
                     "operation_index": operation_index,
-                    "entries": atom_motion_api_items(render_data, atom_mappings, operation_index),
+                    "entries": atom_motion_api_items(
+                        render_data,
+                        atom_mappings,
+                        operation_index,
+                        paths=paths,
+                    ),
                 }
                 self.send_json(body)
                 return
@@ -1041,6 +1119,14 @@ def make_handler(
             if transform is not None:
                 text = transform(text)
             self.send_bytes(text.encode("utf-8"), content_type="text/javascript; charset=utf-8")
+
+        def send_stylesheet_file(self, path: Path) -> None:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                self.send_json_error(f"Stylesheet asset not found: {path.name}", status=404)
+                return
+            self.send_bytes(text.encode("utf-8"), content_type="text/css; charset=utf-8")
 
         def send_json_error(self, message: str, *, status: int = 500) -> None:
             body = json.dumps({"ok": False, "error": message}).encode("utf-8")

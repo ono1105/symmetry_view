@@ -4,11 +4,45 @@ from unittest.mock import Mock
 import numpy as np
 
 from crystal_viewer.viewer.animation import apply_boundary_mode, update_animated_atoms
-from crystal_viewer.viewer.animation_path import animation_path_length, evaluate_path
+from crystal_viewer.viewer.animation_path import (
+    animation_path_length,
+    evaluate_path,
+    synchronize_compound_path_phases,
+)
 from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 
 
 class AnimationPathTest(unittest.TestCase):
+    def test_compound_paths_share_phase_boundary_across_different_radii(self):
+        paths = {
+            0: {
+                "type": "screw",
+                "start": np.array([1.0, 0.0, 0.0]),
+                "target": np.array([0.0, 1.0, 2.0]),
+                "axis_point": np.zeros(3),
+                "axis_direction": np.array([0.0, 0.0, 1.0]),
+                "angle": np.pi / 2,
+                "translation": np.array([0.0, 0.0, 2.0]),
+            },
+            1: {
+                "type": "screw",
+                "start": np.array([3.0, 0.0, 0.0]),
+                "target": np.array([0.0, 3.0, 2.0]),
+                "axis_point": np.zeros(3),
+                "axis_direction": np.array([0.0, 0.0, 1.0]),
+                "angle": np.pi / 2,
+                "translation": np.array([0.0, 0.0, 2.0]),
+            },
+        }
+
+        synchronize_compound_path_phases(paths)
+
+        split = paths[0]["phase_fraction"]
+        self.assertEqual(split, paths[1]["phase_fraction"])
+        self.assertAlmostEqual(split, (3 * np.pi / 2) / (3 * np.pi / 2 + 2))
+        np.testing.assert_allclose(evaluate_path(paths[0], split), [0.0, 1.0, 0.0], atol=1e-8)
+        np.testing.assert_allclose(evaluate_path(paths[1], split), [0.0, 3.0, 0.0], atol=1e-8)
+
     def test_start_marker_is_visible_only_while_playing(self):
         viewer = BrowserControlledViewer.__new__(BrowserControlledViewer)
         marker = Mock()

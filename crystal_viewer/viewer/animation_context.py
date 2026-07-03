@@ -13,6 +13,7 @@ from crystal_viewer.viewer.animation_path import (
     rotate_about_axis,
     signed_angle_to_target,
     signed_rotation_angle_from_matrix,
+    synchronize_compound_path_phases,
 )
 from crystal_viewer.viewer.display_atoms import display_point_cart, periodic_shifts
 from crystal_viewer.viewer.operation_lookup import filter_by_operation, selected_elements
@@ -100,6 +101,7 @@ def animation_paths(
             improper_mode=improper_mode,
             source_kind=str(render_data.get("metadata", {}).get("mode", "")),
         )
+    synchronize_compound_path_phases(paths)
     return paths
 
 

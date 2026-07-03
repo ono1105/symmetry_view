@@ -1,0 +1,2592 @@
+let operations = [];
+let atoms = [];
+let atomMotionBySource = new Map();
+let lastAtomMotionRequestKey = "";
+let pendingAtomMotionRequestKey = "";
+let atomMotionRequestGeneration = 0;
+let lastAtomRenderSignature = "";
+let lastStructureInfoSignature = "";
+let state = {};
+let directionFilterValue = "";
+let operationTypeFilterValue = "";
+let atomElementFilterValue = "";
+let operationLabelMode = "itc_like";
+let customOperationSequence = [];
+let summariesReady = false;
+let activeMode = "standard";
+let experienceMode = "beginner";
+let customUnmappedAtoms = new Set();
+let sourceKind = "crystal";
+let selectedStructureKind = "crystal";
+let importInProgress = false;
+let refreshInProgress = false;
+let importRequestId = 0;
+let exampleCatalog = {crystal: [], molecule: []};
+let selectedExamplePath = "";
+let movementBreakpoints = [0, 1];
+let movementProgressValue = 0;
+const MOVEMENT_FRAME_STEP = 0.02;
+let selectedAtomDetailsOpen = true;
+let displayRangeUpdatePending = false;
+const STRUCTURE_KIND_UI = JSON.parse(document.getElementById("structure-kind-config").textContent);
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  if (response.status === 204) return null;
+  const text = await response.text();
+  let body = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch (_error) {
+      body = null;
+    }
+  }
+  if (!response.ok) {
+    const message = body && body.error ? body.error : (text || `${response.status} ${response.statusText}`);
+    throw new Error(message);
+  }
+  return body;
+}
+
+function optionText(operation) {
+  if (sourceKind === "molecule") {
+    const symbol = molecularSchoenfliesSymbol(operation);
+    return experienceMode === "beginner" ? symbol : `op ${operation.index}: ${symbol}`;
+  }
+  if (experienceMode === "beginner") {
+    return beginnerOperationText(operation);
+  }
+  if (operationLabelMode === "itc_like") {
+    const itc = operation.itc_like_summary || operation.itc_coordinate_summary;
+    if (itc) return `op ${operation.index}: ${formatSymbol(itc)}`;
+    return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
+  }
+  const symbol = formatSymbol(displayOperationSymbol(operation));
+  const summary = operation.element_summary || "";
+  const element = summary ? ` | ${formatSymbol(summary)}` : "";
+  return `op ${operation.index}: ${symbol}${element}`;
+}
+
+function molecularSchoenfliesSymbol(operation) {
+  const symbol = String(operation.symbol || operation.display_symbol || "?");
+  if (symbol === "sigma") return "σ";
+  const match = symbol.match(/^([CS])(\\d+|∞)$/);
+  return match ? `${match[1]}<sub>${match[2]}</sub>` : formatSymbol(symbol);
+}
+
+function beginnerOperationText(operation) {
+  const kind = String(operation.kind || "").toLowerCase();
+  const reportedAngle = operation.angle_deg;
+  const matrixOrder = Number(operation.order);
+  const notationOrder = improperNotationOrder(operation);
+  const fallbackOrder = isImproperOperation(operation) ? notationOrder : matrixOrder;
+  const angle = isImproperOperation(operation) && Number.isFinite(notationOrder) && notationOrder > 1
+    ? 360 / notationOrder
+    : reportedAngle !== null && reportedAngle !== undefined && Number.isFinite(Number(reportedAngle))
+      ? Math.abs(Number(reportedAngle))
+      : (Number.isFinite(fallbackOrder) && fallbackOrder > 1 ? 360 / fallbackOrder : 0);
+  const angleText = Number.isFinite(angle) && angle > 1e-6
+    ? `${Math.round(angle)}°`
+    : "";
+  const symbol = beginnerOperationSymbol(operation);
+  const reading = beginnerOperationReading(operation);
+  const label = `${symbol} (${reading})`;
+  if (kind === "identity") return `${label}:恒等操作`;
+  if (kind.includes("screw")) return `${label}:${angleText}回転+平行移動`;
+  if (kind.includes("glide")) return `${label}:鏡映+平行移動`;
+  if (kind.includes("mirror")) return `${label}:鏡映`;
+  if (kind.includes("inversion") && !kind.includes("roto")) return `${label}:反転`;
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) {
+    return `${label}:${angleText}回転+反転`;
+  }
+  if (kind.includes("rotation")) return `${label}:${angleText}回転`;
+  if (kind.includes("translation")) return `${label}:平行移動`;
+  return `${label}:対称操作`;
+}
+
+function beginnerOperationSymbol(operation) {
+  const kind = String(operation.kind || "").toLowerCase();
+  const order = improperNotationOrder(operation);
+  if (kind.includes("glide")) return "g";
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) {
+    return `<span class="overline">${order}</span>`;
+  }
+  if (kind.includes("inversion")) return '<span class="overline">1</span>';
+  return formatSymbol(operation.display_symbol || operation.symbol || "?");
+}
+
+function beginnerOperationReading(operation) {
+  const kind = String(operation.kind || "").toLowerCase();
+  const order = isImproperOperation(operation) ? improperNotationOrder(operation) : (operation.order || "");
+  if (kind === "identity") return "恒等";
+  if (kind.includes("screw")) return `${order}回らせん`;
+  if (kind.includes("glide")) return "映進";
+  if (kind.includes("mirror")) return "鏡映";
+  if (kind.includes("inversion") && !kind.includes("roto")) return "反転";
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) {
+    return `${order}回回反`;
+  }
+  if (kind.includes("rotation")) return `${order}回回転`;
+  if (kind.includes("translation")) return "並進";
+  return "対称操作";
+}
+
+function operationSummaryText(operation) {
+  if (operationLabelMode === "itc_like") {
+    return operation.itc_like_summary || operation.itc_coordinate_summary || "";
+  }
+  return operation.element_summary || "";
+}
+
+function renderHtml(text) {
+  const template = document.createElement("template");
+  template.innerHTML = text;
+  return template.content;
+}
+
+function formatSymbol(symbol) {
+  const subscripts = "₀₁₂₃₄₅₆";
+  return String(symbol)
+    .replace(/sigma/g, "σ")
+    .replace(/_([0-6])/g, (_, digit) => subscripts[Number(digit)]);
+}
+
+function resolvedImproperMode() {
+  const requested = state.improper_mode || "auto";
+  if (requested === "rotoreflection" || requested === "rotoinversion") return requested;
+  return sourceKind === "molecule" ? "rotoreflection" : "rotoinversion";
+}
+
+function isImproperOperation(operation) {
+  const kind = String(operation.kind || "");
+  return kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection");
+}
+
+function improperNotationOrder(operation) {
+  const suppliedOrder = Number(operation.notation_order);
+  if (Number.isFinite(suppliedOrder) && suppliedOrder > 0) return suppliedOrder;
+  const symbol = String(operation.symbol || operation.display_symbol || "");
+  const match = symbol.match(/[0-9]+/);
+  if (match) return Number(match[0]);
+  const matrixOrder = Number(operation.order);
+  return Number.isFinite(matrixOrder) ? matrixOrder : 0;
+}
+
+function displayOperationSymbol(operation) {
+  if (!isImproperOperation(operation)) {
+    return operation.display_symbol || operation.symbol || "";
+  }
+  const notationOrder = improperNotationOrder(operation);
+  if (resolvedImproperMode() === "rotoreflection") {
+    const reflectionOrder = operation.order || notationOrder;
+    return reflectionOrder ? `S${reflectionOrder}` : (operation.display_symbol || operation.symbol || "");
+  }
+  return notationOrder
+    ? `<span class="overline">${notationOrder}</span>`
+    : (operation.display_symbol || operation.symbol || "");
+}
+
+function atomDisplayLabel(atom) {
+  if (sourceKind !== "crystal" || atom.asymmetric_index === null || atom.asymmetric_index === undefined) {
+    return atom.element;
+  }
+  const siteIndices = [...new Set(
+    atoms
+      .filter(item => item.element === atom.element && item.asymmetric_index !== null && item.asymmetric_index !== undefined)
+      .map(item => Number(item.asymmetric_index))
+  )].sort((a, b) => a - b);
+  const ordinal = siteIndices.indexOf(Number(atom.asymmetric_index));
+  if (siteIndices.length <= 1) return atom.element;
+  return ordinal >= 0 ? `${atom.element}${ordinal + 1}` : atom.element;
+}
+
+function atomMotionParts(atom) {
+  const motion = atomMotionBySource.get(atom.index);
+  if (!motion) return null;
+  const target = motion.target_atom === null || motion.target_atom === undefined ? "?" : motion.target_atom;
+  if (sourceKind === "crystal" && Array.isArray(motion.start_frac) && Array.isArray(motion.target_frac)) {
+    return {
+      path: `${formatVector(motion.start_frac, formatFrac)} → ${formatVector(motion.target_frac, formatFrac)}`,
+      target,
+    };
+  }
+  if (Array.isArray(motion.start_cart) && Array.isArray(motion.target_cart)) {
+    return {
+      path: `${formatVector(motion.start_cart, formatCoord)} → ${formatVector(motion.target_cart, formatCoord)}`,
+      target,
+    };
+  }
+  return {path: "", target};
+}
+
+function formatVector(values, formatter) {
+  return `(${values.map(formatter).join(", ")})`;
+}
+
+function formatFrac(value) {
+  return fmtFrac(value);
+}
+
+function formatCoord(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(3).replace(/\\.?0+$/, "") : "?";
+}
+
+function normalizeColor(value, fallback = "#9aa5b1") {
+  const text = String(value || "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(text)) return text.toLowerCase();
+  return fallback;
+}
+
+function atomEffectiveColor(atom) {
+  const atomColors = state.atom_colors || {};
+  const elementColors = state.element_colors || {};
+  return normalizeColor(
+    atomColors[String(atom.index)] || elementColors[atom.element] || atom.default_color,
+  );
+}
+
+function atomVisible(atom) {
+  const atomHidden = state.atom_hidden || {};
+  const elementHidden = state.element_hidden || {};
+  return !elementHidden[atom.element] && !atomHidden[String(atom.index)];
+}
+
+function visibilityButton(visible, title, onToggle) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `visibility-toggle${visible ? "" : " hidden"}`;
+  button.textContent = visible ? "Shown" : "Hidden";
+  button.title = title;
+  button.setAttribute("aria-label", title);
+  button.addEventListener("click", onToggle);
+  return button;
+}
+
+function renderOperations() {
+  renderOperationTypeFilter();
+  const root = document.getElementById("operations");
+  const sorted = sortedOperations();
+  root.innerHTML = "";
+  for (const operation of sorted) {
+    if (operationTypeFilterValue && operationSymbolFilterKey(operation) !== operationTypeFilterValue) continue;
+    if (directionFilterValue && operationFilterKey(operation) !== directionFilterValue) continue;
+    const text = optionText(operation);
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "operation-row";
+    row.dataset.index = operation.index;
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", operation.index === state.operation_index ? "true" : "false");
+    if (operation.index === state.operation_index) row.classList.add("selected");
+    if (experienceMode === "beginner") {
+      const operationNumber = document.createElement("span");
+      operationNumber.className = "operation-number";
+      operationNumber.textContent = `op ${operation.index}:`;
+      operationNumber.title = "Stable operation index (independent of sort order)";
+      row.appendChild(operationNumber);
+    }
+    row.appendChild(renderHtml(text));
+    row.addEventListener("click", () => {
+      postState({operation_index: operation.index, playing: false, reset: true});
+    });
+    root.appendChild(row);
+  }
+  if (activeMode === "custom") renderCustomSequenceControls(sorted);
+}
+
+function operationSymbolFilterKey(operation) {
+  if (sourceKind === "molecule") return stripHtml(molecularSchoenfliesSymbol(operation));
+  const kind = String(operation.kind || "").toLowerCase();
+  if (kind.includes("glide")) return "g";
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) {
+    return `bar-${improperNotationOrder(operation)}`;
+  }
+  if (kind.includes("inversion")) return "bar-1";
+  return sortableSymbol(operation);
+}
+
+function operationSymbolFilterLabel(operation) {
+  if (sourceKind === "molecule") return molecularSchoenfliesSymbol(operation);
+  return beginnerOperationSymbol(operation);
+}
+
+function renderOperationTypeFilter() {
+  const root = document.getElementById("operation-type-filter");
+  if (!root) return;
+  const symbols = new Map();
+  for (const operation of operations) {
+    const key = operationSymbolFilterKey(operation);
+    if (!symbols.has(key)) symbols.set(key, operationSymbolFilterLabel(operation));
+  }
+  const keys = [...symbols.keys()].sort(compareText);
+  if (operationTypeFilterValue && !keys.includes(operationTypeFilterValue)) operationTypeFilterValue = "";
+  root.innerHTML = "";
+  const allLabel = "All";
+  for (const [key, label] of [["", allLabel], ...keys.map(key => [key, symbols.get(key)])]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `direction-chip${key === operationTypeFilterValue ? " selected" : ""}`;
+    button.appendChild(renderHtml(label));
+    button.addEventListener("click", () => {
+      operationTypeFilterValue = key;
+      renderOperations();
+    });
+    root.appendChild(button);
+  }
+}
+
+function renderCustomSequenceControls(sorted = sortedOperations()) {
+  const select = document.getElementById("cop-operation-select");
+  const list = document.getElementById("custom-sequence-list");
+  if (!select || !list) return;
+  const selectedValue = select.value;
+  select.innerHTML = "";
+  for (const operation of sorted) {
+    const option = document.createElement("option");
+    option.value = String(operation.index);
+    option.textContent = stripHtml(optionText(operation));
+    select.appendChild(option);
+  }
+  if (selectedValue && [...select.options].some(option => option.value === selectedValue)) {
+    select.value = selectedValue;
+  } else if (state.operation_index !== undefined) {
+    select.value = String(state.operation_index);
+  }
+
+  list.innerHTML = "";
+  const operationsByIndex = new Map(operations.map(operation => [operation.index, operation]));
+  if (!customOperationSequence.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = "No operations in sequence.";
+    list.appendChild(empty);
+  } else {
+    customOperationSequence.forEach((sequenceItem, position) => {
+      const operation = sequenceItem.type === "operation" ? operationsByIndex.get(sequenceItem.index) : null;
+      const row = document.createElement("div");
+      row.className = "sequence-item";
+      const label = document.createElement("span");
+      label.textContent = `${position + 1}. ${operation ? stripHtml(optionText(operation)) : customSequenceItemLabel(customOperationSequence[position])}`;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => {
+        customOperationSequence.splice(position, 1);
+        hideCustomSequenceResult();
+        renderCustomSequenceControls();
+      });
+      row.appendChild(label);
+      row.appendChild(remove);
+      list.appendChild(row);
+    });
+  }
+}
+
+function customSequenceItemLabel(item) {
+  if (!item) return "unknown";
+  if (item.type === "operation") return `op ${item.index}`;
+  return item.label || "custom";
+}
+
+function hideCustomSequenceResult() {
+  const div = document.getElementById("cop-result");
+  if (div) div.hidden = true;
+}
+
+function renderDirectionFilter() {
+  const root = document.getElementById("direction-filter");
+  const filterType = operationFilterType();
+  document.getElementById("operation-filter-label").textContent =
+    filterType === "symbol" ? "Symbol" : "Direction";
+  const values = [...new Map(
+    operations
+      .map(operation => [operationFilterKey(operation), operationFilterLabel(operation)])
+      .filter(([value]) => value && value !== "none")
+  ).entries()].sort((a, b) => compareText(a[1], b[1]));
+  root.innerHTML = "";
+  const allButton = document.createElement("button");
+  allButton.type = "button";
+  allButton.className = `direction-chip${directionFilterValue ? "" : " selected"}`;
+  allButton.textContent = "All";
+  allButton.addEventListener("click", () => {
+    directionFilterValue = "";
+    renderDirectionFilter();
+    renderOperations();
+  });
+  root.appendChild(allButton);
+  for (const [value, label] of values) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `direction-chip${value === directionFilterValue ? " selected" : ""}`;
+    button.appendChild(renderHtml(label));
+    button.addEventListener("click", () => {
+      directionFilterValue = value;
+      renderDirectionFilter();
+      renderOperations();
+    });
+    root.appendChild(button);
+  }
+  if (directionFilterValue && !values.some(([value]) => value === directionFilterValue)) {
+    directionFilterValue = "";
+    renderDirectionFilter();
+    renderOperations();
+  }
+}
+
+function syncOperationLabelModeControls() {
+  const block = document.getElementById("operation-label-mode-block");
+  if (block) block.hidden = sourceKind !== "crystal";
+  const select = document.getElementById("operation-label-mode");
+  if (select) select.value = operationLabelMode;
+  const hint = document.getElementById("operation-notation-hint");
+  if (!hint) return;
+  hint.textContent = operationLabelMode === "itc_like"
+    ? "ITC-style notation computed from each operation's (W, t): symbol, intrinsic translation, and the element location."
+    : "The selected operation controls the axis/plane/center shown in PyVista.";
+}
+
+function sortedOperations() {
+  if (experienceMode === "beginner") {
+    return [...operations].sort((a, b) =>
+      compareNumber(beginnerOperationTypeRank(a), beginnerOperationTypeRank(b))
+      || compareNumber(Number(a.order) || 0, Number(b.order) || 0)
+      || compareNumber(Number(a.angle_deg) || 0, Number(b.angle_deg) || 0)
+      || compareNumber(a.index, b.index)
+    );
+  }
+  const mode = document.getElementById("operation-sort").value;
+  return [...operations].sort((a, b) => {
+    if (mode === "symbol") {
+      return compareText(sortableSymbol(a), sortableSymbol(b)) || compareNumber(a.index, b.index);
+    }
+    if (mode === "element") {
+      return compareText(a.element_sort_key || "", b.element_sort_key || "") || compareNumber(a.index, b.index);
+    }
+    if (mode === "direction") {
+      return compareText(a.direction_sort_key || "", b.direction_sort_key || "") || compareNumber(a.index, b.index);
+    }
+    return compareNumber(a.index, b.index);
+  });
+}
+
+function beginnerOperationTypeRank(operation) {
+  const kind = String(operation.kind || "").toLowerCase();
+  if (kind === "identity") return 0;
+  if (kind.includes("rotation") && !kind.includes("improper")) return 1;
+  if (kind.includes("screw")) return 2;
+  if (kind.includes("mirror")) return 3;
+  if (kind.includes("glide")) return 4;
+  if (kind.includes("inversion") && !kind.includes("roto")) return 5;
+  if (kind.includes("improper") || kind.includes("rotoinversion") || kind.includes("rotoreflection")) return 6;
+  if (kind.includes("translation")) return 7;
+  return 8;
+}
+
+function sortableSymbol(operation) {
+  return stripHtml(`${displayOperationSymbol(operation)}`).replace(/_/g, "");
+}
+
+function operationFilterType() {
+  if (sourceKind === "molecule") return "symbol";
+  return document.getElementById("operation-sort").value === "symbol" ? "symbol" : "direction";
+}
+
+function operationFilterKey(operation) {
+  if (operationFilterType() === "symbol") return sortableSymbol(operation);
+  return operation.direction_sort_key || "";
+}
+
+function operationFilterLabel(operation) {
+  if (operationFilterType() === "symbol") return formatSymbol(displayOperationSymbol(operation));
+  return operation.direction_label || operation.direction_filter_label || operation.direction_sort_key || "";
+}
+
+function stripHtml(text) {
+  const template = document.createElement("template");
+  template.innerHTML = text;
+  return template.content.textContent || "";
+}
+
+function compareText(a, b) {
+  return String(a).localeCompare(String(b), undefined, {numeric: true, sensitivity: "base"});
+}
+
+function compareNumber(a, b) {
+  return Number(a) - Number(b);
+}
+
+function basename(path) {
+  const text = String(path || "");
+  if (!text) return "-";
+  const parts = text.split(/[\\\\/]/);
+  return parts[parts.length - 1] || text;
+}
+
+function formatLength(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(4)} Å` : "-";
+}
+
+function formatAngle(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(3)}°` : "-";
+}
+
+function structureLoadedForSelectedKind() {
+  const loaded = state.structure_loaded !== false && sourceKind !== "empty";
+  return loaded && sourceKind === selectedStructureKind;
+}
+
+function sourceKindConfig(kind) {
+  return STRUCTURE_KIND_UI[kind] || STRUCTURE_KIND_UI.crystal;
+}
+
+function setDefaultOperationSortForSourceKind() {
+  document.getElementById("operation-sort").value = "index";
+  directionFilterValue = "";
+}
+
+const CRYSTAL_POINT_GROUP_LABELS = {
+  "1": "C_1",
+  "-1": "C_i",
+  "2": "C_2",
+  "m": "C_s",
+  "2/m": "C_2h",
+  "222": "D_2",
+  "mm2": "C_2v",
+  "mmm": "D_2h",
+  "4": "C_4",
+  "-4": "S_4",
+  "4/m": "C_4h",
+  "422": "D_4",
+  "4mm": "C_4v",
+  "-42m": "D_2d",
+  "4/mmm": "D_4h",
+  "3": "C_3",
+  "-3": "S_6",
+  "32": "D_3",
+  "3m": "C_3v",
+  "-3m": "D_3d",
+  "6": "C_6",
+  "-6": "C_3h",
+  "6/m": "C_6h",
+  "622": "D_6",
+  "6mm": "C_6v",
+  "-6m2": "D_3h",
+  "6/mmm": "D_6h",
+  "23": "T",
+  "m-3": "T_h",
+  "432": "O",
+  "-43m": "T_d",
+  "m-3m": "O_h",
+};
+
+function renderStructureInfo() {
+  const panel = document.getElementById("structure-info-panel");
+  const root = document.getElementById("structure-info");
+  if (!structureLoadedForSelectedKind()) {
+    panel.hidden = true;
+    root.innerHTML = "";
+    lastStructureInfoSignature = "";
+    return;
+  }
+  const metadata = state.metadata || {};
+  const signature = JSON.stringify({
+    experienceMode,
+    sourceKind,
+    selectedStructureKind,
+    sourceFile: metadata.source_file || state.json_path,
+    formula: metadata.formula,
+    symmetryLabel: metadata.symmetry_label,
+    pointGroupLabel: metadata.point_group_label,
+    operationCount: metadata.operation_count || operations.length,
+    latticeParameters: metadata.lattice_parameters,
+    displayLatticeParameters: metadata.display_lattice_parameters,
+    cellSettingMode: state.cell_setting_mode,
+    atoms: atoms.map(atom => [atom.index, atom.element, atom.frac, atom.cart]),
+    atomMotion: [...atomMotionBySource.entries()].map(([index, motion]) => [
+      index, motion.target_frac, motion.target_cart, motion.stages,
+    ]),
+  });
+  if (signature === lastStructureInfoSignature && !panel.hidden) return;
+  const previousDetails = root.querySelector(".atom-position-details");
+  const atomPositionsWereOpen = Boolean(previousDetails?.open);
+  const atomPositionScrollTop = previousDetails?.querySelector(".atom-position-list")?.scrollTop || 0;
+  lastStructureInfoSignature = signature;
+  const config = sourceKindConfig(sourceKind);
+  const summaryItems = [
+        ["Name", basename(metadata.source_file || state.json_path)],
+        ["Formula", metadata.formula || "-"],
+      ];
+  if (sourceKind === "crystal") {
+    if (experienceMode === "beginner") {
+      summaryItems.push(
+        ["Crystal system", crystalSystemFromSymmetryLabel(metadata.symmetry_label)],
+        ["Operations", metadata.operation_count || operations.length || 0],
+      );
+    } else {
+      summaryItems.push(
+        [
+          config.symmetryLabel,
+          symmetryLabelWithGenerators(metadata.symmetry_label, metadata.space_group_generators, { spaceGroup: true }),
+        ],
+        [
+          "Point group",
+          symmetryLabelWithGenerators(metadata.point_group_label || "-", metadata.point_group_generators, {
+            pointGroup: true,
+          }),
+        ],
+      );
+    }
+  } else {
+    summaryItems.push(experienceMode === "beginner"
+      ? ["Operations", metadata.operation_count || operations.length || 0]
+      : [
+          config.symmetryLabel,
+          symmetryLabelWithGenerators(metadata.symmetry_label || metadata.point_group_label, metadata.point_group_generators),
+        ]);
+  }
+  root.innerHTML = "";
+
+  appendSummaryGrid(root, summaryItems, "primary");
+
+  if (sourceKind === "crystal" && experienceMode === "advanced") {
+    appendSummaryGrid(root, [
+      ["Cell", formatCellSettingLabel(state.cell_setting_mode || metadata.display_cell_setting || "native")],
+      ["Atoms", metadata.display_atom_count || atoms.length || "-"],
+      ["Operations", metadata.operation_count || operations.length || "-"],
+    ], "cell-setting");
+  }
+
+  const lattice = metadata.display_lattice_parameters || metadata.lattice_parameters;
+  if (sourceKind === "crystal" && lattice) {
+    if (experienceMode === "beginner") {
+      const latticeTitle = document.createElement("div");
+      latticeTitle.className = "summary-label";
+      latticeTitle.textContent = "Lattice constants";
+      root.appendChild(latticeTitle);
+    }
+    appendSummaryGrid(root, [
+      ["a", formatLength(lattice.a)],
+      ["b", formatLength(lattice.b)],
+      ["c", formatLength(lattice.c)],
+      ["alpha", formatAngle(lattice.alpha)],
+      ["beta", formatAngle(lattice.beta)],
+      ["gamma", formatAngle(lattice.gamma)],
+    ], "compact");
+  }
+  appendAtomPositionSummary(root, atomPositionsWereOpen, atomPositionScrollTop);
+  panel.hidden = false;
+}
+
+function crystalSystemFromSymmetryLabel(label) {
+  const match = String(label || "").match(/^([0-9]+)/);
+  if (!match) return "-";
+  const number = Number(match[1]);
+  if (number <= 2) return "Triclinic";
+  if (number <= 15) return "Monoclinic";
+  if (number <= 74) return "Orthorhombic";
+  if (number <= 142) return "Tetragonal";
+  if (number <= 167) return "Trigonal";
+  if (number <= 194) return "Hexagonal";
+  if (number <= 230) return "Cubic";
+  return "-";
+}
+
+function appendAtomPositionSummary(root, open = false, scrollTop = 0) {
+  const counts = new Map();
+  for (const atom of atoms) counts.set(atom.element, (counts.get(atom.element) || 0) + 1);
+  const composition = [...counts.entries()].map(([element, count]) => `${element} × ${count}`).join("、") || "-";
+  appendSummaryGrid(root, [["Atoms", composition]], "cell-setting");
+
+  const details = document.createElement("details");
+  details.className = "atom-position-details";
+  details.open = open;
+  const summary = document.createElement("summary");
+  summary.textContent = `Atom positions (${atoms.length})`;
+  details.appendChild(summary);
+  const list = document.createElement("div");
+  list.className = "atom-position-list";
+  for (const atom of atoms) {
+    const isCrystal = sourceKind === "crystal" && Array.isArray(atom.frac);
+    const formatter = isCrystal ? formatFrac : formatCoord;
+    const start = isCrystal ? atom.frac : (atom.cart || []);
+    const motion = atomMotionBySource.get(atom.index);
+    const target = isCrystal ? motion?.target_frac : motion?.target_cart;
+    const stages = (motion?.stages || [])
+      .map(stage => isCrystal ? stage.frac : stage.cart)
+      .filter(Array.isArray);
+    const coordinates = `(${start.map(formatter).join(", ")})`;
+    const stageCoordinates = stages
+      .map(stage => ` → (${stage.map(formatter).join(", ")})`)
+      .join("");
+    const targetCoordinates = Array.isArray(target)
+      ? ` → (${target.map(formatter).join(", ")})`
+      : "";
+    const unit = isCrystal ? (experienceMode === "advanced" ? " fractional" : "") : " Å";
+    const row = document.createElement("div");
+    row.textContent = `${atom.index + 1}. ${atomDisplayLabel(atom)}: ${coordinates}${stageCoordinates}${targetCoordinates}${unit}`;
+    list.appendChild(row);
+  }
+  details.appendChild(list);
+  root.appendChild(details);
+  list.scrollTop = scrollTop;
+}
+
+function formatCellSettingLabel(value) {
+  const mode = String(value || "native").toLowerCase();
+  if (mode === "primitive") return "Primitive cell";
+  if (mode === "conventional") return "Bravais cell";
+  if (mode === "refined") return "Refined";
+  if (mode === "hexagonal_conventional") return "Hexagonal conventional";
+  return "As loaded";
+}
+
+function symmetryLabelWithGenerators(label, generators, options = {}) {
+  const base = options.spaceGroup
+    ? formatSpaceGroupLabel(label)
+    : options.pointGroup
+      ? formatCrystalPointGroupLabel(label)
+      : formatSymbol(label || "-");
+  const generatorSet = formatGeneratorSet(generators);
+  return generatorSet ? `${base} ${generatorSet}` : base;
+}
+
+function formatSpaceGroupLabel(label) {
+  const text = String(label || "-");
+  const match = text.match(/^([0-9]+)\\s+(.+)$/);
+  if (!match) return formatSymbol(text);
+  return `No. ${match[1]} ${formatSymbol(match[2])}`;
+}
+
+function formatCrystalPointGroupLabel(label) {
+  const text = String(label || "-").trim();
+  const schoenflies = CRYSTAL_POINT_GROUP_LABELS[text];
+  return schoenflies ? `${formatSymbol(schoenflies)}(${formatSymbol(text)})` : formatSymbol(text);
+}
+
+function formatGeneratorSet(generators) {
+  if (!Array.isArray(generators) || !generators.length) return "";
+  const values = generators.filter((value) => value && value !== "identity only");
+  if (!values.length) return "";
+  return `<${values.map((value) => formatSymbol(value)).join(", ")}>`;
+}
+
+function appendSummaryGrid(root, items, extraClass = "") {
+  const grid = document.createElement("div");
+  grid.className = extraClass ? `summary-grid ${extraClass}` : "summary-grid";
+  for (const [label, value] of items) {
+    grid.appendChild(summaryItem(label, value));
+  }
+  root.appendChild(grid);
+}
+
+function summaryItem(label, value) {
+  const item = document.createElement("div");
+  item.className = "summary-item";
+  const labelEl = document.createElement("div");
+  labelEl.className = "summary-label";
+  labelEl.textContent = label;
+  const valueEl = document.createElement("div");
+  valueEl.className = "summary-value";
+  valueEl.textContent = String(value);
+  item.appendChild(labelEl);
+  item.appendChild(valueEl);
+  return item;
+}
+
+function syncStructureKindButtons() {
+  const button = document.getElementById("structure-kind-toggle");
+  const moleculeSelected = selectedStructureKind === "molecule";
+  button.textContent = moleculeSelected ? "Molecule" : "Crystal";
+  button.dataset.kind = moleculeSelected ? "crystal" : "molecule";
+  button.title = moleculeSelected ? "Switch to Crystal" : "Switch to Molecule";
+}
+
+function setStructureKind(kind) {
+  if (importInProgress) {
+    document.getElementById("status").textContent = "Loading in progress. Wait for it to finish.";
+    return;
+  }
+  selectedStructureKind = kind === "molecule" ? "molecule" : "crystal";
+  if (!structureLoadedForSelectedKind() && activeMode === "custom") {
+    activeMode = "standard";
+    syncActiveModeControls();
+  }
+  syncSourceKindControls();
+  renderExampleOptions();
+  renderStructureInfo();
+  renderStatus();
+}
+
+function syncImportControls() {
+  for (const id of ["import-cif", "cif-file", "import-molecule", "molecule-file", "example-select", "open-example"]) {
+    document.getElementById(id).disabled = importInProgress;
+  }
+  for (const button of document.querySelectorAll(".structure-kind-button")) {
+    button.disabled = importInProgress;
+  }
+}
+
+function renderExampleOptions() {
+  const select = document.getElementById("example-select");
+  const items = sortedExampleItems(exampleCatalog[selectedStructureKind] || [], selectedStructureKind);
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Select example...";
+  select.appendChild(placeholder);
+  for (const item of items) {
+    const option = document.createElement("option");
+    option.value = item.path;
+    option.textContent = exampleOptionText(item);
+    if (item.error) option.title = item.error;
+    select.appendChild(option);
+  }
+  const hasSelectedExample = items.some(item => item.path === selectedExamplePath);
+  select.value = hasSelectedExample ? selectedExamplePath : "";
+  document.getElementById("open-example").disabled = importInProgress || items.length === 0;
+}
+
+function sortedExampleItems(items, kind) {
+  const sorted = [...items];
+  if (kind !== "crystal") return sorted;
+  return sorted.sort((a, b) => {
+    const numberA = spaceGroupNumber(a.symmetry);
+    const numberB = spaceGroupNumber(b.symmetry);
+    return compareNumber(numberA, numberB) || compareText(a.name || "", b.name || "");
+  });
+}
+
+function spaceGroupNumber(label) {
+  const match = String(label || "").match(/(?:No[.][ ]*)?([0-9]+)/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+function exampleOptionText(item) {
+  const formula = item.formula ? `${item.formula} ` : "";
+  const symmetry = item.symmetry ? formatSymbol(item.symmetry) : "";
+  return symmetry ? `${formula}${item.name} — ${symmetry}` : `${formula}${item.name}`;
+}
+
+function beginImport(message) {
+  importInProgress = true;
+  const requestId = ++importRequestId;
+  hideLoadError();
+  syncImportControls();
+  document.getElementById("status").textContent = message;
+  return requestId;
+}
+
+function finishImport(requestId) {
+  if (requestId !== importRequestId) return;
+  importInProgress = false;
+  syncImportControls();
+}
+
+function isCurrentImport(requestId) {
+  return requestId === importRequestId;
+}
+
+function hideLoadError() {
+  const panel = document.getElementById("load-error-panel");
+  if (panel) panel.hidden = true;
+}
+
+function showLoadError(title, rawError, context = {}) {
+  const panel = document.getElementById("load-error-panel");
+  if (!panel) return;
+  const errorText = String(rawError || "Unknown error");
+  const reason = predictedLoadFailureReason(errorText, context);
+  document.getElementById("load-error-title").textContent = title;
+  document.getElementById("load-error-message").textContent = reason;
+  document.getElementById("load-error-detail").textContent = compactErrorDetail(errorText);
+  panel.hidden = false;
+  document.getElementById("status").textContent = `${title}: ${reason}`;
+}
+
+function predictedLoadFailureReason(errorText, context = {}) {
+  const lower = String(errorText || "").toLowerCase();
+  const name = context.name ? ` (${context.name})` : "";
+  if (lower.includes("empty") && (lower.includes("cif") || lower.includes("file"))) {
+    return `The selected file appears to be empty${name}.`;
+  }
+  if (lower.includes("analysis timed out")) {
+    return `Analysis did not finish within the timeout${name}. The file may be too large, malformed, or triggering a slow symmetry analysis path.`;
+  }
+  if (lower.includes("already represented as a primitive cell")) {
+    return `This structure is already represented as a primitive cell${name}.`;
+  }
+  if (lower.includes("already represented as a bravais cell")) {
+    return `This structure is already represented as a Bravais cell${name}.`;
+  }
+  if (lower.includes("invalid json")) {
+    return `The browser request was malformed before the file could be analyzed${name}. Try reopening the file.`;
+  }
+  if (lower.includes("zerodivisionerror") && lower.includes("pymatgen") && lower.includes("cif")) {
+    return `The CIF parser failed before symmetry analysis${name}. A likely cause is malformed CIF loop syntax, such as a loop header with no data rows.`;
+  }
+  if (lower.includes("cif") && (lower.includes("parser") || lower.includes("parse") || lower.includes("from_file"))) {
+    return `The file could not be parsed as a valid CIF${name}. Check CIF loop sections, quoted multiline fields, cell parameters, and atom-site columns.`;
+  }
+  if (lower.includes("no such file") || lower.includes("not found")) {
+    return `The selected file could not be found${name}.`;
+  }
+  if (lower.includes("unsupported input file type")) {
+    return `The selected file type is not supported${name}. Use CIF for crystals or XYZ for molecules.`;
+  }
+  return `The structure could not be loaded${name}. See details below for the parser or analysis error.`;
+}
+
+function compactErrorDetail(errorText) {
+  const lines = String(errorText || "").split("\\n").map(line => line.trimEnd()).filter(Boolean);
+  if (lines.length <= 14) return lines.join("\\n");
+  return [
+    ...lines.slice(0, 8),
+    "...",
+    ...lines.slice(-5),
+  ].join("\\n");
+}
+
+function syncOperationSelection() {
+  for (const row of document.querySelectorAll(".operation-row")) {
+    const selected = Number(row.dataset.index) === state.operation_index;
+    row.classList.toggle("selected", selected);
+    row.setAttribute("aria-selected", selected ? "true" : "false");
+  }
+}
+
+function fmtMatVal(v) {
+  if (v === null || v === undefined) return "  ?";
+  const r = Math.round(v * 1e9) / 1e9;
+  if (Number.isInteger(r) && Math.abs(r) < 10) return String(r).padStart(3);
+  return r.toFixed(4).padStart(8);
+}
+
+function fmtFrac(v) {
+  if (v === null || v === undefined) return "?";
+  const r = Math.round(v * 1e9) / 1e9;
+  if (Math.abs(r) < 1e-8 || Math.abs(r - 1.0) < 1e-8) return "0";
+  // try to express as a simple fraction with denominator ≤ 24
+  for (const d of [2, 3, 4, 6, 8, 12, 24]) {
+    const n = Math.round(r * d);
+    if (Math.abs(n / d - r) < 1e-8) return n === 0 ? "0" : `${n}/${d}`;
+  }
+  return r.toFixed(4);
+}
+
+function renderOperationDetails() {
+  const div = document.getElementById("op-details");
+  if (activeMode === "custom") {
+    renderCustomOperationDetails();
+    return;
+  }
+  const op = operations.find(o => o.index === state.operation_index);
+  if (!op) { div.textContent = ""; return; }
+  if (sourceKind === "molecule") {
+    const Wc = op.matrix_cart;
+    const tc = op.translation_cart;
+    let lines = [];
+    lines.push(`${stripHtml(optionText(op))}`);
+    lines.push(`point group: ${(state.metadata && state.metadata.symmetry_label) || ""}`);
+    if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
+    if (Wc) {
+      lines.push("W (cart):");
+      for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
+    }
+    if (tc && tc.some(v => Math.abs(v) > 1e-8)) {
+      lines.push(`t (cart): ${tc.map(v => v.toFixed(4)).join(",  ")} Å`);
+    }
+    div.textContent = lines.join("\\n");
+    return;
+  }
+  const W = op.matrix_frac;
+  const t = op.translation_frac;
+  if (!W || !t) { div.textContent = ""; return; }
+
+  let lines = [];
+  lines.push(`${stripHtml(optionText(op))}`);
+  if (operationLabelMode === "itc_like") {
+    lines.push("notation: ITC-like (computed from W, t)");
+    if (op.itc_coordinate_summary) lines.push(`ITC general position: ${op.itc_coordinate_summary}`);
+  }
+  if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
+  lines.push("W (frac):");
+  for (const row of W) lines.push(`  [${row.map(fmtMatVal).join("  ")}]`);
+  lines.push(`t (frac): ${t.map(fmtFrac).join(",  ")}`);
+
+  const Wc = op.matrix_cart;
+  const tc = op.translation_cart;
+  if (Wc && tc) {
+    lines.push("W (cart):  (Å scale)");
+    for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
+    lines.push(`t (cart): ${tc.map(v => v.toFixed(4)).join(",  ")} Å`);
+  }
+  div.textContent = lines.join("\\n");
+}
+
+function renderCustomOperationDetails() {
+  const div = document.getElementById("op-details");
+  if (!copMatrix) {
+    div.textContent = "Custom operation is not checked yet. Enter parameters and click Check symmetry.";
+    return;
+  }
+  const result = copMatrix.result || {};
+  let lines = [];
+  lines.push(`custom ${copMatrix.op_type}`);
+  lines.push(result.is_symmetry ? "status: symmetry operation" : "status: not a symmetry operation");
+  if (result.total !== undefined) {
+    lines.push(`mapped: ${result.mapped_count}/${result.total}  unmapped: ${result.unmapped_count}`);
+  }
+  lines.push("W (frac):");
+  for (const row of copMatrix.W_frac) lines.push(`  [${row.map(fmtMatVal).join("  ")}]`);
+  lines.push(`t (frac): ${copMatrix.t_frac.map(fmtFrac).join(",  ")}`);
+  div.textContent = lines.join("\\n");
+}
+
+function renderAtomElementFilter() {
+  const root = document.getElementById("atom-element-filter");
+  const elements = [...new Set(atoms.map(atom => atom.element))].sort(compareText);
+  root.innerHTML = "";
+  const allButton = document.createElement("button");
+  allButton.type = "button";
+  allButton.className = `direction-chip${atomElementFilterValue ? "" : " selected"}`;
+  allButton.textContent = "All";
+  allButton.addEventListener("click", () => {
+    atomElementFilterValue = "";
+    renderAtomElementFilter();
+    renderAtoms();
+  });
+  root.appendChild(allButton);
+  for (const element of elements) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `direction-chip${element === atomElementFilterValue ? " selected" : ""}`;
+    button.textContent = element;
+    button.addEventListener("click", () => {
+      atomElementFilterValue = element;
+      renderAtomElementFilter();
+      renderAtoms();
+    });
+    root.appendChild(button);
+  }
+}
+
+function renderElementColorControls() {
+  const root = document.getElementById("element-colors");
+  const elements = [...new Set(atoms.map(atom => atom.element))].sort(compareText);
+  const elementColors = state.element_colors || {};
+  const elementHidden = state.element_hidden || {};
+  root.innerHTML = "";
+  for (const element of elements) {
+    const sample = atoms.find(atom => atom.element === element);
+    const label = document.createElement("div");
+    label.className = "element-color-item";
+    const visible = !elementHidden[element];
+    if (!visible) label.classList.add("hidden");
+    const visibleButton = visibilityButton(visible, `${visible ? "Hide" : "Show"} ${element}`, () => {
+      const next = Object.assign({}, state.element_hidden || {});
+      if (visible) next[element] = true;
+      else delete next[element];
+      postState({element_hidden: next, playing: false, reset: true});
+    });
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = normalizeColor(elementColors[element] || (sample && sample.default_color));
+    input.title = `Color for ${element}`;
+    input.addEventListener("change", () => {
+      const next = Object.assign({}, state.element_colors || {});
+      next[element] = input.value;
+      postState({element_colors: next});
+    });
+    const span = document.createElement("span");
+    span.textContent = element;
+    label.appendChild(visibleButton);
+    label.appendChild(input);
+    label.appendChild(span);
+    root.appendChild(label);
+  }
+}
+
+function renderAtoms() {
+  const signature = atomListRenderSignature();
+  if (signature === lastAtomRenderSignature) return;
+  lastAtomRenderSignature = signature;
+  const root = document.getElementById("atoms");
+  const selected = new Set(state.selected_atoms || []);
+  root.innerHTML = "";
+  for (const atom of atoms) {
+    if (atomElementFilterValue && atom.element !== atomElementFilterValue) continue;
+    const label = document.createElement("label");
+    label.className = "atom-row";
+    if (customUnmappedAtoms.has(atom.index)) label.classList.add("unmapped");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.className = "animation-toggle";
+    checkbox.value = atom.index;
+    checkbox.checked = selected.has(atom.index);
+    checkbox.addEventListener("change", onAtomSelectionChange);
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = atomEffectiveColor(atom);
+    colorInput.title = `Color for atom ${atom.index}`;
+    colorInput.addEventListener("change", () => {
+      const next = Object.assign({}, state.atom_colors || {});
+      next[String(atom.index)] = colorInput.value;
+      postState({atom_colors: next});
+    });
+    const visible = atomVisible(atom);
+    const visibleButton = visibilityButton(visible, `${visible ? "Hide" : "Show"} atom ${atom.index}`, () => {
+      const next = Object.assign({}, state.atom_hidden || {});
+      if (visible) next[String(atom.index)] = true;
+      else delete next[String(atom.index)];
+      postState({atom_hidden: next, playing: false, reset: true});
+    });
+    const atomLabel = document.createElement("span");
+    atomLabel.className = "atom-label";
+    const atomIndex = document.createElement("span");
+    atomIndex.className = "atom-index";
+    atomIndex.textContent = `${atom.index}:`;
+    atomLabel.appendChild(atomIndex);
+    atomLabel.appendChild(document.createTextNode(atomDisplayLabel(atom)));
+    if (customUnmappedAtoms.has(atom.index)) {
+      const badge = document.createElement("span");
+      badge.className = "atom-badge";
+      badge.textContent = "do not map";
+      atomLabel.appendChild(badge);
+    }
+    const motion = atomMotionParts(atom);
+    const motionSpan = document.createElement("span");
+    motionSpan.className = "atom-motion";
+    if (motion) {
+      const pathSpan = document.createElement("span");
+      pathSpan.className = "atom-motion-path";
+      pathSpan.textContent = motion.path;
+      pathSpan.title = motion.path;
+      const targetSpan = document.createElement("span");
+      targetSpan.className = "atom-motion-target";
+      targetSpan.textContent = `#${motion.target}`;
+      motionSpan.appendChild(pathSpan);
+      motionSpan.appendChild(targetSpan);
+    }
+    label.appendChild(checkbox);
+    label.appendChild(colorInput);
+    label.appendChild(visibleButton);
+    label.appendChild(atomLabel);
+    label.appendChild(motionSpan);
+    root.appendChild(label);
+  }
+}
+
+function renderSelectedAtomSummary() {
+  const root = document.getElementById("selected-atom-summary");
+  if (!root) return;
+  root.innerHTML = "";
+  if (experienceMode !== "beginner") return;
+  const selected = String(state.scope).startsWith("selected")
+    ? new Set((state.selected_atoms || []).map(Number))
+    : new Set();
+  const selectors = document.createElement("div");
+  selectors.className = "atom-element-selectors";
+  const selectionGroups = new Map();
+  for (const atom of atoms) {
+    const label = sourceKind === "crystal" ? atomDisplayLabel(atom) : atom.element;
+    if (!selectionGroups.has(label)) selectionGroups.set(label, []);
+    selectionGroups.get(label).push(Number(atom.index));
+  }
+  for (const [label, indices] of [...selectionGroups.entries()].sort((a, b) => compareText(a[0], b[0]))) {
+    const allSelected = indices.length > 0 && indices.every(index => selected.has(index));
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `atom-element-selector${allSelected ? " selected" : ""}`;
+    button.textContent = label;
+    button.addEventListener("click", event => {
+      let next;
+      if (event.ctrlKey || event.metaKey || event.shiftKey) {
+        next = new Set(selected);
+        for (const index of indices) {
+          if (allSelected) next.delete(index);
+          else next.add(index);
+        }
+      } else {
+        next = allSelected && selected.size === indices.length ? new Set() : new Set(indices);
+      }
+      postState({
+        selected_atoms: [...next].sort((a, b) => a - b),
+        scope: next.size ? "selected_displayed" : "displayed",
+        playing: false,
+        reset: true,
+      });
+    });
+    selectors.appendChild(button);
+  }
+  root.appendChild(selectors);
+  if (!selected.size) return;
+  const details = document.createElement("details");
+  details.className = "selected-atom-details";
+  details.open = selectedAtomDetailsOpen;
+  details.addEventListener("toggle", () => {
+    selectedAtomDetailsOpen = details.open;
+  });
+  const summary = document.createElement("summary");
+  summary.textContent = `Selected atoms (${selected.size})`;
+  details.appendChild(summary);
+  const cards = document.createElement("div");
+  cards.className = "selected-atom-cards";
+  for (const atom of atoms.filter(item => selected.has(Number(item.index)))) {
+    const motion = atomMotionBySource.get(atom.index);
+    const start = sourceKind === "crystal" ? motion?.start_frac : motion?.start_cart;
+    const target = sourceKind === "crystal" ? motion?.target_frac : motion?.target_cart;
+    const formatter = sourceKind === "crystal" ? formatFrac : formatCoord;
+    const unit = sourceKind === "crystal"
+      ? (experienceMode === "advanced" ? " fractional" : "")
+      : " Å";
+    const card = document.createElement("div");
+    card.className = "selected-atom-card";
+    const name = document.createElement("div");
+    name.className = "selected-atom-name";
+    name.textContent = `${atomDisplayLabel(atom)}（atom ${atom.index}）`;
+    const coordinates = document.createElement("div");
+    coordinates.className = "selected-atom-coordinates";
+    coordinates.textContent = Array.isArray(start) && Array.isArray(target)
+      ? `${formatVector(start, formatter)} → ${formatVector(target, formatter)}${unit}`
+      : "座標情報を取得できません";
+    card.appendChild(name);
+    card.appendChild(coordinates);
+    cards.appendChild(card);
+  }
+  details.appendChild(cards);
+  root.appendChild(details);
+}
+
+function atomListRenderSignature() {
+  return JSON.stringify({
+    atoms: atoms.map(atom => [
+      atom.index,
+      atom.element,
+      atom.asymmetric_index,
+      atom.default_color,
+    ]),
+    selected_atoms: state.selected_atoms || [],
+    element_colors: state.element_colors || {},
+    atom_colors: state.atom_colors || {},
+    element_hidden: state.element_hidden || {},
+    atom_hidden: state.atom_hidden || {},
+    atomElementFilterValue,
+    unmapped: [...customUnmappedAtoms].sort((a, b) => a - b),
+    motion: [...atomMotionBySource.entries()].map(([source, motion]) => [
+      source,
+      motion.target_atom,
+      motion.start_frac,
+      motion.target_frac,
+      motion.start_cart,
+      motion.target_cart,
+    ]),
+  });
+}
+
+function syncSpeedButtons() {
+  const speed = Number(state.speed || 1.0);
+  for (const button of document.querySelectorAll(".speed-button")) {
+    button.classList.toggle("selected", Number(button.dataset.speed) === speed);
+  }
+}
+
+function syncBoundaryButtons() {
+  const boundaryMode = state.animation_boundary_mode || "continuous";
+  for (const button of document.querySelectorAll(".boundary-button")) {
+    button.classList.toggle("selected", button.dataset.boundaryMode === boundaryMode);
+  }
+}
+
+const displayRangeSteps = [
+  {mode: "source", label: "Unit cell"},
+  {mode: "expanded_quarter", label: "±1/4"},
+  {mode: "expanded_half", label: "±1/2"},
+  {mode: "expanded_0_75", label: "±3/4"},
+  {mode: "expanded_1_0", label: "±1"},
+];
+
+function syncDisplayButtons() {
+  const displayMode = state.display_mode || "source";
+  const index = Math.max(0, displayRangeSteps.findIndex(step => step.mode === displayMode));
+  document.getElementById("display-range-value").textContent = displayRangeSteps[index].label;
+  document.getElementById("display-range-decrease").disabled = index === 0;
+  document.getElementById("display-range-increase").disabled = index === displayRangeSteps.length - 1;
+  document.getElementById("include-boundary-images").checked = Boolean(state.include_boundary_images);
+}
+
+async function changeDisplayRange(offset) {
+  if (displayRangeUpdatePending) return;
+  const displayMode = state.display_mode || "source";
+  const currentIndex = Math.max(0, displayRangeSteps.findIndex(step => step.mode === displayMode));
+  const nextIndex = Math.max(0, Math.min(displayRangeSteps.length - 1, currentIndex + offset));
+  if (nextIndex === currentIndex) return;
+  displayRangeUpdatePending = true;
+  state.display_mode = displayRangeSteps[nextIndex].mode;
+  syncDisplayButtons();
+  document.getElementById("display-range-decrease").disabled = true;
+  document.getElementById("display-range-increase").disabled = true;
+  try {
+    await postState({
+      display_mode: displayRangeSteps[nextIndex].mode,
+      playing: false,
+      reset: true,
+    });
+  } catch (error) {
+    state.display_mode = displayMode;
+    throw error;
+  } finally {
+    displayRangeUpdatePending = false;
+    syncDisplayButtons();
+  }
+}
+
+function syncCellOriginButtons() {
+  const cellOriginMode = state.cell_origin_mode || "center";
+  for (const button of document.querySelectorAll(".cell-origin-button")) {
+    button.classList.toggle("selected", button.dataset.cellOriginMode === cellOriginMode);
+  }
+}
+
+function syncCellSettingButtons() {
+  const cellSettingMode = state.cell_setting_mode || "native";
+  for (const button of document.querySelectorAll(".cell-setting-button")) {
+    button.classList.toggle("selected", button.dataset.cellSettingMode === cellSettingMode);
+  }
+}
+
+function setCellSettingBusy(busy, mode = "") {
+  for (const button of document.querySelectorAll(".cell-setting-button")) {
+    button.disabled = busy;
+  }
+  if (busy) {
+    document.getElementById("status").textContent =
+      `Converting cell setting to ${formatCellSettingLabel(mode)}...`;
+  }
+}
+
+function syncProjectionButtons() {
+  const projectionMode = state.projection_mode || "perspective";
+  for (const button of document.querySelectorAll(".projection-button")) {
+    button.classList.toggle("selected", button.dataset.projectionMode === projectionMode);
+  }
+}
+
+function syncBackgroundButtons() {
+  const backgroundMode = state.background_mode || "dark";
+  for (const button of document.querySelectorAll(".background-button")) {
+    button.classList.toggle("selected", button.dataset.backgroundMode === backgroundMode);
+  }
+}
+
+function syncLegendButtons() {
+  const legendVisible = Boolean(state.legend_visible);
+  for (const button of document.querySelectorAll(".legend-button")) {
+    button.classList.toggle("selected", (button.dataset.legendVisible === "true") === legendVisible);
+  }
+}
+
+function syncImproperModeControl() {
+  document.getElementById("improper-mode").value = state.improper_mode || "auto";
+}
+
+function syncAtomModeButtons() {
+  const scope = state.scope || "representative";
+  for (const button of document.querySelectorAll(".atom-mode-button")) {
+    button.classList.toggle("selected", button.dataset.scope === scope);
+  }
+}
+
+function syncPlayToggleButton() {
+  const button = document.getElementById("play-toggle");
+  button.textContent = state.playing ? "Stop" : "Start";
+  button.classList.toggle("secondary", Boolean(state.playing));
+}
+
+function setMovementProgress(progress) {
+  const value = Math.max(0, Math.min(Number(progress) || 0, 1));
+  movementProgressValue = value;
+  const slider = document.getElementById("movement-progress");
+  const output = document.getElementById("movement-progress-value");
+  const previous = document.getElementById("previous-frame");
+  const next = document.getElementById("next-frame");
+  if (slider) slider.value = String(Math.round(value * 1000));
+  if (output) output.textContent = `${Math.round(value * 100)}%`;
+  if (previous) previous.disabled = isGifSaving() || value <= 0;
+  if (next) next.disabled = isGifSaving() || value >= 1;
+}
+
+function setMovementBreakpoints(values) {
+  movementBreakpoints = [...new Set((values || [0, 1]).map(Number).filter(Number.isFinite))]
+    .filter(value => value >= 0 && value <= 1)
+    .sort((a, b) => a - b);
+  const list = document.getElementById("movement-stops");
+  if (!list) return;
+  list.innerHTML = "";
+  for (const value of movementBreakpoints) {
+    const option = document.createElement("option");
+    option.value = String(Math.round(value * 1000));
+    list.appendChild(option);
+  }
+}
+
+function dispatchMovementProgress(progress) {
+  setMovementProgress(progress);
+  window.dispatchEvent(new CustomEvent("symmetry-animation-progress", {detail: {progress}}));
+}
+
+function stepMovementProgress(direction) {
+  const current = movementProgressValue;
+  const delta = Math.sign(direction) * MOVEMENT_FRAME_STEP;
+  const proposed = Math.max(0, Math.min(current + delta, 1));
+  const crossedBreakpoints = movementBreakpoints.filter(value => (
+    delta > 0
+      ? value > current + 1e-9 && value < proposed - 1e-9
+      : value < current - 1e-9 && value > proposed + 1e-9
+  ));
+  const progress = crossedBreakpoints.length
+    ? (delta > 0 ? Math.min(...crossedBreakpoints) : Math.max(...crossedBreakpoints))
+    : proposed;
+  if (state.playing) postState({playing: false});
+  dispatchMovementProgress(progress);
+}
+
+function isGifSaving() {
+  return String(state.gif_status || "").startsWith("writing ");
+}
+
+function syncGifSavingControls() {
+  const saving = isGifSaving();
+  document.body.classList.toggle("saving-gif", saving);
+  for (const id of [
+    "save-gif", "save-gif-3view", "save-gif-3view-current", "play-toggle", "reset",
+    "previous-frame", "next-frame",
+  ]) {
+    const button = document.getElementById(id);
+    if (button) button.disabled = saving;
+  }
+  const saveGif = document.getElementById("save-gif");
+  const save3 = document.getElementById("save-gif-3view");
+  const save3current = document.getElementById("save-gif-3view-current");
+  if (saveGif) saveGif.textContent = saving ? "Saving..." : "Save GIF";
+  setMovementProgress(movementProgressValue);
+  if (save3) save3.textContent = saving ? "Saving..." : "Save 3-view GIFs";
+  if (save3current) save3current.textContent = saving ? "Saving..." : "Save 3-view GIFs (current view)";
+}
+
+function selectedAtomIndices() {
+  return Array.from(document.querySelectorAll("#atoms input.animation-toggle:checked"))
+    .map(input => Number(input.value));
+}
+
+function onAtomSelectionChange() {
+  const selected = selectedAtomIndices();
+  postState({
+    selected_atoms: selected,
+    scope: selected.length > 0 ? "selected" : "displayed",
+    playing: false,
+    reset: true,
+  });
+}
+
+function renderStatus() {
+  if (!structureLoadedForSelectedKind()) {
+    const config = sourceKindConfig(selectedStructureKind);
+    document.getElementById("status").textContent =
+      `No ${selectedStructureKind} loaded. Open an example or ${config.inputLabel}.\\n` +
+      `import: ${state.import_status || "-"}`;
+    return;
+  }
+  const operation = operations.find(op => op.index === state.operation_index);
+  const selected = state.selected_atoms && state.selected_atoms.length
+    ? state.selected_atoms.join(", ")
+    : "-";
+  const scopeLabel = (state.scope || "representative") === "representative"
+    ? "clear"
+    : (state.scope || "representative");
+  document.getElementById("status").textContent =
+    `state: ${state.playing ? "playing" : "stopped"}\\n` +
+    `mode: ${activeMode}\\n` +
+    `operation: ${activeMode === "custom" ? (copMatrix ? "custom " + copMatrix.op_type : "custom unchecked") : (operation ? stripHtml(optionText(operation)) : state.operation_index)}\\n` +
+    `speed: ${state.speed || 1.0}x\\n` +
+    `boundary: ${state.animation_boundary_mode || "continuous"}\\n` +
+    `projection: ${state.projection_mode || "perspective"}\\n` +
+    `cell: ${state.cell_setting_mode || "native"}\\n` +
+    `display: ${state.display_mode || "source"}\\n` +
+    `scope: ${scopeLabel}\\n` +
+    `selected atoms: ${selected}\\n` +
+    `source: ${state.json_path || "-"}\\n` +
+    `import: ${state.import_status || "-"}\\n` +
+    `gif: ${state.gif_status || "-"}`;
+}
+
+function viewCenterValue(id, fallback = 0) {
+  const value = Number(document.getElementById(id).value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function viewDirectionValue(id, fallback = 0) {
+  const value = Number(document.getElementById(id).value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function applyViewCenter() {
+  postState({
+    view_center_request_id: Date.now(),
+    view_center_frac: [
+      viewCenterValue("view-center-x"),
+      viewCenterValue("view-center-y"),
+      viewCenterValue("view-center-z"),
+    ],
+  });
+}
+
+function applyViewDirectionIndex() {
+  postState({
+    view_direction_request_id: Date.now(),
+    view_direction_frac: [
+      viewDirectionValue("view-dir-h"),
+      viewDirectionValue("view-dir-k"),
+      viewDirectionValue("view-dir-l", 1),
+    ],
+    playing: false,
+  });
+}
+
+function applyViewPlaneIndex() {
+  postState({
+    view_plane_request_id: Date.now(),
+    view_plane_hkl: [
+      viewDirectionValue("view-plane-h"),
+      viewDirectionValue("view-plane-k"),
+      viewDirectionValue("view-plane-l", 1),
+    ],
+    playing: false,
+  });
+}
+
+function syncSourceKindControls() {
+  sourceKind = state.source_kind || "crystal";
+  syncStructureKindButtons();
+  const loadedForSelected = structureLoadedForSelectedKind();
+  document.getElementById("workspace").hidden = !loadedForSelected;
+  document.getElementById("start-panel").hidden = loadedForSelected;
+  document.getElementById("import-cif").hidden = selectedStructureKind !== "crystal";
+  document.getElementById("import-molecule").hidden = selectedStructureKind !== "molecule";
+  renderExampleOptions();
+  document.getElementById("mode-controls").hidden = !loadedForSelected || sourceKind !== "crystal";
+  document.getElementById("display-block").hidden = !loadedForSelected || sourceKind !== "crystal";
+  document.getElementById("view-direction-index-block").hidden = !loadedForSelected || sourceKind !== "crystal";
+  document.getElementById("view-plane-index-block").hidden = !loadedForSelected || sourceKind !== "crystal";
+  document.getElementById("unit-cell-atoms").hidden = sourceKind !== "crystal";
+  syncOperationLabelModeControls();
+  const config = sourceKindConfig(sourceKind);
+  document.querySelector("#standard-panel .section-title").textContent =
+    config.operationPanelTitle;
+  if ((!loadedForSelected || sourceKind !== "crystal") && activeMode === "custom") {
+    activeMode = "standard";
+    syncActiveModeControls();
+  }
+  const label = document.getElementById("view-center-label");
+  if (sourceKind !== "crystal") {
+    label.textContent = config.viewCenterLabel;
+    for (const id of ["view-center-x", "view-center-y", "view-center-z"]) {
+      document.getElementById(id).value = "0";
+    }
+  } else {
+    label.textContent = config.viewCenterLabel;
+  }
+}
+
+async function postState(update) {
+  state = await api("/api/state", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(update),
+  });
+  window.dispatchEvent(new CustomEvent("symmetry-state-update", {
+    detail: {state: {...state}, update: {...update}},
+  }));
+  await refreshAtomMotion();
+  syncSpeedButtons();
+  syncBoundaryButtons();
+  syncDisplayButtons();
+  syncCellOriginButtons();
+  syncCellSettingButtons();
+  syncProjectionButtons();
+  syncBackgroundButtons();
+  syncLegendButtons();
+  syncImproperModeControl();
+  syncOperationLabelModeControls();
+  syncAtomModeButtons();
+  syncPlayToggleButton();
+  syncGifSavingControls();
+  renderElementColorControls();
+  renderDirectionFilter();
+  renderOperations();
+  renderAtoms();
+  renderSelectedAtomSummary();
+  renderStructureInfo();
+  renderStatus();
+  renderOperationDetails();
+}
+
+window.symmetryPostState = postState;
+
+async function applyCellSetting(mode) {
+  setCellSettingBusy(true, mode);
+  try {
+    const result = await api("/api/cell_setting", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({cell_setting_mode: mode}),
+    });
+    hideLoadError();
+    operations = result.operations || [];
+    atoms = result.atoms || [];
+    state = result.state || {};
+    directionFilterValue = "";
+    atomElementFilterValue = "";
+    summariesReady = Boolean(state.summaries_ready);
+    customUnmappedAtoms = new Set();
+    customOperationSequence = [];
+    copMatrix = null;
+    activeMode = "standard";
+    document.getElementById("cop-result").hidden = true;
+    hideCustomSequenceResult();
+    syncActiveModeControls();
+    syncSourceKindControls();
+    renderDirectionFilter();
+    renderAtomElementFilter();
+    renderElementColorControls();
+    syncOperationSelection();
+    syncSpeedButtons();
+    syncBoundaryButtons();
+    syncDisplayButtons();
+    syncCellOriginButtons();
+    syncCellSettingButtons();
+    syncProjectionButtons();
+    syncBackgroundButtons();
+    syncLegendButtons();
+    syncImproperModeControl();
+    syncAtomModeButtons();
+    syncPlayToggleButton();
+    syncGifSavingControls();
+    renderOperations();
+    await refreshAtomMotion();
+    renderAtoms();
+    renderSelectedAtomSummary();
+    renderStructureInfo();
+    renderStatus();
+    renderOperationDetails();
+  } finally {
+    setCellSettingBusy(false);
+  }
+}
+
+async function refreshAtomMotion() {
+  if (!structureLoadedForSelectedKind() || activeMode !== "standard") {
+    atomMotionBySource = new Map();
+    lastAtomMotionRequestKey = "";
+    pendingAtomMotionRequestKey = "";
+    atomMotionRequestGeneration += 1;
+    return;
+  }
+  const requestKey = JSON.stringify([
+    state.json_path,
+    state.reload_request_id,
+    state.cell_setting_mode,
+    state.operation_index,
+    state.improper_mode,
+    state.display_mode,
+    state.cell_origin_mode,
+  ]);
+  if (requestKey === lastAtomMotionRequestKey || requestKey === pendingAtomMotionRequestKey) return;
+  pendingAtomMotionRequestKey = requestKey;
+  const generation = ++atomMotionRequestGeneration;
+  try {
+    const result = await api("/api/atom_motion");
+    if (generation !== atomMotionRequestGeneration) return;
+    atomMotionBySource = new Map(
+      (result.entries || [])
+        .filter(entry => entry.source_atom !== null && entry.source_atom !== undefined)
+        .map(entry => [entry.source_atom, entry])
+    );
+    lastAtomMotionRequestKey = requestKey;
+  } catch (error) {
+    if (generation !== atomMotionRequestGeneration) return;
+    atomMotionBySource = new Map();
+    lastAtomMotionRequestKey = "";
+    console.warn("Atom motion refresh failed", error);
+  } finally {
+    if (generation === atomMotionRequestGeneration) pendingAtomMotionRequestKey = "";
+  }
+}
+
+async function importCifFile() {
+  if (importInProgress) {
+    document.getElementById("status").textContent = "Loading in progress. Wait for it to finish.";
+    return;
+  }
+  const input = document.getElementById("cif-file");
+  const file = input.files && input.files[0];
+  if (!file) {
+    document.getElementById("status").textContent = "Choose a CIF file first.";
+    return;
+  }
+  const requestId = beginImport(`Loading ${file.name}...`);
+  try {
+    const content = await file.text();
+    const result = await api("/api/import_cif", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({filename: file.name, content, request_id: requestId}),
+    });
+    if (!isCurrentImport(requestId)) return;
+    await applyLoadedStructureSafely(result, "CIF import failed", "CIF display failed", "", {name: file.name, kind: "CIF"});
+  } finally {
+    finishImport(requestId);
+  }
+}
+
+async function importMoleculeFile() {
+  if (importInProgress) {
+    document.getElementById("status").textContent = "Loading in progress. Wait for it to finish.";
+    return;
+  }
+  const input = document.getElementById("molecule-file");
+  const file = input.files && input.files[0];
+  if (!file) {
+    document.getElementById("status").textContent = "Choose an XYZ file first.";
+    return;
+  }
+  const requestId = beginImport(`Loading ${file.name}...`);
+  try {
+    const content = await file.text();
+    const result = await api("/api/import_molecule", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({filename: file.name, content, request_id: requestId}),
+    });
+    if (!isCurrentImport(requestId)) return;
+    await applyLoadedStructureSafely(result, "Molecule import failed", "Molecule display failed", "", {name: file.name, kind: "XYZ"});
+  } finally {
+    finishImport(requestId);
+  }
+}
+
+async function openSelectedExample() {
+  if (importInProgress) {
+    document.getElementById("status").textContent = "Loading in progress. Wait for it to finish.";
+    return;
+  }
+  const select = document.getElementById("example-select");
+  const path = select.value;
+  if (!path) {
+    document.getElementById("status").textContent = "Choose an example first.";
+    return;
+  }
+  const requestId = beginImport(`Loading ${path}...`);
+  try {
+    const result = await api("/api/open_example", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({kind: selectedStructureKind, path, request_id: requestId}),
+    });
+    if (!isCurrentImport(requestId)) return;
+    await applyLoadedStructureSafely(result, "Example load failed", "Example display failed", path, {name: path, kind: selectedStructureKind});
+  } finally {
+    finishImport(requestId);
+  }
+}
+
+async function applyLoadedStructureSafely(result, fallbackError, displayError, examplePath = "", context = {}) {
+  try {
+    await applyLoadedStructure(result, fallbackError, examplePath, context);
+  } catch (error) {
+    console.error(displayError, error);
+    showLoadError(displayError, error, context);
+  }
+}
+
+async function applyLoadedStructure(result, fallbackError, examplePath = "", context = {}) {
+  if (result.stale) {
+    state = result.state || state;
+    renderStatus();
+    return;
+  }
+  if (!result.ok) {
+    state = result.state || state;
+    renderStatus();
+    showLoadError(fallbackError, result.error || fallbackError, context);
+    return;
+  }
+  hideLoadError();
+  operations = result.operations || [];
+  atoms = result.atoms || [];
+  state = result.state || {};
+  if (state.source_kind === "crystal" || state.source_kind === "molecule") {
+    selectedStructureKind = state.source_kind;
+  }
+  sourceKind = state.source_kind || "crystal";
+  selectedExamplePath = examplePath || "";
+  setDefaultOperationSortForSourceKind();
+  directionFilterValue = "";
+  atomElementFilterValue = "";
+  summariesReady = Boolean(state.summaries_ready);
+  customUnmappedAtoms = new Set();
+  customOperationSequence = [];
+  copMatrix = null;
+  document.getElementById("cop-result").hidden = true;
+  hideCustomSequenceResult();
+  activeMode = "standard";
+  syncActiveModeControls();
+  syncSourceKindControls();
+  renderDirectionFilter();
+  renderAtomElementFilter();
+  renderElementColorControls();
+  syncOperationSelection();
+  syncSpeedButtons();
+  syncBoundaryButtons();
+  syncDisplayButtons();
+  syncCellOriginButtons();
+  syncCellSettingButtons();
+  syncProjectionButtons();
+  syncBackgroundButtons();
+  syncLegendButtons();
+  syncImproperModeControl();
+  syncAtomModeButtons();
+  syncPlayToggleButton();
+  syncGifSavingControls();
+  renderOperations();
+  await refreshAtomMotion();
+  renderAtoms();
+  renderSelectedAtomSummary();
+  renderStructureInfo();
+  renderStatus();
+  renderOperationDetails();
+}
+
+function syncActiveModeControls() {
+  document.getElementById("standard-panel").hidden = activeMode !== "standard";
+  document.getElementById("custom-panel").hidden = activeMode !== "custom";
+  for (const button of document.querySelectorAll(".mode-button")) {
+    button.classList.toggle("selected", button.dataset.mode === activeMode);
+  }
+}
+
+function syncExperienceModeControls() {
+  const beginner = experienceMode === "beginner";
+  document.body.classList.toggle("beginner-mode", beginner);
+  document.body.classList.toggle("advanced-mode", !beginner);
+  const modeButton = document.getElementById("experience-toggle");
+  modeButton.textContent = beginner ? "Simple" : "Full";
+  modeButton.dataset.experience = beginner ? "advanced" : "beginner";
+  modeButton.title = beginner ? "Switch to Full mode" : "Switch to Simple mode";
+  document.getElementById("main-title").textContent = "Symmetry Controls";
+  document.getElementById("operations-title").textContent = "Operations";
+  document.getElementById("operations-label").textContent = "Operation list";
+  document.getElementById("structure-info-title").textContent = "Structure Info";
+  document.getElementById("animation-title").textContent = "Animation";
+  document.getElementById("view-title").textContent = "View";
+  document.getElementById("camera-angle-label").textContent = "Rotate current view";
+  document.getElementById("projection-label").textContent = "Projection";
+  document.getElementById("cell-title").textContent = "Cell";
+  document.getElementById("range-label").textContent = "Range";
+  syncPlayToggleButton();
+}
+
+function setExperienceMode(mode) {
+  experienceMode = mode === "advanced" ? "advanced" : "beginner";
+  if (experienceMode === "beginner") directionFilterValue = "";
+  if (experienceMode === "beginner" && activeMode !== "standard") {
+    activeMode = "standard";
+    postState({active_mode: "standard", playing: false, reset: true, clear_custom_check: true});
+  }
+  syncActiveModeControls();
+  syncExperienceModeControls();
+  renderOperations();
+  renderStructureInfo();
+  renderSelectedAtomSummary();
+  renderOperationDetails();
+}
+
+function setActiveMode(mode) {
+  activeMode = mode === "custom" ? "custom" : "standard";
+  syncActiveModeControls();
+  if (activeMode === "standard") {
+    customUnmappedAtoms = new Set();
+    copMatrix = null;
+    renderAtoms();
+    postState({active_mode: "standard", playing: false, reset: true, clear_custom_check: true});
+  } else {
+    renderCustomSequenceControls();
+    postState({active_mode: "custom", playing: false});
+  }
+  renderStatus();
+  renderOperationDetails();
+}
+
+async function refreshState() {
+  if (refreshInProgress) return;
+  refreshInProgress = true;
+  try {
+    state = await api("/api/state");
+    syncOperationSelection();
+    syncSpeedButtons();
+    syncBoundaryButtons();
+    syncDisplayButtons();
+    syncCellOriginButtons();
+    syncCellSettingButtons();
+    syncProjectionButtons();
+    syncBackgroundButtons();
+    syncLegendButtons();
+    syncImproperModeControl();
+    syncAtomModeButtons();
+    syncPlayToggleButton();
+    renderStructureInfo();
+    renderStatus();
+    renderOperationDetails();
+    if (!summariesReady && state.summaries_ready) {
+      summariesReady = true;
+      const info = await api("/api/operations");
+      operations = info.operations;
+      renderDirectionFilter();
+      renderOperations();
+      renderOperationDetails();
+    }
+  } finally {
+    refreshInProgress = false;
+  }
+}
+
+document.getElementById("operation-sort").addEventListener("change", () => {
+  directionFilterValue = "";
+  renderDirectionFilter();
+  renderOperations();
+});
+document.getElementById("operation-label-mode").addEventListener("change", event => {
+  operationLabelMode = event.target.value === "itc_like" ? "itc_like" : "standard";
+  syncOperationLabelModeControls();
+  renderOperations();
+  renderOperationDetails();
+  renderStatus();
+});
+for (const button of document.querySelectorAll(".structure-kind-button")) {
+  button.addEventListener("click", () => setStructureKind(button.dataset.kind));
+}
+document.getElementById("import-cif").addEventListener("click", () => {
+  const input = document.getElementById("cif-file");
+  input.value = "";
+  input.click();
+});
+document.getElementById("cif-file").addEventListener("change", () => {
+  importCifFile().catch(error => {
+    const file = document.getElementById("cif-file").files && document.getElementById("cif-file").files[0];
+    showLoadError("CIF import failed", error, {name: file && file.name, kind: "CIF"});
+  });
+});
+document.getElementById("import-molecule").addEventListener("click", () => {
+  const input = document.getElementById("molecule-file");
+  input.value = "";
+  input.click();
+});
+document.getElementById("molecule-file").addEventListener("change", () => {
+  importMoleculeFile().catch(error => {
+    const file = document.getElementById("molecule-file").files && document.getElementById("molecule-file").files[0];
+    showLoadError("Molecule import failed", error, {name: file && file.name, kind: "XYZ"});
+  });
+});
+document.getElementById("open-example").addEventListener("click", () => {
+  openSelectedExample().catch(error => {
+    const select = document.getElementById("example-select");
+    showLoadError("Example load failed", error, {name: select && select.value, kind: selectedStructureKind});
+  });
+});
+for (const button of document.querySelectorAll(".mode-button")) {
+  button.addEventListener("click", () => setActiveMode(button.dataset.mode));
+}
+for (const button of document.querySelectorAll(".experience-button")) {
+  button.addEventListener("click", () => setExperienceMode(button.dataset.experience));
+}
+function startAnimation() {
+  if (activeMode === "custom") {
+    sendCurrentCustomAnimation(true);
+    return;
+  }
+  postState({playing: true});
+}
+
+document.getElementById("play-toggle").addEventListener("click", () => {
+  if (state.playing) {
+    postState({playing: false});
+  } else {
+    startAnimation();
+  }
+});
+document.getElementById("reset").addEventListener("click", () => postState({playing: false, reset: true}));
+document.getElementById("previous-frame").addEventListener("click", () => stepMovementProgress(-1));
+document.getElementById("next-frame").addEventListener("click", () => stepMovementProgress(1));
+document.addEventListener("keydown", event => {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  const target = event.target;
+  const editingControl = target instanceof HTMLElement && (
+    target.isContentEditable
+    || target.matches('input:not([type="range"]), select, textarea')
+  );
+  if (editingControl) return;
+  event.preventDefault();
+  stepMovementProgress(event.key === "ArrowLeft" ? -1 : 1);
+});
+const movementProgress = document.getElementById("movement-progress");
+movementProgress.addEventListener("pointerdown", () => {
+  if (state.playing) postState({playing: false});
+});
+movementProgress.addEventListener("input", () => {
+  const progress = Number(movementProgress.value) / 1000;
+  dispatchMovementProgress(progress);
+});
+movementProgress.addEventListener("change", () => {
+  const progress = Number(movementProgress.value) / 1000;
+  const nearest = movementBreakpoints.reduce(
+    (best, value) => Math.abs(value - progress) < Math.abs(best - progress) ? value : best,
+    movementBreakpoints[0] ?? progress,
+  );
+  if (Math.abs(nearest - progress) <= 0.04) dispatchMovementProgress(nearest);
+});
+window.addEventListener("symmetry-animation-progress-update", event => {
+  setMovementProgress(event.detail?.progress || 0);
+});
+window.addEventListener("symmetry-animation-breakpoints", event => {
+  setMovementBreakpoints(event.detail?.breakpoints);
+});
+for (const button of document.querySelectorAll(".speed-button")) {
+  button.addEventListener("click", () => postState({speed: Number(button.dataset.speed)}));
+}
+for (const button of document.querySelectorAll(".boundary-button")) {
+  button.addEventListener("click", () => postState({
+    animation_boundary_mode: button.dataset.boundaryMode,
+    playing: false,
+    reset: true,
+  }));
+}
+document.getElementById("display-range-decrease").addEventListener("click", () => {
+  changeDisplayRange(-1).catch(error => showLoadError("Range update failed", error));
+});
+document.getElementById("display-range-increase").addEventListener("click", () => {
+  changeDisplayRange(1).catch(error => showLoadError("Range update failed", error));
+});
+document.getElementById("include-boundary-images").addEventListener("change", event => postState({
+  include_boundary_images: event.currentTarget.checked,
+  playing: false,
+  reset: true,
+}));
+for (const button of document.querySelectorAll(".cell-origin-button")) {
+  button.addEventListener("click", () => postState({
+    cell_origin_mode: button.dataset.cellOriginMode,
+    playing: false,
+    reset: true,
+  }));
+}
+for (const button of document.querySelectorAll(".cell-setting-button")) {
+  button.addEventListener("click", () => {
+    const mode = button.dataset.cellSettingMode;
+    if (mode === (state.cell_setting_mode || "native")) return;
+    applyCellSetting(mode).catch(error => {
+      showLoadError("Cell setting failed", error && error.message ? error.message : error, {kind: "crystal"});
+    });
+  });
+}
+for (const button of document.querySelectorAll(".projection-button")) {
+  button.addEventListener("click", () => postState({
+    projection_mode: button.dataset.projectionMode,
+    playing: false,
+  }));
+}
+for (const button of document.querySelectorAll(".background-button")) {
+  button.addEventListener("click", () => postState({
+    background_mode: button.dataset.backgroundMode,
+    playing: false,
+  }));
+}
+for (const button of document.querySelectorAll(".legend-button")) {
+  button.addEventListener("click", () => postState({
+    legend_visible: button.dataset.legendVisible === "true",
+    playing: false,
+  }));
+}
+document.getElementById("improper-mode").addEventListener("change", event => {
+  postState({
+    improper_mode: event.target.value,
+    playing: false,
+    reset: true,
+  });
+});
+document.getElementById("view-direction").addEventListener("click", () => {
+  postState({view_request_id: Date.now()});
+});
+document.getElementById("reset-view").addEventListener("click", () => {
+  postState({reset_view_request_id: Date.now()});
+});
+document.getElementById("apply-view-center").addEventListener("click", applyViewCenter);
+document.getElementById("view-direction-index").addEventListener("click", applyViewDirectionIndex);
+document.getElementById("view-plane-index").addEventListener("click", applyViewPlaneIndex);
+document.getElementById("save-gif").addEventListener("click", () => {
+  state.gif_status = "writing GIF...";
+  syncGifSavingControls();
+  renderStatus();
+  if (activeMode === "custom") {
+    sendCurrentCustomAnimation(false);
+    window.setTimeout(() => postState({gif_request_id: Date.now(), playing: false}), 120);
+    return;
+  }
+  postState({gif_request_id: Date.now(), playing: false});
+});
+document.getElementById("save-gif-3view").addEventListener("click", () => {
+  state.gif_status = "writing 3-view GIFs...";
+  syncGifSavingControls();
+  renderStatus();
+  if (activeMode === "custom") {
+    sendCurrentCustomAnimation(false);
+    window.setTimeout(() => postState({gif_3view_request_id: Date.now(), playing: false}), 120);
+    return;
+  }
+  postState({gif_3view_request_id: Date.now(), playing: false});
+});
+document.getElementById("save-gif-3view-current").addEventListener("click", () => {
+  state.gif_status = "writing 3-view GIFs...";
+  syncGifSavingControls();
+  renderStatus();
+  if (activeMode === "custom") {
+    sendCurrentCustomAnimation(false);
+    window.setTimeout(() => postState({gif_3view_current_request_id: Date.now(), playing: false}), 120);
+    return;
+  }
+  postState({gif_3view_current_request_id: Date.now(), playing: false});
+});
+function cameraAngle() {
+  const value = Number(document.getElementById("camera-angle").value);
+  if (!Number.isFinite(value)) return 90;
+  return Math.max(0, Math.min(value, 180));
+}
+function rotateCamera(direction) {
+  postState({
+    camera_request_id: Date.now(),
+    camera_direction: direction,
+    camera_angle: cameraAngle(),
+  });
+}
+document.getElementById("camera-left").addEventListener("click", () => rotateCamera("left"));
+document.getElementById("camera-right").addEventListener("click", () => rotateCamera("right"));
+document.getElementById("camera-up").addEventListener("click", () => rotateCamera("up"));
+document.getElementById("camera-down").addEventListener("click", () => rotateCamera("down"));
+document.getElementById("camera-roll-left").addEventListener("click", () => rotateCamera("roll-left"));
+document.getElementById("camera-roll-right").addEventListener("click", () => rotateCamera("roll-right"));
+document.getElementById("displayed-atoms").addEventListener("click", () => {
+  postState({selected_atoms: atoms.map(atom => atom.index), scope: "displayed", playing: false, reset: true});
+});
+document.getElementById("unit-cell-atoms").addEventListener("click", () => {
+  postState({selected_atoms: atoms.map(atom => atom.index), scope: "unit_cell", playing: false, reset: true});
+});
+document.getElementById("clear-atoms").addEventListener("click", () => {
+  postState({selected_atoms: [], scope: "displayed", playing: false, reset: true});
+});
+
+// --- Custom Operation Check ---
+
+document.getElementById("cop-type").addEventListener("change", () => {
+  const type = document.getElementById("cop-type").value;
+  for (const el of document.querySelectorAll(".cop-fields")) el.hidden = true;
+  const target = document.getElementById("cop-" + type);
+  if (target) target.hidden = false;
+});
+
+function copNum(id, fallback = 0) {
+  const v = Number(document.getElementById(id).value);
+  return Number.isFinite(v) ? v : fallback;
+}
+
+function buildCopPayload() {
+  const type = document.getElementById("cop-type").value;
+  const tolerance = copNum("cop-tol", 0.1);
+  let params = {};
+  if (type === "rotation") {
+    params = {
+      axis: [copNum("cop-rot-u"), copNum("cop-rot-v"), copNum("cop-rot-w", 1)],
+      angle: copNum("cop-rot-angle", 90),
+      point: [copNum("cop-rot-px"), copNum("cop-rot-py"), copNum("cop-rot-pz")],
+    };
+  } else if (type === "mirror") {
+    params = {
+      normal: [copNum("cop-mir-h"), copNum("cop-mir-k"), copNum("cop-mir-l", 1)],
+      point: [copNum("cop-mir-px"), copNum("cop-mir-py"), copNum("cop-mir-pz")],
+    };
+  } else if (type === "inversion") {
+    params = {
+      center: [copNum("cop-inv-cx"), copNum("cop-inv-cy"), copNum("cop-inv-cz")],
+    };
+  } else if (type === "screw") {
+    params = {
+      axis: [copNum("cop-scr-u"), copNum("cop-scr-v"), copNum("cop-scr-w", 1)],
+      angle: copNum("cop-scr-angle", 180),
+      screw: [copNum("cop-scr-tx"), copNum("cop-scr-ty"), copNum("cop-scr-tz", 0.5)],
+      point: [copNum("cop-scr-px"), copNum("cop-scr-py"), copNum("cop-scr-pz")],
+    };
+  } else if (type === "glide") {
+    params = {
+      normal: [copNum("cop-gli-h"), copNum("cop-gli-k"), copNum("cop-gli-l", 1)],
+      point: [copNum("cop-gli-px"), copNum("cop-gli-py"), copNum("cop-gli-pz")],
+      glide: [copNum("cop-gli-tx", 0.5), copNum("cop-gli-ty"), copNum("cop-gli-tz")],
+    };
+  } else if (type === "rotoinversion") {
+    params = {
+      axis: [copNum("cop-riv-u"), copNum("cop-riv-v"), copNum("cop-riv-w", 1)],
+      angle: copNum("cop-riv-angle", 90),
+      center: [copNum("cop-riv-cx"), copNum("cop-riv-cy"), copNum("cop-riv-cz")],
+    };
+  } else if (type === "translation") {
+    params = {
+      vector: [copNum("cop-tra-x", 0.5), copNum("cop-tra-y", 0.5), copNum("cop-tra-z")],
+    };
+  } else if (type === "matrix") {
+    params = {
+      W: [
+        copNum("cop-mat-w00",1), copNum("cop-mat-w01"), copNum("cop-mat-w02"),
+        copNum("cop-mat-w10"), copNum("cop-mat-w11",1), copNum("cop-mat-w12"),
+        copNum("cop-mat-w20"), copNum("cop-mat-w21"), copNum("cop-mat-w22",1),
+      ],
+      t: [copNum("cop-mat-tx"), copNum("cop-mat-ty"), copNum("cop-mat-tz")],
+    };
+  }
+  return {type, params, tolerance, request_id: Date.now()};
+}
+
+function setCopMatrixInputs(W, t) {
+  const flatW = (W || []).flat();
+  const ids = [
+    "cop-mat-w00", "cop-mat-w01", "cop-mat-w02",
+    "cop-mat-w10", "cop-mat-w11", "cop-mat-w12",
+    "cop-mat-w20", "cop-mat-w21", "cop-mat-w22",
+  ];
+  ids.forEach((id, index) => {
+    const input = document.getElementById(id);
+    if (input && Number.isFinite(Number(flatW[index]))) input.value = formatMatrixNumber(flatW[index]);
+  });
+  ["cop-mat-tx", "cop-mat-ty", "cop-mat-tz"].forEach((id, index) => {
+    const input = document.getElementById(id);
+    if (input && Number.isFinite(Number((t || [])[index]))) input.value = formatMatrixNumber(t[index]);
+  });
+  document.getElementById("cop-type").value = "matrix";
+  document.getElementById("cop-type").dispatchEvent(new Event("change"));
+}
+
+function formatMatrixNumber(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "0";
+  const rounded = Math.round(numeric);
+  if (Math.abs(numeric - rounded) < 1e-10) return String(rounded);
+  return numeric.toFixed(10).replace(/0+$/, "").replace(/\\.$/, "");
+}
+
+let copMatrix = null;        // {W_frac, t_frac, op_type, op_params}
+let copSelectedAtoms = new Set();
+let copAllUnmapped = [];
+
+function displayCopResult(result, opType, opParams) {
+  const div = document.getElementById("cop-result");
+  copMatrix = null;
+  copSelectedAtoms = new Set();
+  copAllUnmapped = [];
+  customUnmappedAtoms = new Set();
+  if (!result) { div.hidden = true; return; }
+  if (result.error) {
+    div.className = "cop-result fail";
+    div.innerHTML = `<strong>Error:</strong> ${result.error}`;
+    div.hidden = false;
+    return;
+  }
+  const ok = result.is_symmetry;
+  div.className = "cop-result " + (ok ? "ok" : "fail");
+  let html = ok
+    ? `<strong>✓ All ${result.total} atoms map correctly — this IS a symmetry operation</strong>`
+    : `<strong>✗ ${result.unmapped_count} / ${result.total} atoms do not map — NOT a symmetry operation</strong>`;
+
+  if (!ok && result.unmapped && result.unmapped.length > 0) {
+    copAllUnmapped = result.unmapped.map(u => u.source);
+    customUnmappedAtoms = new Set(copAllUnmapped);
+    html += `<div style="margin:8px 0 4px;font-size:12px;color:#94a3b8">Unmapped atoms are highlighted in PyVista. Use the shared Atoms and Animation panels to animate this custom operation.</div>`;
+    html += `<div class="unmapped-list" id="cop-unmapped-list">`;
+    for (const u of result.unmapped) {
+      const frac = u.frac ? u.frac.map(v => v.toFixed(3)).join(", ") : "—";
+      html += `<div>atom ${u.source}: <b>${u.element}</b>  →  (${frac})  nearest: ${u.distance.toFixed(3)} Å</div>`;
+    }
+    html += `</div>`;
+  }
+  if (result.W_frac && result.t_frac) {
+    copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac, op_type: opType || "matrix", op_params: opParams || {}, result};
+    if (opType === "sequence") setCopMatrixInputs(result.W_frac, result.t_frac);
+    if (Number.isInteger(result.matching_operation_index)) {
+      const matched = operations.find(operation => operation.index === result.matching_operation_index);
+      const label = matched ? stripHtml(optionText(matched)) : `op ${result.matching_operation_index}`;
+      html += `<p class="hint">Matches existing ${label}.</p>`;
+      html += `<div class="button-row flush"><button id="btn-select-composed-match" class="secondary" data-index="${result.matching_operation_index}">Select match</button></div>`;
+    } else if (Array.isArray(result.operation_indices) || Array.isArray(result.sequence_items)) {
+      html += `<p class="hint">No existing operation has the same normalized (W|t).</p>`;
+    }
+    html += `<p id="cop-anim-msg" class="hint">Use Start with the current Atoms mode: Clear, selected atoms, Unit cell only, or Displayed all.</p>`;
+  }
+  div.innerHTML = html;
+  const selectMatch = document.getElementById("btn-select-composed-match");
+  if (selectMatch) {
+    selectMatch.addEventListener("click", () => {
+      const index = Number(selectMatch.dataset.index);
+      if (Number.isInteger(index)) {
+        setActiveMode("standard");
+        postState({operation_index: index, playing: false, reset: true});
+      }
+    });
+  }
+  div.hidden = false;
+  renderAtoms();
+  renderOperationDetails();
+}
+
+function currentAnimationAtoms() {
+  const all = atoms.map(atom => atom.index);
+  if (state.scope === "representative") return all.slice(0, 1);
+  if (state.scope === "unit_cell") return all;
+  if (state.scope === "displayed") return all;
+  if (String(state.scope).startsWith("selected")) return state.selected_atoms && state.selected_atoms.length ? state.selected_atoms : selectedAtomIndices();
+  return all;
+}
+
+function currentAnimationUnitCellOnly() {
+  return state.scope === "unit_cell" || state.scope === "representative" || state.scope === "selected";
+}
+
+function sendCurrentCustomAnimation(startPlaying = true) {
+  const msg = document.getElementById("cop-anim-msg");
+  if (!copMatrix) {
+    if (msg) msg.textContent = "Check the custom operation first.";
+    else document.getElementById("status").textContent = "Check the custom operation first.";
+    return;
+  }
+  const indices = currentAnimationAtoms();
+  if (!indices.length) {
+    if (msg) msg.textContent = "No atoms selected.";
+    return;
+  }
+  if (msg) msg.textContent = "";
+  sendCopAnimate(indices, currentAnimationUnitCellOnly(), startPlaying);
+}
+
+async function sendCopAnimate(atomIndices, unitCellOnly = false, startPlaying = true) {
+  if (!copMatrix || atomIndices.length === 0) {
+    return;
+  }
+  const body = {
+    custom_op_animate: {
+      atom_indices: atomIndices,
+      W_frac: copMatrix.W_frac,
+      t_frac: copMatrix.t_frac,
+      op_type: copMatrix.op_type,
+      op_params: copMatrix.op_params,
+      sequence_items: copMatrix.result && copMatrix.result.sequence_items ? copMatrix.result.sequence_items : null,
+      unit_cell_only: Boolean(unitCellOnly),
+      animate_id: Date.now(),
+    },
+    playing: Boolean(startPlaying),
+  };
+  await postState(body);
+}
+
+async function sendCopCheck() {
+  const payload = buildCopPayload();
+  const resultDiv = document.getElementById("cop-result");
+  resultDiv.className = "cop-result";
+  resultDiv.innerHTML = "Checking…";
+  resultDiv.hidden = false;
+  try {
+    const result = await api("/api/check_operation", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    displayCopResult(result, payload.type, payload.params);
+    // notify PyVista to highlight unmapped atoms
+    state = await api("/api/state", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({custom_op_check_id: payload.request_id}),
+    });
+  } catch (err) {
+    resultDiv.className = "cop-result fail";
+    resultDiv.innerHTML = `<strong>Error:</strong> ${err}`;
+  }
+}
+
+function customSequencePayloadItems() {
+  return customOperationSequence.map(item => {
+    if (item.type === "operation") {
+      return {type: "operation", index: item.index};
+    }
+    return {
+      type: "custom",
+      label: item.label,
+      W_frac: item.W_frac,
+      t_frac: item.t_frac,
+      op_type: item.op_type,
+      op_params: item.op_params,
+    };
+  });
+}
+
+async function sendCustomSequenceCompose() {
+  const resultDiv = document.getElementById("cop-result");
+  if (!customOperationSequence.length) {
+    resultDiv.className = "cop-result fail";
+    resultDiv.innerHTML = "<strong>Error:</strong> Add one or more operations first.";
+    resultDiv.hidden = false;
+    return;
+  }
+  const payload = {
+    sequence_items: customSequencePayloadItems(),
+    tolerance: copNum("cop-tol", 0.1),
+    store_custom_result: true,
+    request_id: Date.now(),
+  };
+  resultDiv.className = "cop-result";
+  resultDiv.innerHTML = "Composing…";
+  resultDiv.hidden = false;
+  try {
+    const result = await api("/api/compose_operations", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    displayCopResult(result, "sequence", {sequence_items: payload.sequence_items});
+    if (!result.error) {
+      state = await api("/api/state", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({custom_op_check_id: payload.request_id}),
+      });
+    }
+  } catch (err) {
+    resultDiv.className = "cop-result fail";
+    resultDiv.innerHTML = `<strong>Error:</strong> ${err}`;
+  }
+}
+
+document.getElementById("btn-check-op").addEventListener("click", sendCopCheck);
+document.getElementById("btn-add-existing-op").addEventListener("click", () => {
+  const select = document.getElementById("cop-operation-select");
+  const index = Number(select.value);
+  if (Number.isInteger(index)) {
+    customOperationSequence.push({type: "operation", index});
+    hideCustomSequenceResult();
+    renderCustomSequenceControls();
+  }
+});
+document.getElementById("btn-add-checked-custom").addEventListener("click", () => {
+  addCurrentCustomOperationToSequence();
+});
+
+function addCurrentCustomOperationToSequence() {
+  const resultDiv = document.getElementById("cop-result");
+  if (!copMatrix) {
+    resultDiv.className = "cop-result fail";
+    resultDiv.innerHTML = "<strong>Error:</strong> Check a custom operation first.";
+    resultDiv.hidden = false;
+    return;
+  }
+  customOperationSequence.push({
+    type: "custom",
+    label: `custom ${copMatrix.op_type}`,
+    W_frac: copMatrix.W_frac,
+    t_frac: copMatrix.t_frac,
+    op_type: copMatrix.op_type,
+    op_params: copMatrix.op_params,
+  });
+  hideCustomSequenceResult();
+  renderCustomSequenceControls();
+}
+document.getElementById("btn-compose-custom-sequence").addEventListener("click", sendCustomSequenceCompose);
+document.getElementById("btn-clear-custom-sequence").addEventListener("click", () => {
+  customOperationSequence = [];
+  hideCustomSequenceResult();
+  renderCustomSequenceControls();
+});
+document.getElementById("btn-clear-check").addEventListener("click", async () => {
+  document.getElementById("cop-result").hidden = true;
+  copMatrix = null;
+  copSelectedAtoms = new Set();
+  copAllUnmapped = [];
+  customUnmappedAtoms = new Set();
+  state = await api("/api/state", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({clear_custom_check: true}),
+  });
+  renderAtoms();
+  renderOperationDetails();
+});
+
+async function boot() {
+  const st = document.getElementById("status");
+  syncExperienceModeControls();
+  st.textContent = "Connecting…";
+  const [info, atomInfo, stateInfo, examplesInfo] = await Promise.all([
+    api("/api/operations"),
+    api("/api/atoms"),
+    api("/api/state"),
+    api("/api/examples"),
+  ]);
+  operations = info.operations;
+  summariesReady = Boolean(info.summaries_ready);
+  st.textContent = `Loaded ${operations.length} operations`;
+  atoms = atomInfo.atoms;
+  st.textContent = `Loaded ${operations.length} operations, ${atoms.length} atoms`;
+  state = stateInfo;
+  exampleCatalog = examplesInfo || {crystal: [], molecule: []};
+  if (state.source_kind === "crystal" || state.source_kind === "molecule") {
+    selectedStructureKind = state.source_kind;
+  }
+  sourceKind = state.source_kind || "crystal";
+  setDefaultOperationSortForSourceKind();
+  await refreshAtomMotion();
+  syncSourceKindControls();
+  renderDirectionFilter();
+  renderAtomElementFilter();
+  renderElementColorControls();
+  syncSpeedButtons();
+  syncBoundaryButtons();
+  syncDisplayButtons();
+  syncCellOriginButtons();
+  syncCellSettingButtons();
+  syncProjectionButtons();
+  syncBackgroundButtons();
+  syncLegendButtons();
+  syncImproperModeControl();
+  syncAtomModeButtons();
+  syncPlayToggleButton();
+  syncGifSavingControls();
+  renderOperations();
+  renderAtoms();
+  renderSelectedAtomSummary();
+  renderStructureInfo();
+  renderStatus();
+  renderOperationDetails();
+  setInterval(() => {
+    refreshState().catch(error => {
+      document.getElementById("status").textContent = `Refresh error: ${error}`;
+    });
+  }, 1000);
+}
+boot().catch(error => {
+  document.getElementById("status").textContent = `Boot error: ${error}`;
+});

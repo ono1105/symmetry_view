@@ -193,10 +193,10 @@ cd crystal_viewer/web
 npm ci
 ```
 
-Restart `tools/view_json_server.py` after changing browser HTML, JavaScript, or
-static asset routes. The page HTML is constructed when the Python process
-imports `browser_ui.py`; an already-running server does not pick up those
-changes.
+Restart `tools/view_json_server.py` after changing browser HTML or static asset
+routes. The page HTML is loaded when Python imports `browser_ui.py`. CSS and
+JavaScript files are read per request, so reloading the page picks up changes to
+those files without restarting the server.
 
 ## CLI Viewers
 
