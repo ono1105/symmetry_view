@@ -7,6 +7,7 @@ import {
   evaluatePath,
   pathBreakpoints,
   pathAppliesToDisplayInstance,
+  sequentialSegmentIndex,
 } from "../../crystal_viewer/web/animation_path.js";
 
 const fixtureUrl = new URL("../fixtures/animation_path_golden.json", import.meta.url);
@@ -76,6 +77,33 @@ test("sequential breakpoints retain nested compound phase boundaries", () => {
   const breakpoints = pathBreakpoints({type: "sequential", segments: [screw, linear]});
   assert.ok(breakpoints.some(value => Math.abs(value - (Math.PI / 2) / totalLength) <= tolerance));
   assert.ok(breakpoints.some(value => Math.abs(value - screwLength / totalLength) <= tolerance));
+});
+
+test("sequential segment index follows length-weighted timing", () => {
+  const path = {
+    type: "sequential",
+    segments: [
+      {type: "linear", start: [0, 0, 0], target: [1, 0, 0]},
+      {type: "linear", start: [1, 0, 0], target: [1, 3, 0]},
+    ],
+  };
+  assert.equal(sequentialSegmentIndex(path, 0.2), 0);
+  assert.equal(sequentialSegmentIndex(path, 0.3), 1);
+});
+
+test("sequential paths honor shared server segment weights", () => {
+  const path = {
+    type: "sequential",
+    segment_weights: [0.75, 0.25],
+    segments: [
+      {type: "linear", start: [0, 0, 0], target: [0, 0, 0]},
+      {type: "linear", start: [0, 0, 0], target: [0, 0, 1]},
+    ],
+  };
+  assert.equal(sequentialSegmentIndex(path, 0.7), 0);
+  assert.equal(sequentialSegmentIndex(path, 0.8), 1);
+  assertVectorClose(evaluatePath(path, 0.75), [0, 0, 0], "shared segment boundary");
+  assert.ok(pathBreakpoints(path).some(value => Math.abs(value - 0.75) <= tolerance));
 });
 
 test("applyBoundaryContext matches Python wrap samples", () => {

@@ -375,6 +375,24 @@ def synchronize_compound_path_phases(paths: dict[int, dict]) -> None:
     the second phase while farther atoms are still in the first phase.  Use the
     longest travel in each phase as the operation-wide timing reference.
     """
+    sequential = [path for path in paths.values() if path.get("type") == "sequential"]
+    if sequential:
+        segment_count = min(len(path.get("segments", [])) for path in sequential)
+        duration_lengths = []
+        for index in range(segment_count):
+            indexed = {key: path["segments"][index] for key, path in paths.items()
+                       if path.get("type") == "sequential" and len(path.get("segments", [])) > index}
+            synchronize_compound_path_phases(indexed)
+            duration_lengths.append(max(
+                animation_path_length(segment, start_override=np.asarray(segment["start"], dtype=float))
+                for segment in indexed.values()
+            ))
+        total = sum(duration_lengths)
+        weights = ([length / total for length in duration_lengths] if total > 1e-12
+                   else [1.0 / segment_count] * segment_count) if segment_count else []
+        for path in sequential:
+            path["segment_weights"] = weights
+
     compound_types = {"screw", "glide", "rotoinversion", "rotoreflection"}
     phase_lengths = []
     compound_paths = []
@@ -410,7 +428,11 @@ def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None
             starts.append(segment_start)
             lengths.append(animation_path_length(segment, start_override=segment_start))
             segment_start = evaluate_path(segment, 1.0, start_override=segment_start)
-        total = sum(lengths)
+        supplied_weights = path.get("segment_weights")
+        weights = ([float(value) for value in supplied_weights]
+                   if isinstance(supplied_weights, list) and len(supplied_weights) == len(segments)
+                   else lengths)
+        total = sum(weights)
         if total <= 1e-12:
             index = min(int(s * len(segments)), len(segments) - 1)
             local_s = (s * len(segments)) - index
@@ -419,7 +441,7 @@ def evaluate_path(path: dict, s: float, start_override: np.ndarray | None = None
             cumulative = 0.0
             index = len(segments) - 1
             local_s = 1.0
-            for candidate, length in enumerate(lengths):
+            for candidate, length in enumerate(weights):
                 if distance <= cumulative + length or candidate == len(segments) - 1:
                     index = candidate
                     local_s = 1.0 if length <= 1e-12 else (distance - cumulative) / length

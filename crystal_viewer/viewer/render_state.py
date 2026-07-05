@@ -26,6 +26,7 @@ STATE_UPDATE_KEYS = frozenset(
         "display_mode",
         "include_boundary_images",
         "animation_boundary_mode",
+        "pause_at_breakpoints",
         "active_mode",
         "scope",
         "view_request_id",
@@ -71,6 +72,7 @@ class RenderStateSnapshot:
     display_mode: str
     include_boundary_images: bool
     animation_boundary_mode: str
+    pause_at_breakpoints: bool
     active_mode: str
     view_request_id: Any
     reset_view_request_id: Any
@@ -139,6 +141,7 @@ def initial_render_state(
         "display_mode": preserved.get("display_mode", display_mode),
         "include_boundary_images": bool(preserved.get("include_boundary_images", False)),
         "animation_boundary_mode": preserved.get("animation_boundary_mode", "continuous"),
+        "pause_at_breakpoints": bool(preserved.get("pause_at_breakpoints", False)),
         "active_mode": "standard",
         "gif_status": "",
         "gif_request_id": None,
@@ -163,6 +166,7 @@ def initial_render_state(
         "import_in_progress": False,
         "json_path": str(preserved.get("json_path", "")),
         "summaries_ready": True,
+        "pyvista_enabled": bool(preserved.get("pyvista_enabled", False)),
     }
 
 
@@ -196,6 +200,7 @@ def pop_render_state_snapshot(state: dict) -> RenderStateSnapshot:
         display_mode=str(state.get("display_mode", "")),
         include_boundary_images=bool(state.get("include_boundary_images", False)),
         animation_boundary_mode=str(state.get("animation_boundary_mode", "continuous")),
+        pause_at_breakpoints=bool(state.get("pause_at_breakpoints", False)),
         active_mode=str(state.get("active_mode", "standard")),
         view_request_id=state.get("view_request_id"),
         reset_view_request_id=state.get("reset_view_request_id"),

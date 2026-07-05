@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import numpy as np
 
 from crystal_viewer.viewer.animation import apply_boundary_mode, update_animated_atoms
+from crystal_viewer.viewer.custom_animation import build_custom_animation_paths
 from crystal_viewer.viewer.animation_path import (
     animation_path_length,
     evaluate_path,
@@ -14,6 +15,46 @@ from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 
 
 class AnimationPathTest(unittest.TestCase):
+    def test_shared_custom_path_builder_supports_operation_and_sequence(self):
+        viewer = sequence_test_viewer()
+        rotation_request = {
+            "atom_indices": [0],
+            "W_frac": [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+            "t_frac": [0, 0, 0],
+            "op_type": "rotation",
+            "op_params": {"axis": [0, 0, 1], "angle": 90, "point": [0, 0, 0]},
+        }
+        sequence_request = {
+            "atom_indices": [0],
+            "sequence_items": [{"type": "operation", "index": 1}],
+        }
+
+        rotation = build_custom_animation_paths(viewer.render_data, None, rotation_request)
+        sequence = build_custom_animation_paths(viewer.render_data, None, sequence_request)
+
+        self.assertEqual(rotation[0]["type"], "rotation")
+        self.assertEqual(sequence[0]["type"], "sequential")
+        np.testing.assert_allclose(evaluate_path(rotation[0], 1.0), [0, 1, 0], atol=1e-8)
+        np.testing.assert_allclose(evaluate_path(sequence[0], 1.0), [0, 1, 0], atol=1e-8)
+
+    def test_custom_glide_sequence_exposes_translation_arrow(self):
+        viewer = sequence_test_viewer()
+        request = {
+            "atom_indices": [0],
+            "sequence_items": [{
+                "type": "custom",
+                "label": "custom glide",
+                "W_frac": [[1, 0, 0], [0, 1, 0], [0, 0, -1]],
+                "t_frac": [0.5, 0, 0],
+                "op_type": "glide",
+                "op_params": {"normal": [0, 0, 1], "point": [0, 0, 0], "glide": [0.5, 0, 0]},
+            }],
+        }
+
+        path = build_custom_animation_paths(viewer.render_data, None, request)[0]
+
+        np.testing.assert_allclose(path["segment_elements"][0]["glide_translation_cart"], [0.5, 0, 0])
+
     def test_normalized_duration_is_invariant_to_structure_scale(self):
         small = normalized_animation_duration_seconds(2.0, 4.0)
         large = normalized_animation_duration_seconds(20.0, 40.0)
@@ -54,6 +95,52 @@ class AnimationPathTest(unittest.TestCase):
         self.assertAlmostEqual(split, (3 * np.pi / 2) / (3 * np.pi / 2 + 2))
         np.testing.assert_allclose(evaluate_path(paths[0], split), [0.0, 1.0, 0.0], atol=1e-8)
         np.testing.assert_allclose(evaluate_path(paths[1], split), [0.0, 3.0, 0.0], atol=1e-8)
+
+    def test_sequence_steps_share_boundaries_when_one_atom_is_stationary(self):
+        def sequence(start):
+            rotated = np.array([-start[1], start[0], start[2]], dtype=float)
+            return {
+                "type": "sequential",
+                "segments": [
+                    {
+                        "type": "rotation",
+                        "start": np.asarray(start, dtype=float),
+                        "target": rotated,
+                        "axis_point": np.zeros(3),
+                        "axis_direction": np.array([0.0, 0.0, 1.0]),
+                        "angle": np.pi / 2,
+                    },
+                    {
+                        "type": "affine_linear",
+                        "start": rotated,
+                        "target": rotated + np.array([0.0, 0.0, 1.0]),
+                        "matrix_cart": np.eye(3),
+                        "translation_cart": np.array([0.0, 0.0, 1.0]),
+                    },
+                ],
+            }
+
+        paths = {0: sequence([0.0, 0.0, 0.0]), 1: sequence([2.0, 0.0, 0.0])}
+        synchronize_compound_path_phases(paths)
+
+        split = paths[0]["segment_weights"][0]
+        self.assertEqual(paths[0]["segment_weights"], paths[1]["segment_weights"])
+        np.testing.assert_allclose(evaluate_path(paths[0], split), [0.0, 0.0, 0.0], atol=1e-8)
+        np.testing.assert_allclose(evaluate_path(paths[1], split), [0.0, 2.0, 0.0], atol=1e-8)
+
+    def test_pyvista_sequence_elements_follow_segment_weights(self):
+        viewer = BrowserControlledViewer.__new__(BrowserControlledViewer)
+        viewer.paths = {
+            0: {
+                "type": "sequential",
+                "segments": [{}, {}],
+                "segment_weights": [0.8, 0.2],
+                "segment_elements": [{"label": "first"}, {"label": "second"}],
+            },
+        }
+
+        self.assertEqual(viewer.current_sequence_segment_elements(0.79), (0, {"label": "first"}))
+        self.assertEqual(viewer.current_sequence_segment_elements(0.81), (1, {"label": "second"}))
 
     def test_start_marker_is_visible_only_while_playing(self):
         viewer = BrowserControlledViewer.__new__(BrowserControlledViewer)
@@ -158,7 +245,10 @@ class AnimationPathTest(unittest.TestCase):
     def test_sequence_existing_rotation_uses_rotation_segment(self):
         viewer = sequence_test_viewer()
 
-        paths = viewer.build_custom_sequence_animation_paths([0], [{"type": "operation", "index": 1}])
+        paths = build_custom_animation_paths(
+            viewer.render_data, viewer.atom_mappings,
+            {"atom_indices": [0], "sequence_items": [{"type": "operation", "index": 1}]},
+        )
         path = paths[0]
 
         self.assertEqual(path["type"], "sequential")
@@ -168,9 +258,9 @@ class AnimationPathTest(unittest.TestCase):
     def test_sequence_custom_rotation_uses_rotation_segment(self):
         viewer = sequence_test_viewer()
 
-        paths = viewer.build_custom_sequence_animation_paths(
-            [0],
-            [
+        paths = build_custom_animation_paths(
+            viewer.render_data, viewer.atom_mappings,
+            {"atom_indices": [0], "sequence_items": [
                 {
                     "type": "custom",
                     "label": "custom rotation",
@@ -179,7 +269,7 @@ class AnimationPathTest(unittest.TestCase):
                     "op_type": "rotation",
                     "op_params": {"axis": [0, 0, 1], "angle": 90, "point": [0, 0, 0]},
                 }
-            ],
+            ]},
         )
         path = paths[0]
 
@@ -190,12 +280,10 @@ class AnimationPathTest(unittest.TestCase):
         viewer = sequence_test_viewer()
         W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]], dtype=float)
 
-        paths = viewer.build_custom_animation_paths(
-            [0],
-            W,
-            np.zeros(3),
-            op_type="matrix",
-            op_params={},
+        paths = build_custom_animation_paths(
+            viewer.render_data, viewer.atom_mappings,
+            {"atom_indices": [0], "W_frac": W, "t_frac": np.zeros(3),
+             "op_type": "matrix", "op_params": {}},
         )
 
         self.assertEqual(paths[0]["type"], "affine_linear")
@@ -205,9 +293,9 @@ class AnimationPathTest(unittest.TestCase):
     def test_sequence_custom_matrix_uses_linear_affine_segment(self):
         viewer = sequence_test_viewer()
 
-        paths = viewer.build_custom_sequence_animation_paths(
-            [0],
-            [
+        paths = build_custom_animation_paths(
+            viewer.render_data, viewer.atom_mappings,
+            {"atom_indices": [0], "sequence_items": [
                 {
                     "type": "custom",
                     "label": "matrix",
@@ -216,7 +304,7 @@ class AnimationPathTest(unittest.TestCase):
                     "op_type": "matrix",
                     "op_params": {},
                 }
-            ],
+            ]},
         )
 
         self.assertEqual(paths[0]["segments"][0]["type"], "affine_linear")

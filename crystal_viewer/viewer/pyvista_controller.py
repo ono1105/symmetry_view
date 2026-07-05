@@ -11,12 +11,10 @@ import numpy as np
 import pyvista as pv
 from PIL import Image, ImageDraw, ImageFont
 
-from crystal_viewer.geometry import normalize, signed_rotation_angle_from_matrix
+from crystal_viewer.geometry import normalize
 from crystal_viewer.viewer.native_gui import NativePyVistaViewer
-from crystal_viewer.viewer.animation_context import display_equivalent_operation_context
 from crystal_viewer.viewer.animation_path import (
     animation_path_length,
-    build_operation_path,
     normalized_animation_duration_seconds,
 )
 from crystal_viewer.viewer.atom_style import HIGHLIGHT_RADIUS_SCALE, atom_color, color_to_rgb
@@ -26,6 +24,7 @@ from crystal_viewer.viewer.display_atoms import (
     display_scene_center,
     display_scene_span,
 )
+from crystal_viewer.viewer.custom_animation import build_custom_animation_paths as build_shared_custom_paths
 from crystal_viewer.viewer.operation_labels import (
     camera_up_vector,
     custom_focus_point_cart,
@@ -419,28 +418,14 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if snapshot.custom_op_animate is not None:
             animate_id = snapshot.custom_op_animate.get("animate_id")
             if animate_id != self.last_custom_op_animate_id:
-                atom_indices = snapshot.custom_op_animate.get("atom_indices", [])
-                W_frac = np.asarray(snapshot.custom_op_animate.get("W_frac"), dtype=float)
-                t_frac = np.asarray(snapshot.custom_op_animate.get("t_frac"), dtype=float)
-                op_type = str(snapshot.custom_op_animate.get("op_type", "matrix"))
-                op_params = snapshot.custom_op_animate.get("op_params") or {}
-                sequence_items = snapshot.custom_op_animate.get("sequence_items") or []
-                unit_cell_only = bool(snapshot.custom_op_animate.get("unit_cell_only", False))
-                if sequence_items:
-                    self.paths = self.build_custom_sequence_animation_paths(
-                        atom_indices,
-                        sequence_items,
-                        unit_cell_only=unit_cell_only,
-                    )
-                else:
-                    self.paths = self.build_custom_animation_paths(
-                        atom_indices,
-                        W_frac,
-                        t_frac,
-                        op_type=op_type,
-                        op_params=op_params,
-                        unit_cell_only=unit_cell_only,
-                    )
+                self.paths = build_shared_custom_paths(
+                    self.render_data,
+                    self.atom_mappings,
+                    snapshot.custom_op_animate,
+                    display_mode=self.display_mode,
+                    cell_origin_mode=self.cell_origin_mode,
+                    improper_mode=self.improper_mode,
+                )
                 self.using_custom_paths = True
                 self.last_custom_op_animate_id = animate_id
                 self.last_custom_sequence_segment_index = None
@@ -1092,179 +1077,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
         with self.state_lock:
             self.shared_state["gif_status"] = status
 
-    def build_custom_animation_paths(
-        self,
-        atom_indices: list[int],
-        W_frac: np.ndarray,
-        t_frac: np.ndarray,
-        *,
-        op_type: str = "matrix",
-        op_params: dict | None = None,
-        unit_cell_only: bool = False,
-    ) -> dict[int, dict]:
-        """Build operation-aware animation paths for a user-supplied (W|t) operation."""
-        unit_cell = self.render_data.get("unit_cell")
-        if unit_cell is None:
-            return {}
-        lattice = np.asarray(unit_cell["lattice"], dtype=float)
-        W_cart = lattice.T @ W_frac @ np.linalg.inv(lattice.T)
-        t_cart = t_frac @ lattice
-        op_params = op_params or {}
-
-        # Build symmetry element dicts so build_operation_path can use arcs/reflections
-        axis_dict: dict | None = None
-        plane_dict: dict | None = None
-        center_dict: dict | None = None
-
-        if op_type in ("rotation", "screw"):
-            uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
-            d_cart = normalize(uvw @ lattice)
-            p_cart = np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice
-            axis_dict = {"point_cart": p_cart.tolist(), "direction_cart": d_cart.tolist()}
-        elif op_type in ("mirror", "glide"):
-            hkl = np.asarray(op_params.get("normal", [0, 0, 1]), dtype=float)
-            n_cart = normalize(np.linalg.inv(lattice) @ hkl)
-            p_cart = np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice
-            plane_dict = {"point_cart": p_cart.tolist(), "normal_cart": n_cart.tolist()}
-        elif op_type == "inversion":
-            c_cart = np.asarray(op_params.get("center", [0, 0, 0]), dtype=float) @ lattice
-            center_dict = {"point_cart": c_cart.tolist()}
-        elif op_type == "rotoinversion":
-            uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
-            d_cart = normalize(uvw @ lattice)
-            c_cart = np.asarray(op_params.get("center", [0, 0, 0]), dtype=float) @ lattice
-            axis_dict = {"point_cart": c_cart.tolist(), "direction_cart": d_cart.tolist()}
-            center_dict = {"point_cart": c_cart.tolist()}
-
-        # Map to kind strings expected by build_operation_path
-        _kind_map = {
-            "rotation": "rotation_n",
-            "screw": "screw_n",
-            "mirror": "mirror",
-            "glide": "glide",
-            "inversion": "inversion",
-            "rotoinversion": "rotoinversion_or_improper_n",
-        }
-        kind = _kind_map.get(op_type, "identity")
-        angle_deg = float(op_params.get("angle", 90)) if op_params else 90.0
-        fake_op = {
-            "kind": kind,
-            "angle_deg": angle_deg,
-            "order": None,
-            "matrix_cart": W_cart.tolist(),
-            "translation_cart": t_cart.tolist(),
-        }
-        fake_op, axis_dict, plane_dict, center_dict = display_equivalent_operation_context(
-            self.render_data,
-            fake_op,
-            axis_dict,
-            plane_dict,
-            center_dict,
-            self.display_mode,
-            self.cell_origin_mode,
-        )
-        path_matrix = np.asarray(fake_op["matrix_cart"], dtype=float)
-        path_translation = np.asarray(fake_op["translation_cart"], dtype=float)
-        angle_override = None
-        if op_type in ("rotation", "screw") and axis_dict is not None:
-            angle_override = signed_rotation_angle_from_matrix(
-                path_matrix,
-                np.asarray(axis_dict["direction_cart"], dtype=float),
-            )
-
-        idx_set = set(int(i) for i in atom_indices)
-        paths = {}
-        for item in self.animated_atoms:
-            atom = item["atom"]
-            if atom["index"] not in idx_set:
-                continue
-            start = np.asarray(atom["cart"], dtype=float)
-            target = path_matrix @ start + path_translation
-            if op_type == "matrix":
-                path = {
-                    "type": "affine_linear",
-                    "start": start,
-                    "target": target,
-                    "matrix_cart": path_matrix,
-                    "translation_cart": path_translation,
-                }
-            else:
-                path = build_operation_path(
-                    start, target, fake_op,
-                    axis=axis_dict, plane=plane_dict, center=center_dict,
-                    angle_override=angle_override,
-                    improper_mode=self.improper_mode,
-                    source_kind=str(self.render_data.get("metadata", {}).get("mode", "")),
-                )
-            if unit_cell_only:
-                path["unit_cell_only"] = True
-            paths[atom["index"]] = path
-        return paths
-
-    def build_custom_sequence_animation_paths(
-        self,
-        atom_indices: list[int],
-        sequence_items: list[dict],
-        *,
-        unit_cell_only: bool = False,
-    ) -> dict[int, dict]:
-        """Build a segmented animation for a chain of existing/custom operations."""
-        unit_cell = self.render_data.get("unit_cell")
-        if unit_cell is None:
-            return {}
-        lattice = np.asarray(unit_cell["lattice"], dtype=float)
-        idx_set = set(int(i) for i in atom_indices)
-        step_contexts = self.custom_sequence_step_contexts(sequence_items, lattice)
-        if not step_contexts:
-            return {}
-
-        paths = {}
-        for item in self.animated_atoms:
-            atom = item["atom"]
-            if atom["index"] not in idx_set:
-                continue
-            current = np.asarray(atom["cart"], dtype=float)
-            segments = []
-            for context in step_contexts:
-                W_cart = context["W_cart"]
-                t_cart = context["t_cart"]
-                target = W_cart @ current + t_cart
-                if context["operation"].get("kind") == "matrix":
-                    segments.append({
-                        "type": "affine_linear",
-                        "start": current,
-                        "target": target,
-                        "matrix_cart": W_cart,
-                        "translation_cart": t_cart,
-                    })
-                else:
-                    segments.append(build_operation_path(
-                        current,
-                        target,
-                        context["operation"],
-                        axis=context["axis"],
-                        plane=context["plane"],
-                        center=context["center"],
-                        angle_override=context["angle_override"],
-                        improper_mode=self.improper_mode,
-                        source_kind=str(self.render_data.get("metadata", {}).get("mode", "")),
-                    ))
-                current = target
-            path = {"type": "sequential", "segments": segments}
-            path["segment_elements"] = [
-                {
-                    "axes": [context["axis"]] if context["axis"] is not None else [],
-                    "planes": [context["plane"]] if context["plane"] is not None else [],
-                    "centers": [context["center"]] if context["center"] is not None else [],
-                    "label": context["label"],
-                }
-                for context in step_contexts
-            ]
-            if unit_cell_only:
-                path["unit_cell_only"] = True
-            paths[atom["index"]] = path
-        return paths
-
     def animation_duration_seconds(self) -> float:
         if self.paths is not self._path_length_cache_paths:
             self._maximum_path_length = 0.0
@@ -1288,72 +1100,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
             display_scene_span(self.render_data, self.display_mode, self.cell_origin_mode),
         )
         return base_duration / speed_multiplier
-
-    def custom_sequence_step_contexts(self, sequence_items: list[dict], lattice: np.ndarray) -> list[dict]:
-        operations_by_index = {int(operation["index"]): operation for operation in self.operations}
-        steps = []
-        for item in sequence_items:
-            kind = str(item.get("type") or "operation")
-            if kind == "operation":
-                operation = operations_by_index.get(int(item.get("index")))
-                if operation is None:
-                    continue
-                W_frac = np.asarray(operation.get("matrix_frac"), dtype=float)
-                t_frac = np.asarray(operation.get("translation_frac"), dtype=float)
-                axes, planes, centers = display_symmetry_elements(
-                    self.render_data,
-                    self.atom_mappings,
-                    operation.get("index"),
-                    element_index=None,
-                    improper_mode=self.improper_mode,
-                )
-                axis = axes[0] if axes else None
-                plane = planes[0] if planes else None
-                center = centers[0] if centers else None
-                label = f"op {operation.get('index')}"
-            elif kind == "custom":
-                W_frac = np.asarray(item.get("W_frac"), dtype=float)
-                t_frac = np.asarray(item.get("t_frac"), dtype=float)
-                operation, axis, plane, center = self.custom_sequence_item_operation_context(
-                    item,
-                    W_frac,
-                    t_frac,
-                    lattice,
-                )
-                label = str(item.get("label") or "custom")
-            else:
-                continue
-            if W_frac.shape != (3, 3) or t_frac.shape != (3,):
-                continue
-            W_cart = lattice.T @ W_frac @ np.linalg.inv(lattice.T)
-            t_cart = t_frac @ lattice
-            operation, axis, plane, center = display_equivalent_operation_context(
-                self.render_data,
-                operation,
-                axis,
-                plane,
-                center,
-                self.display_mode,
-                self.cell_origin_mode,
-            )
-            path_matrix = np.asarray(operation["matrix_cart"], dtype=float)
-            angle_override = None
-            if str(operation.get("kind", "")).startswith(("rotation", "screw")) and axis is not None:
-                angle_override = signed_rotation_angle_from_matrix(
-                    path_matrix,
-                    np.asarray(axis["direction_cart"], dtype=float),
-                )
-            steps.append({
-                "W_cart": path_matrix,
-                "t_cart": np.asarray(operation["translation_cart"], dtype=float),
-                "operation": operation,
-                "axis": axis,
-                "plane": plane,
-                "center": center,
-                "angle_override": angle_override,
-                "label": label,
-            })
-        return steps
 
     def update_custom_sequence_element_actors(self, s: float) -> None:
         metadata = self.current_sequence_segment_elements(s)
@@ -1383,7 +1129,21 @@ class BrowserControlledViewer(NativePyVistaViewer):
             if not elements:
                 return None
             segment_count = len(elements)
-            segment_index = min(int(float(np.clip(s, 0.0, 1.0)) * segment_count), segment_count - 1)
+            weights = path.get("segment_weights")
+            if not isinstance(weights, list) or len(weights) != segment_count:
+                weights = [1.0 / segment_count] * segment_count
+            total = float(sum(max(float(weight), 0.0) for weight in weights))
+            progress = float(np.clip(s, 0.0, 1.0))
+            cumulative = 0.0
+            segment_index = segment_count - 1
+            if total > 1e-12:
+                for index, weight in enumerate(weights):
+                    cumulative += max(float(weight), 0.0) / total
+                    if progress <= cumulative + 1e-12:
+                        segment_index = index
+                        break
+            else:
+                segment_index = min(int(progress * segment_count), segment_count - 1)
             return segment_index, elements[segment_index]
         return None
 
@@ -1395,61 +1155,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 pass
         self.custom_sequence_element_actors = []
         self.last_custom_sequence_segment_index = None
-
-    def custom_sequence_item_operation_context(
-        self,
-        item: dict,
-        W_frac: np.ndarray,
-        t_frac: np.ndarray,
-        lattice: np.ndarray,
-    ) -> tuple[dict, dict | None, dict | None, dict | None]:
-        W_cart = lattice.T @ W_frac @ np.linalg.inv(lattice.T)
-        t_cart = t_frac @ lattice
-        op_type = str(item.get("op_type") or "matrix")
-        op_params = item.get("op_params") or {}
-        axis = plane = center = None
-        if op_type in ("rotation", "screw"):
-            uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
-            axis = {
-                "point_cart": (np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice).tolist(),
-                "direction_cart": normalize(uvw @ lattice).tolist(),
-            }
-        elif op_type in ("mirror", "glide"):
-            hkl = np.asarray(op_params.get("normal", [0, 0, 1]), dtype=float)
-            plane = {
-                "point_cart": (np.asarray(op_params.get("point", [0, 0, 0]), dtype=float) @ lattice).tolist(),
-                "normal_cart": normalize(np.linalg.inv(lattice) @ hkl).tolist(),
-            }
-        elif op_type == "inversion":
-            center = {
-                "point_cart": (np.asarray(op_params.get("center", [0, 0, 0]), dtype=float) @ lattice).tolist(),
-            }
-        elif op_type == "rotoinversion":
-            uvw = np.asarray(op_params.get("axis", [0, 0, 1]), dtype=float)
-            point = (np.asarray(op_params.get("center", [0, 0, 0]), dtype=float) @ lattice).tolist()
-            axis = {"point_cart": point, "direction_cart": normalize(uvw @ lattice).tolist()}
-            center = {"point_cart": point}
-
-        kind = {
-            "rotation": "rotation_n",
-            "screw": "screw_n",
-            "mirror": "mirror",
-            "glide": "glide",
-            "inversion": "inversion",
-            "rotoinversion": "rotoinversion_or_improper_n",
-        }.get(op_type, "matrix")
-        return (
-            {
-                "kind": kind,
-                "angle_deg": float(op_params.get("angle", 90)) if op_params else 90.0,
-                "order": None,
-                "matrix_cart": W_cart.tolist(),
-                "translation_cart": t_cart.tolist(),
-            },
-            axis,
-            plane,
-            center,
-        )
 
     def apply_custom_check(self, result: dict | None) -> None:
         self.clear_custom_check_actors()

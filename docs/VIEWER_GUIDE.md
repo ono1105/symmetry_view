@@ -120,9 +120,16 @@ atom color controls
 selected atom animation scope
 play / stop / reset
 camera controls and view center controls
-GIF saving
+PNG screenshots, WebM recording, and debug JSON export
 custom operation check and animation
 ```
+
+The default server path still opens PyVista for final comparison and legacy
+three-view GIF output. Use `--web-only` to test the Web-only path; the UI hides
+PyVista GIF controls in that mode. Standard, custom, and custom-sequence
+animations run in Three.js. The Web viewer can save the current canvas as PNG,
+record the current animation as WebM when supported by the browser, and export a JSON bundle
+containing the state, render data, animation path, and symmetry elements.
 
 `tools/view_json_server.py` should stay a thin entry point and HTTP API. Shared viewer code belongs under `crystal_viewer/viewer/`; browser-facing UI assets belong under `crystal_viewer/web/`.
 

@@ -33,6 +33,28 @@ class BrowserUiAssetsTest(unittest.TestCase):
         self.assertIn('src="/static/three_loader.js"', HTML)
         self.assertIn('id="previous-frame"', HTML)
         self.assertIn('id="next-frame"', HTML)
+        self.assertIn('id="animation-speed"', HTML)
+        self.assertIn('id="pause-at-breakpoints"', HTML)
+        self.assertIn('>Stepwise</span>', HTML)
+        self.assertNotIn('id="continue-boundary"', HTML)
+        self.assertIn('class="inline-checkbox advanced-only"', HTML)
+        self.assertLess(HTML.index('id="play-toggle"'), HTML.index('id="reset"'))
+        self.assertLess(HTML.index('id="reset"'), HTML.index('id="pause-at-breakpoints"'))
+        self.assertNotIn('class="secondary speed-button', HTML)
+        self.assertIn('id="save-png"', HTML)
+        self.assertIn('id="record-webm"', HTML)
+        self.assertIn('id="export-debug-json"', HTML)
+        self.assertNotIn('id="btn-load-existing-op"', HTML)
+        self.assertIn('id="btn-add-custom-operation"', HTML)
+        self.assertIn('id="reset-atom-appearance"', HTML)
+        self.assertIn('id="example-select-menu"', HTML)
+        self.assertIn('id="cop-operation-menu"', HTML)
+        self.assertIn('id="view-panel"', HTML)
+        self.assertNotIn("Three.js 3D View", HTML)
+        self.assertIn('class="panel advanced-only collapsible-panel selected-operation-panel"', HTML)
+        self.assertLess(HTML.index("Create operation"), HTML.index("Operation sequence"))
+        self.assertIn('<section class="panel advanced-only" id="custom-panel" hidden>', HTML)
+        self.assertIn('id="mode-controls"', HTML)
         self.assertNotIn("__STRUCTURE_KIND_CONFIG__", HTML)
         self.assertNotIn("<style>", HTML)
         self.assertNotIn("<script>", HTML)
@@ -42,6 +64,16 @@ class BrowserUiAssetsTest(unittest.TestCase):
         for name in ("browser_ui.html", "browser_ui.css", "browser_ui.js", "three_loader.js"):
             with self.subTest(name=name):
                 self.assertTrue((web_dir / name).is_file())
+
+    def test_three_view_initializes_instance_colors(self):
+        source = Path("crystal_viewer/web/three_view.js").read_text(encoding="utf-8")
+        self.assertIn("mesh.setColorAt(instanceIndex, instance.baseColor)", source)
+        self.assertIn("mesh.instanceColor.needsUpdate = true", source)
+
+    def test_three_view_refreshes_custom_paths_and_records_through_breakpoints(self):
+        source = Path("crystal_viewer/web/three_view.js").read_text(encoding="utf-8")
+        self.assertIn("customAnimationChanged || pathOptionsChanged", source)
+        self.assertIn("this.state.pause_at_breakpoints && !this.recording", source)
 
 
 class AtomRenderStyleItemsTest(unittest.TestCase):
@@ -58,6 +90,18 @@ class AtomRenderStyleItemsTest(unittest.TestCase):
         self.assertEqual(result[0]["index"], 4)
         self.assertRegex(result[0]["color"], r"^#[0-9a-f]{6}$")
         self.assertGreater(result[0]["radius"], 0.0)
+
+    def test_applies_browser_color_overrides(self):
+        render_data = {
+            "atoms": [
+                {"index": 4, "element": "O", "atomic_number": 8, "cart": [0.0, 0.0, 0.0]},
+            ],
+            "unit_cell": None,
+        }
+
+        result = atom_render_style_items(render_data, atom_colors={"4": "#123456"})
+
+        self.assertEqual(result[0]["color"], "#123456")
 
     def test_scales_crystal_radius_against_shortest_lattice_vector(self):
         render_data = {
@@ -107,6 +151,16 @@ class DisplayRenderApiItemsTest(unittest.TestCase):
         self.assertEqual(len(regular), 8)
         self.assertEqual(len(with_boundaries), 27)
         self.assertEqual(sum(bool(item["is_primary_image"]) for item in with_boundaries), 8)
+
+    def test_hidden_atoms_are_omitted(self):
+        items = display_atom_api_items(
+            self.render_data,
+            display_mode="source",
+            cell_origin_mode="center",
+            atom_hidden={"0": True},
+        )
+
+        self.assertNotIn(0, {item["source_atom"] for item in items})
 
     def test_all_cell_ranges_match_shared_pyvista_display_instances(self):
         expected_counts = {
@@ -331,6 +385,8 @@ class ComposeOperationIndicesTest(unittest.TestCase):
         self.assertEqual(result["operation_indices"], [1, 2])
         self.assertEqual(result["W_frac"], c4)
         self.assertEqual(result["t_frac"], [0.0, 0.25, 0.0])
+        self.assertEqual(result["matrix_cart"], c4)
+        self.assertEqual(result["translation_cart"], [0.0, 0.25, 0.0])
 
 
 class FindOperationSequenceForTargetTest(unittest.TestCase):

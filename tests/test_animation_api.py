@@ -9,6 +9,7 @@ from crystal_viewer.viewer.animation_api import (
     animation_boundary_context,
     animation_path_length,
     animation_path_response,
+    custom_animation_path_response,
     serialize_animation_path,
     symmetry_elements_response,
 )
@@ -74,6 +75,41 @@ class SerializeAnimationPathTest(unittest.TestCase):
 
 
 class AnimationPathResponseTest(unittest.TestCase):
+    def test_custom_rotation_and_sequence_publish_cartesian_paths(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+        common = {
+            "atom_indices": [0, 1],
+            "unit_cell_only": False,
+        }
+        rotation = custom_animation_path_response(
+            payload["render_data"],
+            payload["atom_mappings"],
+            {
+                **common,
+                "animate_id": 101,
+                "W_frac": [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+                "t_frac": [0, 0, 0],
+                "op_type": "rotation",
+                "op_params": {"axis": [0, 0, 1], "angle": 90, "point": [0, 0, 0]},
+            },
+        )
+        sequence = custom_animation_path_response(
+            payload["render_data"],
+            payload["atom_mappings"],
+            {**common, "animate_id": 102, "sequence_items": [
+                {"type": "operation", "index": 1},
+                {"type": "operation", "index": 1},
+            ]},
+        )
+
+        self.assertEqual(rotation["animate_id"], 101)
+        self.assertEqual(len(rotation["paths"]), 2)
+        self.assertEqual(rotation["paths"][0]["path"]["type"], "rotation")
+        self.assertIn("angle_deg", rotation["paths"][0]["path"])
+        self.assertEqual(sequence["animate_id"], 102)
+        self.assertEqual(len(sequence["paths"][0]["path"]["segments"]), 2)
+        self.assertGreater(sequence["animation_duration_seconds"], 0)
+
     def test_sio2_screw_paths_publish_one_shared_phase_boundary(self):
         payload = json.loads(Path("exports/json/sio2.json").read_text(encoding="utf-8"))
 

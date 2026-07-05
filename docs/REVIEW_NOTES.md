@@ -1,5 +1,57 @@
 # コードレビューメモ（Codex向け共有）
 
+## 2026-07-04 (追補): WebM録画・時間正規化・前回指摘の修正確認（Claude, 未コミット差分）
+
+前回レビュー後の未コミット差分（さらに拡大: 1718+/642−）を再精査。**前回の指摘2件は両方修正済みを確認**。
+
+### 前回指摘の修正確認
+
+- **#1 旧PyVistaカスタム経路メソッドのデッド化** → `build_custom_animation_paths`/`build_custom_sequence_animation_paths`/`custom_sequence_step_contexts` を**削除**（`def` 0件）。`tests/test_animation_path.py` も共有 `custom_animation.build_custom_animation_paths` に**付け替え済み**。本番と同一実装をテストが検証する状態になった。
+- **#2 `/api/render_data` の `animation_boundary_mode` 二重・未使用代入** → **削除済み**（grep 0件）。
+
+### 新規レビュー（今回の追加分）
+
+- **時間正規化のモデル刷新**：`normalized_animation_duration_seconds(distance, scene_span)` を新設し、`duration = distance/scene_span / 0.525` を `[1.0, 16/3]` 秒でクランプ。構造スケールに依存しない見かけ速度になる。span は `max(・,1e-9)` で 0除算ガード済み。**PyVista(`pyvista_controller.py:1098`) と Web API(`animation_api.py:112,169`) が同一関数を使用**しており、参照ビューとプレビューの時間が一致（パリティ維持）。three.js は `baseAnimationDurationSeconds` をサーバ値から受け取り、標準・カスタム両経路で設定される。
+- **WebM クライアント録画**（three.js `recordWebm`, `--web-only` でGIF不可の代替）：`captureStream`/`MediaRecorder` 未対応環境をガード、`if (this.recording) return` で録画中の状態更新を抑止、`finally` でトラック停止と `recording` 解除。カスタムモードでも `this.animationPaths` が populate され再生される。
+- **モジュール整合**：`sequentialSegmentBoundaries`/`sequentialSegmentIndex` 等の export/import をランタイム解決まで確認（全6 export 一致）。
+- **検証**：Python 81件＋JSパリティ10件グリーン、JS全4ファイル構文OK。
+
+### 残る軽微な点（任意）
+
+- `recordWebm` の録画長は `animationDurationMs()+500ms` 固定。タブ非アクティブ時の rAF スロットリングでフレームが疎になる可能性（実害小）。
+- カスタムアニメの保存ファイル名が常に `op0.webm`（`animationOperationIndex ?? 0`）。体裁のみ。
+- three.js の毎フレーム進捗イベント発火（既出）は未対応のまま。scrubber更新の throttle 候補。
+
+**総評**：前回指摘が的確に解消され、時間正規化は PyVista/Web で共有され整合。新規のWebM録画も堅牢。実害バグは無し。
+
+## 2026-07-04: 共有カスタムアニメ・segment_weights・web-only のレビュー（Claude, 未コミット差分）
+
+対象は未コミットの大型差分（1329+/285−）。Web UIを `browser_ui.css`/`.html`/`.js` に分割、新モジュール `custom_animation.py`、順序アニメの操作全体タイミング `segment_weights`（Python/JS両対応）、`--web-only` モード、境界原子トグルを追加。**Python 77件＋JSパリティ10件すべてグリーン、JS全ファイル構文OK**。前回指摘の `include_boundary_images` 保持漏れ（セル基底変換）は `view_json_server.py:1026` で修正済みを確認。以下、良い点と指摘。
+
+### 良好（確認済み）
+
+- **カスタム経路生成の共有化**：PyVista と Web API が同じ `custom_animation.build_custom_animation_paths` を使うようになり、二重実装が解消。行列変換も row-vector 規約に整合（`W_cart=Lᵀ W (Lᵀ)⁻¹`、法線 `n_cart=L⁻¹ n_frac`、方向・点 `@L`）。
+- **`segment_weights`**：順序アニメで各原子がバラバラのタイミングで区切りを跨がないよう、操作全体の区間長で重み付け。`evaluate_path`（Py）と `sequentialWeights`/`sequentialSegmentIndex`（JS）が一致。
+- **カスタム区間の対称要素表示**（`updateCustomSequenceElements`）：区間indexが変わった時だけ `clearSymmetryElements` する実装で、ちらつきなし。
+
+### 指摘
+
+1. **【要対応・テスト観点】旧 PyVista カスタム経路メソッドが本番デッド化したのにテストだけが旧実装を検証している** — `pyvista_controller.py` の `build_custom_animation_paths`(:1082)/`build_custom_sequence_animation_paths`(:1191)/`custom_sequence_step_contexts`(:1279) は本番では共有モジュールに置換済みで未使用。しかし `tests/test_animation_path.py`(234/244/266/281) は**旧メソッドを呼んでいる**。結果、**本番で使う共有モジュールがこれらのテストで覆われず**、2実装が無言で乖離し得る（共有版は `synchronize_compound_path_phases`/`segment_weights` を実行するが旧版は別物）。→ テストを共有 `build_custom_animation_paths` に付け替え、旧メソッド約200行を削除。
+2. **【デッドコード】未使用の二重代入** — `view_json_server.py:607-610` の `/api/render_data` ハンドラで `animation_boundary_mode` を2回連続で代入し、しかも応答bodyで一切使っていない。両行とも削除。
+3. **【効率・低】`updateCustomSequenceElements` が毎フレーム `sequentialSegmentIndex` を再計算** — three_view.js の順序アニメ再生中、毎フレーム全区間の弧長を再計算する。区間長/重み配列をpath単位でキャッシュすれば軽減。低優先。
+
+（別途、three_view.js の毎フレーム進捗イベント発火＝以前の指摘は未対応のまま。scrubber更新の throttle 候補。）
+
+### Codex対応（2026-07-05）
+
+- 旧 `BrowserControlledViewer.build_custom_animation_paths()`、`build_custom_sequence_animation_paths()`、関連context生成メソッドを削除し、該当テストを本番の共有 `custom_animation.build_custom_animation_paths()` へ付け替えた。
+- `/api/render_data` の未使用 `animation_boundary_mode` 二重代入を削除した。
+- カスタム操作列の区間境界をロード時に一度だけ計算し、Three.jsの毎フレーム対称要素更新ではキャッシュ済み境界を参照するようにした。
+- PyVista側の操作列対称要素切替も等分割ではなく `segment_weights` に従うよう修正した。
+- 選択変更時に不変の原子色を全インスタンスへ再送していた処理を削除した。進捗通知は既に1%刻みに抑制済み。
+- カスタム操作中に表示範囲・セル原点などが変わった場合も、表示等価なCartesian経路を再取得するよう修正した。
+- Stepwise有効時でもWebM録画は区切りで停止せず、最後まで収録するよう修正した。
+
 ## 2026-07-03: browser_ui.py UI再構成のレビュー（Claude, commit 7379c97）
 
 `7379c97 feat: refine web viewer controls and animation` の browser_ui.py（≈433行）UI再構成を精査。多くはCSS圧縮とパネルの `<details>` 折りたたみ化。インラインJS 2ブロックとも構文チェックOK。動作上の重大バグはなし。良かった点と軽微な指摘は以下。

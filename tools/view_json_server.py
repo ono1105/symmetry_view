@@ -43,7 +43,11 @@ from crystal_viewer.viewer.atom_style import atom_color, display_atom_radius
 from crystal_viewer.viewer.animation_context import animation_paths
 from crystal_viewer.viewer.animation_path import evaluate_path, phase_fraction, two_phase_geometry
 from crystal_viewer.viewer.display_atoms import display_atom_instances, display_fractional_bounds
-from crystal_viewer.viewer.animation_api import animation_path_response, symmetry_elements_response
+from crystal_viewer.viewer.animation_api import (
+    animation_path_response,
+    custom_animation_path_response,
+    symmetry_elements_response,
+)
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
     check_custom_operation,
@@ -52,7 +56,6 @@ from crystal_viewer.viewer.custom_operation import (
 from crystal_viewer.web.browser_ui import HTML
 from crystal_viewer.viewer.operation_labels import atom_frac_label
 from crystal_viewer.viewer.operation_lookup import operation_by_index, selected_mapping
-from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 from crystal_viewer.viewer.render_state import (
     apply_render_state_update,
     initial_render_state,
@@ -174,11 +177,16 @@ def atom_api_items(atoms: list[dict]) -> list[dict]:
     ]
 
 
-def atom_render_style_items(render_data: dict) -> list[dict]:
+def atom_render_style_items(
+    render_data: dict,
+    *,
+    element_colors: dict | None = None,
+    atom_colors: dict | None = None,
+) -> list[dict]:
     return [
         {
             "index": int(atom["index"]),
-            "color": atom_color(atom),
+            "color": atom_color(atom, element_colors=element_colors, atom_colors=atom_colors),
             "radius": display_atom_radius(atom, render_data),
         }
         for atom in render_data.get("atoms", [])
@@ -191,6 +199,8 @@ def display_atom_api_items(
     display_mode: str,
     cell_origin_mode: str,
     include_boundary_images: bool = False,
+    element_hidden: dict | None = None,
+    atom_hidden: dict | None = None,
 ) -> list[dict]:
     items = []
     for instance_id, item in enumerate(
@@ -202,6 +212,10 @@ def display_atom_api_items(
         )
     ):
         atom = item["atom"]
+        if (element_hidden or {}).get(str(atom.get("element", ""))):
+            continue
+        if (atom_hidden or {}).get(str(atom.get("index", ""))):
+            continue
         items.append(
             {
                 "instance_id": instance_id,
@@ -324,6 +338,7 @@ def compose_operation_indices(
     )
     check_result["W_frac"] = composed.W.tolist()
     check_result["t_frac"] = composed.t.tolist()
+    check_result.update(cartesian_operation_items(unit_cell, composed.W, composed.t))
     check_result["operation_indices"] = operation_indices
     check_result["matching_operation_index"] = find_matching_operation_index(
         composed.W,
@@ -380,6 +395,7 @@ def compose_operation_sequence_items(
     )
     check_result["W_frac"] = composed.W.tolist()
     check_result["t_frac"] = composed.t.tolist()
+    check_result.update(cartesian_operation_items(unit_cell, composed.W, composed.t))
     check_result["sequence_items"] = sequence_items
     check_result["sequence_labels"] = labels
     check_result["matching_operation_index"] = find_matching_operation_index(
@@ -388,6 +404,18 @@ def compose_operation_sequence_items(
         operations,
     )
     return check_result
+
+
+def cartesian_operation_items(unit_cell: dict, W_frac, t_frac) -> dict:
+    lattice = np.asarray(unit_cell["lattice"], dtype=float)
+    W = np.asarray(W_frac, dtype=float)
+    t = np.asarray(t_frac, dtype=float)
+    W_cart = lattice.T @ W @ np.linalg.inv(lattice.T)
+    t_cart = t @ lattice
+    return {
+        "matrix_cart": W_cart.tolist(),
+        "translation_cart": t_cart.tolist(),
+    }
 
 
 def find_operation_sequence_for_target(
@@ -601,6 +629,10 @@ def make_handler(
                     display_mode = str(shared_state.get("display_mode", "source"))
                     cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
                     include_boundary_images = bool(shared_state.get("include_boundary_images", False))
+                    element_colors = dict(shared_state.get("element_colors", {}))
+                    atom_colors = dict(shared_state.get("atom_colors", {}))
+                    element_hidden = dict(shared_state.get("element_hidden", {}))
+                    atom_hidden = dict(shared_state.get("atom_hidden", {}))
                 body = {
                     "schema_version": schema_version,
                     "source_kind": source_kind,
@@ -614,13 +646,19 @@ def make_handler(
                         display_mode=display_mode,
                         cell_origin_mode=cell_origin_mode,
                         include_boundary_images=include_boundary_images,
+                        element_hidden=element_hidden,
+                        atom_hidden=atom_hidden,
                     ),
                     "display_unit_cell": display_unit_cell_api_item(
                         render_data,
                         display_mode=display_mode,
                         cell_origin_mode=cell_origin_mode,
                     ),
-                    "atom_styles": atom_render_style_items(render_data),
+                    "atom_styles": atom_render_style_items(
+                        render_data,
+                        element_colors=element_colors,
+                        atom_colors=atom_colors,
+                    ),
                 }
                 self.send_json(body)
                 return
@@ -660,6 +698,28 @@ def make_handler(
                     self.send_json_error(str(exc), status=400)
                     return
                 self.send_json(body)
+                return
+            if path == "/api/custom_animation_path":
+                with state_lock:
+                    request = dict(shared_state.get("custom_op_animate") or {})
+                    render_data = session.render_data
+                    atom_mappings = session.atom_mappings
+                    improper_mode = str(shared_state.get("improper_mode", "auto"))
+                    display_mode = str(shared_state.get("display_mode", "source"))
+                    cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                    include_boundary_images = bool(shared_state.get("include_boundary_images", False))
+                    animation_boundary_mode = str(
+                        shared_state.get("animation_boundary_mode", "continuous")
+                    )
+                if not request:
+                    self.send_json_error("No custom animation is active", status=404)
+                    return
+                self.send_json(custom_animation_path_response(
+                    render_data, atom_mappings, request, improper_mode=improper_mode,
+                    display_mode=display_mode, cell_origin_mode=cell_origin_mode,
+                    include_boundary_images=include_boundary_images,
+                    animation_boundary_mode=animation_boundary_mode,
+                ))
                 return
             if path == "/api/symmetry_elements":
                 query = parse_qs(parsed_url.query)
@@ -761,11 +821,19 @@ def make_handler(
                     self.send_json({"error": result})
                     return
                 W_frac, t_frac = result
+                if payload.get("build_only"):
+                    self.send_json({
+                        "W_frac": W_frac.tolist(),
+                        "t_frac": t_frac.tolist(),
+                        **cartesian_operation_items(unit_cell, W_frac, t_frac),
+                    })
+                    return
                 check_result = check_custom_operation(render_data, W_frac, t_frac, tolerance)
                 visuals = custom_operation_visuals(op_type, params, lattice, W_frac, t_frac)
                 # include the operation matrix so the browser can request animation
                 check_result["W_frac"] = W_frac.tolist()
                 check_result["t_frac"] = t_frac.tolist()
+                check_result.update(cartesian_operation_items(unit_cell, W_frac, t_frac))
                 check_result.update(visuals)
                 # store result for PyVista highlight
                 with state_lock:
@@ -995,6 +1063,7 @@ def make_handler(
                         "reload_request_id": shared_state.get("reload_request_id"),
                         "import_status": preserved_status,
                         "json_path": shared_state.get("json_path", str(current_json_path)),
+                        "pyvista_enabled": bool(shared_state.get("pyvista_enabled", False)),
                     }
                     session.replace_from(new_session)
                     next_state = initial_render_state(
@@ -1047,6 +1116,7 @@ def make_handler(
                     # very large atom scene after loading a denser structure.
                     "display_mode": "source",
                     "reload_request_id": shared_state.get("reload_request_id"),
+                    "pyvista_enabled": bool(shared_state.get("pyvista_enabled", False)),
                 }
                 session.replace_from(new_session)
                 next_state = initial_render_state(
@@ -1110,7 +1180,7 @@ def make_handler(
                 text = path.read_text(encoding="utf-8")
             except FileNotFoundError:
                 message = (
-                    "Three.js dependency is missing; run `cd crystal_viewer/web && npm ci`."
+                    "The 3D rendering dependency is missing; run `cd crystal_viewer/web && npm ci`."
                     if vendor
                     else f"JavaScript asset not found: {path.name}"
                 )
@@ -1443,6 +1513,11 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=5173)
     parser.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically.")
     parser.add_argument(
+        "--web-only",
+        action="store_true",
+        help="Run without the legacy PyVista window (custom animation and GIF output unavailable).",
+    )
+    parser.add_argument(
         "--json-output",
         type=Path,
         default=None,
@@ -1507,6 +1582,7 @@ def main() -> int:
     shared_state["reset"] = False
     shared_state["reload_request_id"] = 0
     shared_state["json_path"] = str(json_path)
+    shared_state["pyvista_enabled"] = not args.web_only
 
     handler = make_handler(
         session,
@@ -1520,24 +1596,34 @@ def main() -> int:
         default_display_mode=display_mode,
     )
     example_catalog()
-    app = BrowserControlledViewer(
-        json_path,
-        display_mode=display_mode,
-        initial_operation=shared_state["operation_index"],
-        scope=shared_state["scope"],
-        shared_state=shared_state,
-        state_lock=state_lock,
-        viewer_session=session,
-    )
     server = start_server(args.host, args.port, handler)
     url = f"http://{args.host}:{server.server_port}/"
     print(f"Control panel: {url}")
     if not args.no_browser:
         open_url(url)
 
-    app.show()
-    server.shutdown()
-    server.server_close()
+    try:
+        if not args.web_only:
+            from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
+
+            app = BrowserControlledViewer(
+                json_path,
+                display_mode=display_mode,
+                initial_operation=shared_state["operation_index"],
+                scope=shared_state["scope"],
+                shared_state=shared_state,
+                state_lock=state_lock,
+                viewer_session=session,
+            )
+            app.show()
+        else:
+            while True:
+                time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.shutdown()
+        server.server_close()
     return 0
 
 

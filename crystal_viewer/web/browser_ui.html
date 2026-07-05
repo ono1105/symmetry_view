@@ -21,17 +21,16 @@
       <button id="import-cif" class="secondary">Open CIF</button>
       <input id="molecule-file" class="file-input" type="file" accept=".xyz,.txt">
       <button id="import-molecule" class="secondary">Open XYZ</button>
-      <select id="example-select" class="example-select"></select>
-      <button id="open-example" class="secondary">Open Example</button>
-      <div class="button-row flush advanced-only" id="mode-controls">
-        <button class="secondary mode-button selected" data-mode="standard">Symmetry operation</button>
-        <button class="secondary mode-button" data-mode="custom">Custom operation</button>
+      <div class="rich-select example-select" id="example-picker">
+        <button type="button" class="secondary rich-select-trigger" id="example-select-display" aria-expanded="false">Select example...</button>
+        <div class="rich-select-menu" id="example-select-menu" role="listbox" hidden></div>
+        <select id="example-select" class="native-select-proxy" aria-hidden="true" tabindex="-1"></select>
       </div>
+      <button id="open-example" class="secondary">Open Example</button>
     </div>
   </div>
   <section class="panel" id="start-panel" hidden>
     <h2 class="section-title">Open Structure</h2>
-    <p class="hint">Open a CIF for crystal symmetry or an XYZ for molecular point-group symmetry.</p>
   </section>
   <section class="panel error-panel" id="load-error-panel" hidden>
     <div class="error-title" id="load-error-title"></div>
@@ -43,15 +42,24 @@
     <div class="structure-summary" id="structure-info"></div>
   </section>
   <div class="viewer-workspace">
+  <div class="viewer-primary">
   <section class="panel" id="three-view-panel">
-    <h2 class="section-title">Three.js 3D View</h2>
     <div class="three-view-shell" id="three-view">
       <canvas aria-label="Interactive three-dimensional structure view"></canvas>
-      <div class="three-view-status" data-three-status>Loading Three.js view…</div>
+      <div class="three-view-status" data-three-status hidden></div>
     </div>
   </section>
+  <details class="panel advanced-only collapsible-panel selected-operation-panel" open>
+    <summary>Selected Operation</summary>
+    <div id="op-details" class="operation-details"></div>
+  </details>
+  </div>
   <div class="grid" id="workspace">
     <div class="left-stack">
+    <div class="operation-mode-switch advanced-only" id="mode-controls" role="tablist" aria-label="Operation mode">
+      <button class="mode-button selected" data-mode="standard" role="tab" aria-selected="true">Standard</button>
+      <button class="mode-button" data-mode="custom" role="tab" aria-selected="false">Custom</button>
+    </div>
     <section class="panel" id="standard-panel">
       <h2 class="section-title" id="operations-title">Operations</h2>
       <div class="control-stack">
@@ -87,25 +95,24 @@
       </div>
       <label for="operations" id="operations-label">Operation list</label>
       <div class="operation-list" id="operations" role="listbox"></div>
-      <p class="hint advanced-only" id="operation-notation-hint">ITC-style notation computed from each operation's (W, t): symbol, intrinsic translation, and the element location.</p>
     </section>
-    <section class="panel" id="custom-panel" hidden>
+    <section class="panel advanced-only" id="custom-panel" hidden>
       <h2 class="section-title">Custom Operation</h2>
-      <p class="hint">Enter any (W|t) operation and check it against the unit-cell atoms. After checking, the shared animation and atom controls apply to this operation.</p>
-      <div class="control-stack">
-        <div>
-          <label for="cop-operation-select">Operation sequence</label>
-          <div class="sequence-row">
-            <select id="cop-operation-select"></select>
-            <button id="btn-add-existing-op" class="secondary">Add</button>
+      <div class="custom-block">
+          <h3 class="subsection-title">Add existing operation</h3>
+          <label for="cop-operation-select">Existing operation</label>
+          <div class="compact-add-row">
+            <div class="rich-select" id="cop-operation-picker">
+              <button type="button" class="secondary rich-select-trigger" id="cop-operation-display" aria-expanded="false">Select operation</button>
+              <div class="rich-select-menu" id="cop-operation-menu" role="listbox" hidden></div>
+              <select id="cop-operation-select" class="native-select-proxy" aria-hidden="true" tabindex="-1"></select>
+            </div>
+            <button id="btn-add-existing-op" class="secondary compact-add-button">Add</button>
           </div>
-          <div class="button-row flush">
-            <button id="btn-compose-custom-sequence" class="secondary">Compose sequence</button>
-            <button id="btn-clear-custom-sequence" class="secondary">Clear sequence</button>
-          </div>
-          <div id="custom-sequence-list" class="sequence-list"></div>
-          <p class="hint">Operations are applied from top to bottom. Use Check symmetry before adding a custom operation.</p>
-        </div>
+      </div>
+      <details class="custom-block custom-create-details">
+        <summary>Create operation</summary>
+        <div class="control-stack">
         <div>
           <label for="cop-type">Operation type</label>
           <select id="cop-type">
@@ -225,7 +232,6 @@
           </div>
         </div>
         <div id="cop-identity" class="cop-fields" hidden>
-          <p class="hint">Identity: W = I, t = 0. All atoms map to themselves.</p>
         </div>
         <div id="cop-matrix" class="cop-fields" hidden>
           <label>Rotation matrix W — 3×3 row-major, fractional basis</label>
@@ -253,16 +259,19 @@
         </div>
       </div>
       <div class="button-row flush">
-        <button id="btn-check-op">Check symmetry</button>
-        <button id="btn-add-checked-custom" class="secondary">Add checked custom to sequence</button>
-        <button id="btn-clear-check" class="secondary">Clear custom</button>
+        <button id="btn-add-custom-operation" class="secondary compact-add-button">Add to sequence</button>
       </div>
-      <div id="cop-result" class="cop-result" hidden></div>
+      </details>
+      <div class="custom-block">
+          <h3 class="subsection-title">Operation sequence</h3>
+          <div id="custom-sequence-list" class="sequence-list"></div>
+          <div class="button-row flush">
+            <button id="btn-compose-custom-sequence">Check sequence</button>
+            <button id="btn-clear-custom-sequence" class="secondary">Clear</button>
+          </div>
+          <div id="cop-result" class="cop-result" hidden></div>
+      </div>
     </section>
-    <details class="panel advanced-only collapsible-panel">
-      <summary>Selected Operation</summary>
-      <div id="op-details" class="operation-details"></div>
-    </details>
     </div>
     <div class="side-stack">
       <section class="panel">
@@ -270,6 +279,10 @@
         <div class="button-row flush">
           <button id="play-toggle">Start</button>
           <button id="reset" class="secondary">Reset</button>
+          <label class="inline-checkbox advanced-only" for="pause-at-breakpoints">
+            <input id="pause-at-breakpoints" type="checkbox">
+            <span title="Pause at each operation boundary">Stepwise</span>
+          </label>
         </div>
         <label class="movement-slider-row" for="movement-progress">
           <input id="movement-progress" type="range" min="0" max="1000" value="0" step="1" list="movement-stops">
@@ -284,11 +297,12 @@
         <details class="compact-details advanced-only">
           <summary>Animation settings</summary>
           <h3 class="subsection-title">Speed</h3>
-          <div class="button-row flush" id="speed-controls">
-            <button class="secondary speed-button" data-speed="0.5">Slow</button>
-            <button class="secondary speed-button selected" data-speed="1.0">Normal</button>
-            <button class="secondary speed-button" data-speed="2.0">Fast</button>
-          </div>
+          <label class="speed-slider-row" for="animation-speed">
+            <span>Slow</span>
+            <input id="animation-speed" type="range" min="0.25" max="3" value="1" step="0.05">
+            <span>Fast</span>
+            <output id="animation-speed-value" for="animation-speed">1.00×</output>
+          </label>
           <div class="subsection-title">
             <label for="improper-mode">Improper operation</label>
             <select id="improper-mode">
@@ -304,26 +318,34 @@
           </div>
           <h3 class="subsection-title">Export</h3>
           <div class="button-row flush">
+            <button id="save-png" class="secondary">Save PNG</button>
+            <button id="record-webm" class="secondary">Record WebM</button>
+            <button id="export-debug-json" class="secondary">Export debug JSON</button>
+          </div>
+          <div class="button-row flush" id="pyvista-export-controls" hidden>
             <button id="save-gif" class="secondary">Save GIF</button>
             <button id="save-gif-3view" class="secondary">Save 3-view GIFs</button>
             <button id="save-gif-3view-current" class="secondary">Save current 3-view</button>
           </div>
         </details>
       </section>
-      <section class="panel">
-        <h2 class="section-title" id="view-title">View</h2>
+      <details class="viewer-camera-tools" id="view-panel">
+        <summary id="view-title">Camera</summary>
+        <div class="viewer-camera-tools-body">
         <div class="camera-block">
-          <label for="camera-angle" id="camera-angle-label">Rotate current view</label>
-          <div class="camera-grid">
-            <button id="camera-roll-left" class="secondary" title="Roll left" aria-label="Roll left">↶</button>
-            <button id="camera-up" class="secondary" title="Tilt up" aria-label="Tilt up">↑</button>
-            <button id="camera-roll-right" class="secondary" title="Roll right" aria-label="Roll right">↷</button>
-            <button id="camera-left" class="secondary" title="Rotate left" aria-label="Rotate left">←</button>
-            <button id="camera-down" class="secondary" title="Tilt down" aria-label="Tilt down">↓</button>
-            <button id="camera-right" class="secondary" title="Rotate right" aria-label="Rotate right">→</button>
-            <span></span>
-            <input id="camera-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1" title="Rotation angle" aria-label="Rotation angle">
-            <span></span>
+          <div class="camera-rotate-row">
+            <div class="camera-grid">
+              <button id="camera-roll-left" class="secondary" title="Roll left" aria-label="Roll left">↶</button>
+              <button id="camera-up" class="secondary" title="Tilt up" aria-label="Tilt up">↑</button>
+              <button id="camera-roll-right" class="secondary" title="Roll right" aria-label="Roll right">↷</button>
+              <button id="camera-left" class="secondary" title="Rotate left" aria-label="Rotate left">←</button>
+              <button id="camera-down" class="secondary" title="Tilt down" aria-label="Tilt down">↓</button>
+              <button id="camera-right" class="secondary" title="Rotate right" aria-label="Rotate right">→</button>
+            </div>
+            <label class="compact-angle-control" title="Rotation angle">
+              <input id="camera-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1" aria-label="Rotation angle">
+              <span>°</span>
+            </label>
           </div>
           <div class="button-row flush">
             <button id="view-direction" class="secondary">View along direction</button>
@@ -336,8 +358,7 @@
             <button class="secondary projection-button" data-projection-mode="orthographic">Orthographic</button>
           </div>
         </div>
-        <details class="compact-details advanced-only">
-          <summary>View settings</summary>
+        <div class="advanced-only camera-settings-expanded">
         <div class="camera-block advanced-only" id="view-direction-index-block">
           <label>View along [h k l]</label>
           <div class="view-direction-row">
@@ -382,8 +403,9 @@
             <button class="secondary legend-button" data-legend-visible="true">Show</button>
           </div>
         </div>
-        </details>
-      </section>
+        </div>
+        </div>
+      </details>
       <section class="panel" id="display-block">
         <h2 class="section-title" id="cell-title">Cell</h2>
         <div class="cell-block">
@@ -418,18 +440,20 @@
       </section>
       <details class="panel advanced-only collapsible-panel">
         <summary>Atoms</summary>
-        <label>Elements</label>
+        <label>Element appearance</label>
         <div class="element-color-list" id="element-colors"></div>
-        <label>Element filter</label>
+        <div class="button-row flush">
+          <button id="reset-atom-appearance" class="secondary">Reset appearance</button>
+        </div>
+        <label>Filter atoms</label>
         <div class="direction-filter-list" id="atom-element-filter"></div>
-        <label>Animated atoms</label>
+        <label>Atom selection and appearance</label>
         <div class="atom-list" id="atoms"></div>
         <div class="button-row">
           <button id="displayed-atoms" class="secondary atom-mode-button" data-scope="displayed">Displayed all</button>
           <button id="unit-cell-atoms" class="secondary atom-mode-button" data-scope="unit_cell">Unit cell only</button>
           <button id="clear-atoms" class="secondary atom-mode-button" data-scope="representative">Clear</button>
         </div>
-        <p class="hint">Check atoms to animate selected atom types. Unit cell only leaves periodic display copies fixed.</p>
       </details>
     </div>
   </div>

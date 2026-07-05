@@ -29,6 +29,7 @@ const MOVEMENT_FRAME_STEP = 0.02;
 let selectedAtomDetailsOpen = true;
 let displayRangeUpdatePending = false;
 const STRUCTURE_KIND_UI = JSON.parse(document.getElementById("structure-kind-config").textContent);
+document.getElementById("three-view-panel").appendChild(document.getElementById("view-panel"));
 
 async function api(path, options) {
   const response = await fetch(path, options);
@@ -59,8 +60,8 @@ function optionText(operation) {
   }
   if (operationLabelMode === "itc_like") {
     const itc = operation.itc_like_summary || operation.itc_coordinate_summary;
-    if (itc) return `op ${operation.index}: ${formatSymbol(itc)}`;
-    return `op ${operation.index}: ${formatSymbol(displayOperationSymbol(operation))}`;
+    if (itc) return `op ${operation.index}: ${formatItcLikeSymbol(itc)}`;
+    return `op ${operation.index}: ${formatItcLikeSymbol(displayOperationSymbol(operation))}`;
   }
   const symbol = formatSymbol(displayOperationSymbol(operation));
   const summary = operation.element_summary || "";
@@ -146,11 +147,63 @@ function renderHtml(text) {
   return template.content;
 }
 
+function setRichSelectOpen(pickerId, open) {
+  const picker = document.getElementById(pickerId);
+  const trigger = picker.querySelector(".rich-select-trigger");
+  const menu = picker.querySelector(".rich-select-menu");
+  menu.hidden = !open;
+  trigger.setAttribute("aria-expanded", String(open));
+}
+
+function installRichSelectToggle(pickerId) {
+  const picker = document.getElementById(pickerId);
+  picker.querySelector(".rich-select-trigger").addEventListener("click", event => {
+    event.stopPropagation();
+    const menu = picker.querySelector(".rich-select-menu");
+    for (const other of document.querySelectorAll(".rich-select")) {
+      setRichSelectOpen(other.id, other === picker && menu.hidden);
+    }
+  });
+}
+
+installRichSelectToggle("example-picker");
+installRichSelectToggle("cop-operation-picker");
+document.addEventListener("click", () => {
+  for (const picker of document.querySelectorAll(".rich-select")) setRichSelectOpen(picker.id, false);
+});
+
 function formatSymbol(symbol) {
   const subscripts = "₀₁₂₃₄₅₆";
   return String(symbol)
     .replace(/sigma/g, "σ")
     .replace(/_([0-6])/g, (_, digit) => subscripts[Number(digit)]);
+}
+
+function formatItcLikeSymbol(symbol) {
+  return formatSymbol(symbol).replace(/^\s*-([0-9]+)/, '<span class="overline">$1</span>');
+}
+
+function formatPlainOverbar(symbol) {
+  return String(symbol).replace(/-([0-9]+)/g, (_, digits) =>
+    [...digits].map(digit => `${digit}\u0305`).join(""));
+}
+
+function stripHtmlWithOverbars(value) {
+  const withUnicodeOverbars = String(value).replace(
+    /<span class="overline">([^<]+)<\/span>/g,
+    (_, text) => [...text].map(character => `${character}\u0305`).join(""),
+  );
+  return stripHtml(withUnicodeOverbars);
+}
+
+function formatGroupSymbol(symbol) {
+  const text = String(symbol);
+  const schoenflies = text.match(/^([CDS])(\d+|∞)([a-z]*)$/);
+  if (schoenflies) return `${schoenflies[1]}<sub>${schoenflies[2]}${schoenflies[3]}</sub>`;
+  return text
+    .replace(/sigma/g, "σ")
+    .replace(/_([A-Za-z0-9∞]+)/g, "<sub>$1</sub>")
+    .replace(/-([0-9]+)/g, '<span class="overline">$1</span>');
 }
 
 function resolvedImproperMode() {
@@ -254,11 +307,41 @@ function atomVisible(atom) {
   return !elementHidden[atom.element] && !atomHidden[String(atom.index)];
 }
 
+function atomVisibilityUpdate(atom, visible) {
+  const atomHidden = Object.assign({}, state.atom_hidden || {});
+  const elementHidden = Object.assign({}, state.element_hidden || {});
+  if (visible) {
+    atomHidden[String(atom.index)] = true;
+  } else {
+    delete atomHidden[String(atom.index)];
+    if (elementHidden[atom.element]) {
+      delete elementHidden[atom.element];
+      for (const peer of atoms) {
+        if (peer.element === atom.element && peer.index !== atom.index) {
+          atomHidden[String(peer.index)] = true;
+        }
+      }
+    }
+  }
+  return {atom_hidden: atomHidden, element_hidden: elementHidden, playing: false, reset: true};
+}
+
+function resetAtomAppearance() {
+  return postState({
+    element_colors: {},
+    atom_colors: {},
+    element_hidden: {},
+    atom_hidden: {},
+    playing: false,
+    reset: true,
+  });
+}
+
 function visibilityButton(visible, title, onToggle) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = `visibility-toggle${visible ? "" : " hidden"}`;
-  button.textContent = visible ? "Shown" : "Hidden";
+  button.textContent = visible ? "Visible" : "Hidden";
   button.title = title;
   button.setAttribute("aria-label", title);
   button.addEventListener("click", onToggle);
@@ -290,11 +373,22 @@ function renderOperations() {
     }
     row.appendChild(renderHtml(text));
     row.addEventListener("click", () => {
-      postState({operation_index: operation.index, playing: false, reset: true});
+      activeMode = "standard";
+      customUnmappedAtoms = new Set();
+      syncActiveModeControls();
+      postState({
+        active_mode: "standard",
+        operation_index: operation.index,
+        playing: false,
+        reset: true,
+        clear_custom_check: true,
+      });
     });
     root.appendChild(row);
   }
-  if (activeMode === "custom") renderCustomSequenceControls(sorted);
+  if (activeMode === "custom" && experienceMode === "advanced" && sourceKind === "crystal") {
+    renderCustomSequenceControls(sorted);
+  }
 }
 
 function operationSymbolFilterKey(operation) {
@@ -340,36 +434,52 @@ function renderOperationTypeFilter() {
 
 function renderCustomSequenceControls(sorted = sortedOperations()) {
   const select = document.getElementById("cop-operation-select");
+  const menu = document.getElementById("cop-operation-menu");
   const list = document.getElementById("custom-sequence-list");
   if (!select || !list) return;
   const selectedValue = select.value;
   select.innerHTML = "";
-  for (const operation of sorted) {
+  menu.innerHTML = "";
+  const customSorted = [...sorted].sort((a, b) =>
+    compareNumber(beginnerOperationTypeRank(a), beginnerOperationTypeRank(b))
+    || compareNumber(Number(a.order) || 0, Number(b.order) || 0)
+    || compareNumber(a.index, b.index)
+  );
+  for (const operation of customSorted) {
     const option = document.createElement("option");
     option.value = String(operation.index);
-    option.textContent = stripHtml(optionText(operation));
+    option.textContent = stripHtmlWithOverbars(optionText(operation));
     select.appendChild(option);
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "rich-select-option";
+    item.dataset.value = String(operation.index);
+    item.appendChild(renderHtml(optionText(operation)));
+    item.addEventListener("click", () => {
+      select.value = item.dataset.value;
+      select.dispatchEvent(new Event("change"));
+      syncCustomOperationPicker();
+      setRichSelectOpen("cop-operation-picker", false);
+    });
+    menu.appendChild(item);
   }
   if (selectedValue && [...select.options].some(option => option.value === selectedValue)) {
     select.value = selectedValue;
   } else if (state.operation_index !== undefined) {
     select.value = String(state.operation_index);
   }
+  if (select.value && select.value !== selectedValue) loadSelectedExistingOperation();
+  syncCustomOperationPicker();
 
   list.innerHTML = "";
   const operationsByIndex = new Map(operations.map(operation => [operation.index, operation]));
-  if (!customOperationSequence.length) {
-    const empty = document.createElement("div");
-    empty.className = "hint";
-    empty.textContent = "No operations in sequence.";
-    list.appendChild(empty);
-  } else {
+  if (customOperationSequence.length) {
     customOperationSequence.forEach((sequenceItem, position) => {
       const operation = sequenceItem.type === "operation" ? operationsByIndex.get(sequenceItem.index) : null;
       const row = document.createElement("div");
       row.className = "sequence-item";
       const label = document.createElement("span");
-      label.textContent = `${position + 1}. ${operation ? stripHtml(optionText(operation)) : customSequenceItemLabel(customOperationSequence[position])}`;
+      label.textContent = `${position + 1}. ${operation ? stripHtmlWithOverbars(optionText(operation)) : customSequenceItemLabel(customOperationSequence[position])}`;
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "secondary";
@@ -383,6 +493,18 @@ function renderCustomSequenceControls(sorted = sortedOperations()) {
       row.appendChild(remove);
       list.appendChild(row);
     });
+  }
+}
+
+function syncCustomOperationPicker() {
+  const select = document.getElementById("cop-operation-select");
+  const operation = operations.find(item => String(item.index) === select.value);
+  const trigger = document.getElementById("cop-operation-display");
+  trigger.replaceChildren();
+  if (operation) trigger.appendChild(renderHtml(optionText(operation)));
+  else trigger.textContent = "Select operation";
+  for (const item of document.querySelectorAll("#cop-operation-menu .rich-select-option")) {
+    item.classList.toggle("selected", item.dataset.value === select.value);
   }
 }
 
@@ -442,11 +564,6 @@ function syncOperationLabelModeControls() {
   if (block) block.hidden = sourceKind !== "crystal";
   const select = document.getElementById("operation-label-mode");
   if (select) select.value = operationLabelMode;
-  const hint = document.getElementById("operation-notation-hint");
-  if (!hint) return;
-  hint.textContent = operationLabelMode === "itc_like"
-    ? "ITC-style notation computed from each operation's (W, t): symbol, intrinsic translation, and the element location."
-    : "The selected operation controls the axis/plane/center shown in PyVista.";
 }
 
 function sortedOperations() {
@@ -647,16 +764,18 @@ function renderStructureInfo() {
       ? ["Operations", metadata.operation_count || operations.length || 0]
       : [
           config.symmetryLabel,
-          symmetryLabelWithGenerators(metadata.symmetry_label || metadata.point_group_label, metadata.point_group_generators),
+          symmetryLabelWithGenerators(metadata.symmetry_label || metadata.point_group_label, metadata.point_group_generators, {
+            groupSymbol: true,
+          }),
         ]);
   }
   root.innerHTML = "";
 
   appendSummaryGrid(root, summaryItems, "primary");
 
-  if (sourceKind === "crystal" && experienceMode === "advanced") {
+    if (sourceKind === "crystal" && experienceMode === "advanced") {
     appendSummaryGrid(root, [
-      ["Cell", formatCellSettingLabel(state.cell_setting_mode || metadata.display_cell_setting || "native")],
+      ["Bravais lattice", bravaisLatticeLabel(metadata.symmetry_label)],
       ["Atoms", metadata.display_atom_count || atoms.length || "-"],
       ["Operations", metadata.operation_count || operations.length || "-"],
     ], "cell-setting");
@@ -746,12 +865,28 @@ function formatCellSettingLabel(value) {
   return "As loaded";
 }
 
+function bravaisLatticeLabel(symmetryLabel) {
+  const text = String(symmetryLabel || "").trim();
+  const symbol = text.replace(/^\d+\s+/, "");
+  const centering = (symbol.match(/^[PABCIFR]/) || ["P"])[0];
+  const systemName = crystalSystemFromSymmetryLabel(symmetryLabel);
+  const system = systemName.toLowerCase();
+  const centeringName = {
+    P: "Primitive", A: "Base-centered", B: "Base-centered", C: "Base-centered",
+    I: "Body-centered", F: "Face-centered", R: "Rhombohedral",
+  }[centering] || centering;
+  if (centering === "R") return "Rhombohedral";
+  return `${centeringName} ${system}`;
+}
+
 function symmetryLabelWithGenerators(label, generators, options = {}) {
   const base = options.spaceGroup
     ? formatSpaceGroupLabel(label)
     : options.pointGroup
       ? formatCrystalPointGroupLabel(label)
-      : formatSymbol(label || "-");
+      : options.groupSymbol
+        ? formatGroupSymbol(label || "-")
+        : formatSymbol(label || "-");
   const generatorSet = formatGeneratorSet(generators);
   return generatorSet ? `${base} ${generatorSet}` : base;
 }
@@ -759,21 +894,21 @@ function symmetryLabelWithGenerators(label, generators, options = {}) {
 function formatSpaceGroupLabel(label) {
   const text = String(label || "-");
   const match = text.match(/^([0-9]+)\\s+(.+)$/);
-  if (!match) return formatSymbol(text);
-  return `No. ${match[1]} ${formatSymbol(match[2])}`;
+  if (!match) return formatGroupSymbol(text);
+  return `No. ${match[1]} ${formatGroupSymbol(match[2])}`;
 }
 
 function formatCrystalPointGroupLabel(label) {
   const text = String(label || "-").trim();
   const schoenflies = CRYSTAL_POINT_GROUP_LABELS[text];
-  return schoenflies ? `${formatSymbol(schoenflies)}(${formatSymbol(text)})` : formatSymbol(text);
+  return schoenflies ? `${formatGroupSymbol(schoenflies)} (${formatGroupSymbol(text)})` : formatGroupSymbol(text);
 }
 
 function formatGeneratorSet(generators) {
   if (!Array.isArray(generators) || !generators.length) return "";
   const values = generators.filter((value) => value && value !== "identity only");
   if (!values.length) return "";
-  return `<${values.map((value) => formatSymbol(value)).join(", ")}>`;
+  return `&lang;${values.map((value) => formatSymbol(value)).join(", ")}&rang;`;
 }
 
 function appendSummaryGrid(root, items, extraClass = "") {
@@ -793,7 +928,7 @@ function summaryItem(label, value) {
   labelEl.textContent = label;
   const valueEl = document.createElement("div");
   valueEl.className = "summary-value";
-  valueEl.textContent = String(value);
+  valueEl.appendChild(renderHtml(String(value)));
   item.appendChild(labelEl);
   item.appendChild(valueEl);
   return item;
@@ -830,12 +965,15 @@ function syncImportControls() {
   for (const button of document.querySelectorAll(".structure-kind-button")) {
     button.disabled = importInProgress;
   }
+  document.getElementById("example-select-display").disabled = importInProgress;
 }
 
 function renderExampleOptions() {
   const select = document.getElementById("example-select");
+  const menu = document.getElementById("example-select-menu");
   const items = sortedExampleItems(exampleCatalog[selectedStructureKind] || [], selectedStructureKind);
   select.innerHTML = "";
+  menu.innerHTML = "";
   const placeholder = document.createElement("option");
   placeholder.value = "";
   placeholder.textContent = "Select example...";
@@ -846,10 +984,52 @@ function renderExampleOptions() {
     option.textContent = exampleOptionText(item);
     if (item.error) option.title = item.error;
     select.appendChild(option);
+    const menuItem = document.createElement("button");
+    menuItem.type = "button";
+    menuItem.className = "rich-select-option";
+    menuItem.dataset.value = item.path;
+    const prefix = document.createElement("span");
+    prefix.textContent = `${item.formula ? `${item.formula} ` : ""}${item.name}`;
+    menuItem.appendChild(prefix);
+    if (item.symmetry) {
+      menuItem.appendChild(document.createTextNode(" — "));
+      const symmetry = document.createElement("span");
+      symmetry.appendChild(renderHtml(formatGroupSymbol(item.symmetry)));
+      menuItem.appendChild(symmetry);
+    }
+    menuItem.addEventListener("click", () => {
+      select.value = item.path;
+      selectedExamplePath = item.path;
+      syncExamplePicker(items);
+      setRichSelectOpen("example-picker", false);
+    });
+    menu.appendChild(menuItem);
   }
   const hasSelectedExample = items.some(item => item.path === selectedExamplePath);
   select.value = hasSelectedExample ? selectedExamplePath : "";
+  syncExamplePicker(items);
   document.getElementById("open-example").disabled = importInProgress || items.length === 0;
+}
+
+function syncExamplePicker(items = sortedExampleItems(exampleCatalog[selectedStructureKind] || [], selectedStructureKind)) {
+  const select = document.getElementById("example-select");
+  const selected = items.find(item => item.path === select.value);
+  const trigger = document.getElementById("example-select-display");
+  trigger.replaceChildren();
+  if (!selected) {
+    trigger.textContent = "Select example...";
+  } else {
+    const prefix = document.createElement("span");
+    prefix.textContent = `${selected.formula ? `${selected.formula} ` : ""}${selected.name}`;
+    trigger.appendChild(prefix);
+    if (selected.symmetry) {
+      trigger.appendChild(document.createTextNode(" — "));
+      trigger.appendChild(renderHtml(formatGroupSymbol(selected.symmetry)));
+    }
+  }
+  for (const item of document.querySelectorAll("#example-select-menu .rich-select-option")) {
+    item.classList.toggle("selected", item.dataset.value === select.value);
+  }
 }
 
 function sortedExampleItems(items, kind) {
@@ -869,7 +1049,7 @@ function spaceGroupNumber(label) {
 
 function exampleOptionText(item) {
   const formula = item.formula ? `${item.formula} ` : "";
-  const symmetry = item.symmetry ? formatSymbol(item.symmetry) : "";
+  const symmetry = item.symmetry ? formatPlainOverbar(formatSymbol(item.symmetry)) : "";
   return symmetry ? `${formula}${item.name} — ${symmetry}` : `${formula}${item.name}`;
 }
 
@@ -979,6 +1159,60 @@ function fmtFrac(v) {
   return r.toFixed(4);
 }
 
+function appendOperationDetailLine(root, label, value, html = false) {
+  const row = document.createElement("div");
+  row.className = "operation-detail-line";
+  const key = document.createElement("span");
+  key.className = "operation-detail-label";
+  key.textContent = label;
+  const content = document.createElement("span");
+  content.className = "operation-detail-value";
+  if (html) content.appendChild(renderHtml(String(value)));
+  else content.textContent = String(value);
+  row.append(key, content);
+  root.appendChild(row);
+}
+
+function appendOperationMatrix(root, label, matrix, formatter) {
+  const block = document.createElement("div");
+  block.className = "operation-matrix-block";
+  const title = document.createElement("div");
+  title.className = "operation-detail-label";
+  title.textContent = label;
+  const body = document.createElement("div");
+  body.className = "operation-matrix";
+  for (const values of matrix) {
+    const row = document.createElement("div");
+    row.className = "operation-matrix-row";
+    for (const value of values) {
+      const cell = document.createElement("span");
+      cell.textContent = formatter(value).trim();
+      row.appendChild(cell);
+    }
+    body.appendChild(row);
+  }
+  block.append(title, body);
+  root.appendChild(block);
+}
+
+function appendTransformCard(root, label, matrix, translation, formatter, translationFormatter) {
+  const card = document.createElement("section");
+  card.className = "operation-transform-card";
+  const title = document.createElement("h3");
+  title.textContent = label;
+  card.appendChild(title);
+  appendOperationMatrix(card, "W", matrix, formatter);
+  appendOperationDetailLine(card, "t", translationFormatter(translation));
+  root.appendChild(card);
+}
+
+function appendOperationTitle(root, value) {
+  const title = document.createElement("div");
+  title.className = "operation-detail-title";
+  title.appendChild(renderHtml(value));
+  root.appendChild(title);
+}
+
 function renderOperationDetails() {
   const div = document.getElementById("op-details");
   if (activeMode === "custom") {
@@ -986,66 +1220,65 @@ function renderOperationDetails() {
     return;
   }
   const op = operations.find(o => o.index === state.operation_index);
-  if (!op) { div.textContent = ""; return; }
+  div.replaceChildren();
+  if (!op) return;
+  appendOperationTitle(div, optionText(op));
+  const transforms = document.createElement("div");
+  transforms.className = "operation-transform-grid";
+  div.appendChild(transforms);
   if (sourceKind === "molecule") {
     const Wc = op.matrix_cart;
     const tc = op.translation_cart;
-    let lines = [];
-    lines.push(`${stripHtml(optionText(op))}`);
-    lines.push(`point group: ${(state.metadata && state.metadata.symmetry_label) || ""}`);
-    if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
-    if (Wc) {
-      lines.push("W (cart):");
-      for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
-    }
-    if (tc && tc.some(v => Math.abs(v) > 1e-8)) {
-      lines.push(`t (cart): ${tc.map(v => v.toFixed(4)).join(",  ")} Å`);
-    }
-    div.textContent = lines.join("\\n");
+    if (Wc) appendTransformCard(
+      transforms, "Operation matrix", Wc, tc || [0, 0, 0], value => value.toFixed(4),
+      values => `(${values.map(value => value.toFixed(4)).join(",  ")}) Å`,
+    );
     return;
   }
   const W = op.matrix_frac;
   const t = op.translation_frac;
-  if (!W || !t) { div.textContent = ""; return; }
+  if (!W || !t) return;
 
-  let lines = [];
-  lines.push(`${stripHtml(optionText(op))}`);
-  if (operationLabelMode === "itc_like") {
-    lines.push("notation: ITC-like (computed from W, t)");
-    if (op.itc_coordinate_summary) lines.push(`ITC general position: ${op.itc_coordinate_summary}`);
-  }
-  if (isImproperOperation(op)) lines.push(`improper view: ${resolvedImproperMode()}`);
-  lines.push("W (frac):");
-  for (const row of W) lines.push(`  [${row.map(fmtMatVal).join("  ")}]`);
-  lines.push(`t (frac): ${t.map(fmtFrac).join(",  ")}`);
-
+  appendTransformCard(transforms, "Fractional (W | t)", W, t, fmtMatVal, values => `(${values.map(fmtFrac).join(",  ")})`);
   const Wc = op.matrix_cart;
   const tc = op.translation_cart;
   if (Wc && tc) {
-    lines.push("W (cart):  (Å scale)");
-    for (const row of Wc) lines.push(`  [${row.map(v => v.toFixed(4).padStart(9)).join("  ")}]`);
-    lines.push(`t (cart): ${tc.map(v => v.toFixed(4)).join(",  ")} Å`);
+    appendTransformCard(
+      transforms, "Cartesian (W | t)", Wc, tc, value => value.toFixed(4),
+      values => `(${values.map(value => value.toFixed(4)).join(",  ")}) Å`,
+    );
   }
-  div.textContent = lines.join("\\n");
 }
 
 function renderCustomOperationDetails() {
   const div = document.getElementById("op-details");
+  div.replaceChildren();
   if (!copMatrix) {
-    div.textContent = "Custom operation is not checked yet. Enter parameters and click Check symmetry.";
+    div.textContent = "Check the operation sequence to display its matrix.";
     return;
   }
   const result = copMatrix.result || {};
-  let lines = [];
-  lines.push(`custom ${copMatrix.op_type}`);
-  lines.push(result.is_symmetry ? "status: symmetry operation" : "status: not a symmetry operation");
+  appendOperationTitle(div, `Custom ${copMatrix.op_type}`);
+  const metadata = document.createElement("div");
+  metadata.className = "operation-detail-metadata";
+  appendOperationDetailLine(metadata, "Status", result.is_symmetry ? "Symmetry operation" : "Not a symmetry operation");
   if (result.total !== undefined) {
-    lines.push(`mapped: ${result.mapped_count}/${result.total}  unmapped: ${result.unmapped_count}`);
+    appendOperationDetailLine(metadata, "Atom mapping", `${result.mapped_count}/${result.total} mapped · ${result.unmapped_count} unmapped`);
   }
-  lines.push("W (frac):");
-  for (const row of copMatrix.W_frac) lines.push(`  [${row.map(fmtMatVal).join("  ")}]`);
-  lines.push(`t (frac): ${copMatrix.t_frac.map(fmtFrac).join(",  ")}`);
-  div.textContent = lines.join("\\n");
+  const transforms = document.createElement("div");
+  transforms.className = "operation-transform-grid";
+  appendTransformCard(
+    transforms, "Fractional", copMatrix.W_frac, copMatrix.t_frac, fmtMatVal,
+    values => `(${values.map(fmtFrac).join(",  ")})`,
+  );
+  if (result.matrix_cart && result.translation_cart) {
+    appendTransformCard(
+      transforms, "Cartesian", result.matrix_cart, result.translation_cart,
+      value => Number(value).toFixed(4),
+      values => `(${values.map(value => Number(value).toFixed(4)).join(",  ")}) Å`,
+    );
+  }
+  div.append(metadata, transforms);
 }
 
 function renderAtomElementFilter() {
@@ -1129,6 +1362,8 @@ function renderAtoms() {
     checkbox.className = "animation-toggle";
     checkbox.value = atom.index;
     checkbox.checked = selected.has(atom.index);
+    checkbox.title = `Animate atom ${atom.index}`;
+    checkbox.setAttribute("aria-label", `Animate atom ${atom.index}`);
     checkbox.addEventListener("change", onAtomSelectionChange);
     const colorInput = document.createElement("input");
     colorInput.type = "color";
@@ -1141,10 +1376,7 @@ function renderAtoms() {
     });
     const visible = atomVisible(atom);
     const visibleButton = visibilityButton(visible, `${visible ? "Hide" : "Show"} atom ${atom.index}`, () => {
-      const next = Object.assign({}, state.atom_hidden || {});
-      if (visible) next[String(atom.index)] = true;
-      else delete next[String(atom.index)];
-      postState({atom_hidden: next, playing: false, reset: true});
+      postState(atomVisibilityUpdate(atom, visible));
     });
     const atomLabel = document.createElement("span");
     atomLabel.className = "atom-label";
@@ -1174,9 +1406,9 @@ function renderAtoms() {
       motionSpan.appendChild(targetSpan);
     }
     label.appendChild(checkbox);
-    label.appendChild(colorInput);
-    label.appendChild(visibleButton);
     label.appendChild(atomLabel);
+    label.appendChild(visibleButton);
+    label.appendChild(colorInput);
     label.appendChild(motionSpan);
     root.appendChild(label);
   }
@@ -1224,6 +1456,12 @@ function renderSelectedAtomSummary() {
     });
     selectors.appendChild(button);
   }
+  const resetAppearance = document.createElement("button");
+  resetAppearance.type = "button";
+  resetAppearance.className = "atom-element-selector reset-appearance-button";
+  resetAppearance.textContent = "Reset appearance";
+  resetAppearance.addEventListener("click", resetAtomAppearance);
+  selectors.appendChild(resetAppearance);
   root.appendChild(selectors);
   if (!selected.size) return;
   const details = document.createElement("details");
@@ -1247,15 +1485,35 @@ function renderSelectedAtomSummary() {
       : " Å";
     const card = document.createElement("div");
     card.className = "selected-atom-card";
+    const header = document.createElement("div");
+    header.className = "selected-atom-card-header";
     const name = document.createElement("div");
     name.className = "selected-atom-name";
     name.textContent = `${atomDisplayLabel(atom)}（atom ${atom.index}）`;
+    const controls = document.createElement("div");
+    controls.className = "selected-atom-controls";
+    const visible = atomVisible(atom);
+    const visibleButton = visibilityButton(visible, `${visible ? "Hide" : "Show"} atom ${atom.index}`, () => {
+      postState(atomVisibilityUpdate(atom, visible));
+    });
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = atomEffectiveColor(atom);
+    colorInput.title = `Color for atom ${atom.index}`;
+    colorInput.setAttribute("aria-label", `Color for atom ${atom.index}`);
+    colorInput.addEventListener("change", () => {
+      const next = Object.assign({}, state.atom_colors || {});
+      next[String(atom.index)] = colorInput.value;
+      postState({atom_colors: next});
+    });
+    controls.append(visibleButton, colorInput);
+    header.append(name, controls);
     const coordinates = document.createElement("div");
     coordinates.className = "selected-atom-coordinates";
     coordinates.textContent = Array.isArray(start) && Array.isArray(target)
       ? `${formatVector(start, formatter)} → ${formatVector(target, formatter)}${unit}`
       : "座標情報を取得できません";
-    card.appendChild(name);
+    card.appendChild(header);
     card.appendChild(coordinates);
     cards.appendChild(card);
   }
@@ -1291,9 +1549,12 @@ function atomListRenderSignature() {
 
 function syncSpeedButtons() {
   const speed = Number(state.speed || 1.0);
-  for (const button of document.querySelectorAll(".speed-button")) {
-    button.classList.toggle("selected", Number(button.dataset.speed) === speed);
-  }
+  const slider = document.getElementById("animation-speed");
+  const output = document.getElementById("animation-speed-value");
+  if (document.activeElement !== slider) slider.value = String(speed);
+  output.value = `${speed.toFixed(2)}×`;
+  output.textContent = output.value;
+  document.getElementById("pause-at-breakpoints").checked = Boolean(state.pause_at_breakpoints);
 }
 
 function syncBoundaryButtons() {
@@ -1404,8 +1665,10 @@ function syncAtomModeButtons() {
 
 function syncPlayToggleButton() {
   const button = document.getElementById("play-toggle");
-  button.textContent = state.playing ? "Stop" : "Start";
-  button.classList.toggle("secondary", Boolean(state.playing));
+  const boundaryPaused = atPausedAnimationBoundary();
+  button.textContent = boundaryPaused ? "Next" : state.playing ? "Stop" : "Start";
+  button.classList.toggle("secondary", Boolean(state.playing) || boundaryPaused);
+  button.disabled = false;
 }
 
 function setMovementProgress(progress) {
@@ -1419,6 +1682,7 @@ function setMovementProgress(progress) {
   if (output) output.textContent = `${Math.round(value * 100)}%`;
   if (previous) previous.disabled = isGifSaving() || value <= 0;
   if (next) next.disabled = isGifSaving() || value >= 1;
+  syncPlayToggleButton();
 }
 
 function setMovementBreakpoints(values) {
@@ -1477,6 +1741,34 @@ function syncGifSavingControls() {
   setMovementProgress(movementProgressValue);
   if (save3) save3.textContent = saving ? "Saving..." : "Save 3-view GIFs";
   if (save3current) save3current.textContent = saving ? "Saving..." : "Save 3-view GIFs (current view)";
+  document.getElementById("pyvista-export-controls").hidden = !state.pyvista_enabled;
+}
+
+function downloadJson(filename, value) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], {type: "application/json"});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportDebugJson() {
+  const operationIndex = Number(state.operation_index);
+  const [stateData, renderData, animationPath, symmetryElements] = await Promise.all([
+    api("/api/state"),
+    api("/api/render_data"),
+    api(`/api/animation_path?operation_index=${operationIndex}`),
+    api(`/api/symmetry_elements?operation_index=${operationIndex}`),
+  ]);
+  downloadJson(`symmetry-debug-op${operationIndex}.json`, {
+    exported_at: new Date().toISOString(),
+    state: stateData,
+    render: renderData,
+    animation: animationPath,
+    symmetry_elements: symmetryElements,
+  });
 }
 
 function selectedAtomIndices() {
@@ -1579,7 +1871,6 @@ function syncSourceKindControls() {
   document.getElementById("import-cif").hidden = selectedStructureKind !== "crystal";
   document.getElementById("import-molecule").hidden = selectedStructureKind !== "molecule";
   renderExampleOptions();
-  document.getElementById("mode-controls").hidden = !loadedForSelected || sourceKind !== "crystal";
   document.getElementById("display-block").hidden = !loadedForSelected || sourceKind !== "crystal";
   document.getElementById("view-direction-index-block").hidden = !loadedForSelected || sourceKind !== "crystal";
   document.getElementById("view-plane-index-block").hidden = !loadedForSelected || sourceKind !== "crystal";
@@ -1873,10 +2164,25 @@ async function applyLoadedStructure(result, fallbackError, examplePath = "", con
 }
 
 function syncActiveModeControls() {
-  document.getElementById("standard-panel").hidden = activeMode !== "standard";
-  document.getElementById("custom-panel").hidden = activeMode !== "custom";
-  for (const button of document.querySelectorAll(".mode-button")) {
-    button.classList.toggle("selected", button.dataset.mode === activeMode);
+  const customAvailable = experienceMode === "advanced"
+    && sourceKind === "crystal"
+    && structureLoadedForSelectedKind();
+  if (!customAvailable && activeMode === "custom") activeMode = "standard";
+  const standard = activeMode !== "custom";
+  document.getElementById("standard-panel").hidden = !standard;
+  const customPanel = document.getElementById("custom-panel");
+  customPanel.hidden = standard || !customAvailable;
+  const modeControls = document.getElementById("mode-controls");
+  modeControls.hidden = !customAvailable;
+  for (const button of modeControls.querySelectorAll(".mode-button")) {
+    const selected = button.dataset.mode === activeMode;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-selected", String(selected));
+  }
+  const recordWebm = document.getElementById("record-webm");
+  if (recordWebm) {
+    recordWebm.disabled = false;
+    recordWebm.title = "";
   }
 }
 
@@ -1893,8 +2199,7 @@ function syncExperienceModeControls() {
   document.getElementById("operations-label").textContent = "Operation list";
   document.getElementById("structure-info-title").textContent = "Structure Info";
   document.getElementById("animation-title").textContent = "Animation";
-  document.getElementById("view-title").textContent = "View";
-  document.getElementById("camera-angle-label").textContent = "Rotate current view";
+  document.getElementById("view-title").textContent = "Camera";
   document.getElementById("projection-label").textContent = "Projection";
   document.getElementById("cell-title").textContent = "Cell";
   document.getElementById("range-label").textContent = "Range";
@@ -1903,10 +2208,18 @@ function syncExperienceModeControls() {
 
 function setExperienceMode(mode) {
   experienceMode = mode === "advanced" ? "advanced" : "beginner";
-  if (experienceMode === "beginner") directionFilterValue = "";
-  if (experienceMode === "beginner" && activeMode !== "standard") {
-    activeMode = "standard";
-    postState({active_mode: "standard", playing: false, reset: true, clear_custom_check: true});
+  if (experienceMode === "beginner") {
+    directionFilterValue = "";
+    const update = {};
+    if (activeMode !== "standard") {
+      activeMode = "standard";
+      Object.assign(update, {active_mode: "standard", playing: false, reset: true, clear_custom_check: true});
+    }
+    if (state.pause_at_breakpoints) {
+      state.pause_at_breakpoints = false;
+      update.pause_at_breakpoints = false;
+    }
+    if (Object.keys(update).length) postState(update);
   }
   syncActiveModeControls();
   syncExperienceModeControls();
@@ -1916,20 +2229,23 @@ function setExperienceMode(mode) {
   renderOperationDetails();
 }
 
-function setActiveMode(mode) {
+async function setActiveMode(mode) {
   activeMode = mode === "custom" ? "custom" : "standard";
   syncActiveModeControls();
   if (activeMode === "standard") {
     customUnmappedAtoms = new Set();
-    copMatrix = null;
     renderAtoms();
-    postState({active_mode: "standard", playing: false, reset: true, clear_custom_check: true});
+    await postState({active_mode: "standard", playing: false, reset: true, clear_custom_check: true});
   } else {
     renderCustomSequenceControls();
-    postState({active_mode: "custom", playing: false});
+    await postState({active_mode: "custom", playing: false});
   }
   renderStatus();
   renderOperationDetails();
+}
+
+for (const button of document.querySelectorAll(".mode-button")) {
+  button.addEventListener("click", () => setActiveMode(button.dataset.mode));
 }
 
 async function refreshState() {
@@ -2008,9 +2324,6 @@ document.getElementById("open-example").addEventListener("click", () => {
     showLoadError("Example load failed", error, {name: select && select.value, kind: selectedStructureKind});
   });
 });
-for (const button of document.querySelectorAll(".mode-button")) {
-  button.addEventListener("click", () => setActiveMode(button.dataset.mode));
-}
 for (const button of document.querySelectorAll(".experience-button")) {
   button.addEventListener("click", () => setExperienceMode(button.dataset.experience));
 }
@@ -2022,7 +2335,13 @@ function startAnimation() {
   postState({playing: true});
 }
 
-document.getElementById("play-toggle").addEventListener("click", () => {
+let pausePreferenceUpdate = Promise.resolve();
+document.getElementById("play-toggle").addEventListener("click", async () => {
+  await pausePreferenceUpdate;
+  if (atPausedAnimationBoundary()) {
+    postState({playing: true});
+    return;
+  }
   if (state.playing) {
     postState({playing: false});
   } else {
@@ -2031,6 +2350,13 @@ document.getElementById("play-toggle").addEventListener("click", () => {
 });
 document.getElementById("reset").addEventListener("click", () => postState({playing: false, reset: true}));
 document.getElementById("previous-frame").addEventListener("click", () => stepMovementProgress(-1));
+function atPausedAnimationBoundary() {
+  if (!state.pause_at_breakpoints || state.playing || movementProgressValue >= 1 - 1e-9) return false;
+  return movementBreakpoints.some(value => (
+    value > 1e-9 && value < 1 - 1e-9 && Math.abs(value - movementProgressValue) <= 0.0015
+  ));
+}
+
 document.getElementById("next-frame").addEventListener("click", () => stepMovementProgress(1));
 document.addEventListener("keydown", event => {
   if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -2065,9 +2391,34 @@ window.addEventListener("symmetry-animation-progress-update", event => {
 window.addEventListener("symmetry-animation-breakpoints", event => {
   setMovementBreakpoints(event.detail?.breakpoints);
 });
-for (const button of document.querySelectorAll(".speed-button")) {
-  button.addEventListener("click", () => postState({speed: Number(button.dataset.speed)}));
-}
+window.addEventListener("symmetry-animation-breakpoint-pause", event => {
+  setMovementProgress(event.detail?.progress || 0);
+  postState({playing: false});
+});
+const animationSpeed = document.getElementById("animation-speed");
+let speedUpdateTimer = null;
+animationSpeed.addEventListener("input", () => {
+  const speed = Number(animationSpeed.value);
+  const output = document.getElementById("animation-speed-value");
+  output.value = `${speed.toFixed(2)}×`;
+  output.textContent = output.value;
+  clearTimeout(speedUpdateTimer);
+  speedUpdateTimer = setTimeout(() => postState({speed}), 100);
+});
+animationSpeed.addEventListener("change", () => {
+  clearTimeout(speedUpdateTimer);
+  postState({speed: Number(animationSpeed.value)});
+});
+document.getElementById("pause-at-breakpoints").addEventListener("change", event => {
+  const enabled = event.target.checked;
+  state.pause_at_breakpoints = enabled;
+  syncPlayToggleButton();
+  pausePreferenceUpdate = postState({pause_at_breakpoints: enabled}).catch(error => {
+    state.pause_at_breakpoints = !enabled;
+    syncSpeedButtons();
+    showLoadError("Animation setting failed", error);
+  });
+});
 for (const button of document.querySelectorAll(".boundary-button")) {
   button.addEventListener("click", () => postState({
     animation_boundary_mode: button.dataset.boundaryMode,
@@ -2147,6 +2498,15 @@ document.getElementById("save-gif").addEventListener("click", () => {
   }
   postState({gif_request_id: Date.now(), playing: false});
 });
+document.getElementById("save-png").addEventListener("click", () => {
+  window.dispatchEvent(new CustomEvent("symmetry-save-png"));
+});
+document.getElementById("record-webm").addEventListener("click", () => {
+  window.dispatchEvent(new CustomEvent("symmetry-record-webm"));
+});
+document.getElementById("export-debug-json").addEventListener("click", () => {
+  exportDebugJson().catch(error => showLoadError("Debug export failed", error));
+});
 document.getElementById("save-gif-3view").addEventListener("click", () => {
   state.gif_status = "writing 3-view GIFs...";
   syncGifSavingControls();
@@ -2196,6 +2556,7 @@ document.getElementById("unit-cell-atoms").addEventListener("click", () => {
 document.getElementById("clear-atoms").addEventListener("click", () => {
   postState({selected_atoms: [], scope: "displayed", playing: false, reset: true});
 });
+document.getElementById("reset-atom-appearance").addEventListener("click", resetAtomAppearance);
 
 // --- Custom Operation Check ---
 
@@ -2319,7 +2680,7 @@ function displayCopResult(result, opType, opParams) {
   if (!ok && result.unmapped && result.unmapped.length > 0) {
     copAllUnmapped = result.unmapped.map(u => u.source);
     customUnmappedAtoms = new Set(copAllUnmapped);
-    html += `<div style="margin:8px 0 4px;font-size:12px;color:#94a3b8">Unmapped atoms are highlighted in PyVista. Use the shared Atoms and Animation panels to animate this custom operation.</div>`;
+    html += `<div style="margin:8px 0 4px;font-size:12px;color:#94a3b8">Unmapped atoms are listed below. Use the shared Atoms and Animation panels to animate this custom operation.</div>`;
     html += `<div class="unmapped-list" id="cop-unmapped-list">`;
     for (const u of result.unmapped) {
       const frac = u.frac ? u.frac.map(v => v.toFixed(3)).join(", ") : "—";
@@ -2331,14 +2692,8 @@ function displayCopResult(result, opType, opParams) {
     copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac, op_type: opType || "matrix", op_params: opParams || {}, result};
     if (opType === "sequence") setCopMatrixInputs(result.W_frac, result.t_frac);
     if (Number.isInteger(result.matching_operation_index)) {
-      const matched = operations.find(operation => operation.index === result.matching_operation_index);
-      const label = matched ? stripHtml(optionText(matched)) : `op ${result.matching_operation_index}`;
-      html += `<p class="hint">Matches existing ${label}.</p>`;
       html += `<div class="button-row flush"><button id="btn-select-composed-match" class="secondary" data-index="${result.matching_operation_index}">Select match</button></div>`;
-    } else if (Array.isArray(result.operation_indices) || Array.isArray(result.sequence_items)) {
-      html += `<p class="hint">No existing operation has the same normalized (W|t).</p>`;
     }
-    html += `<p id="cop-anim-msg" class="hint">Use Start with the current Atoms mode: Clear, selected atoms, Unit cell only, or Displayed all.</p>`;
   }
   div.innerHTML = html;
   const selectMatch = document.getElementById("btn-select-composed-match");
@@ -2346,8 +2701,16 @@ function displayCopResult(result, opType, opParams) {
     selectMatch.addEventListener("click", () => {
       const index = Number(selectMatch.dataset.index);
       if (Number.isInteger(index)) {
-        setActiveMode("standard");
-        postState({operation_index: index, playing: false, reset: true});
+        activeMode = "standard";
+        customUnmappedAtoms = new Set();
+        syncActiveModeControls();
+        postState({
+          active_mode: "standard",
+          operation_index: index,
+          playing: false,
+          reset: true,
+          clear_custom_check: true,
+        });
       }
     });
   }
@@ -2370,18 +2733,20 @@ function currentAnimationUnitCellOnly() {
 }
 
 function sendCurrentCustomAnimation(startPlaying = true) {
-  const msg = document.getElementById("cop-anim-msg");
+  const result = document.getElementById("cop-result");
   if (!copMatrix) {
-    if (msg) msg.textContent = "Check the custom operation first.";
-    else document.getElementById("status").textContent = "Check the custom operation first.";
+    result.className = "cop-result fail";
+    result.textContent = "Check the operation sequence first.";
+    result.hidden = false;
     return;
   }
   const indices = currentAnimationAtoms();
   if (!indices.length) {
-    if (msg) msg.textContent = "No atoms selected.";
+    result.className = "cop-result fail";
+    result.textContent = "No atoms selected.";
+    result.hidden = false;
     return;
   }
-  if (msg) msg.textContent = "";
   sendCopAnimate(indices, currentAnimationUnitCellOnly(), startPlaying);
 }
 
@@ -2403,31 +2768,6 @@ async function sendCopAnimate(atomIndices, unitCellOnly = false, startPlaying = 
     playing: Boolean(startPlaying),
   };
   await postState(body);
-}
-
-async function sendCopCheck() {
-  const payload = buildCopPayload();
-  const resultDiv = document.getElementById("cop-result");
-  resultDiv.className = "cop-result";
-  resultDiv.innerHTML = "Checking…";
-  resultDiv.hidden = false;
-  try {
-    const result = await api("/api/check_operation", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(payload),
-    });
-    displayCopResult(result, payload.type, payload.params);
-    // notify PyVista to highlight unmapped atoms
-    state = await api("/api/state", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({custom_op_check_id: payload.request_id}),
-    });
-  } catch (err) {
-    resultDiv.className = "cop-result fail";
-    resultDiv.innerHTML = `<strong>Error:</strong> ${err}`;
-  }
 }
 
 function customSequencePayloadItems() {
@@ -2464,6 +2804,7 @@ async function sendCustomSequenceCompose() {
   resultDiv.innerHTML = "Composing…";
   resultDiv.hidden = false;
   try {
+    if (activeMode !== "custom") await setActiveMode("custom");
     const result = await api("/api/compose_operations", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -2483,7 +2824,13 @@ async function sendCustomSequenceCompose() {
   }
 }
 
-document.getElementById("btn-check-op").addEventListener("click", sendCopCheck);
+function loadSelectedExistingOperation() {
+  const index = Number(document.getElementById("cop-operation-select").value);
+  const operation = operations.find(item => Number(item.index) === index);
+  if (!operation || !Array.isArray(operation.matrix_frac) || !Array.isArray(operation.translation_frac)) return;
+  setCopMatrixInputs(operation.matrix_frac, operation.translation_frac);
+}
+document.getElementById("cop-operation-select").addEventListener("change", loadSelectedExistingOperation);
 document.getElementById("btn-add-existing-op").addEventListener("click", () => {
   const select = document.getElementById("cop-operation-select");
   const index = Number(select.value);
@@ -2493,28 +2840,35 @@ document.getElementById("btn-add-existing-op").addEventListener("click", () => {
     renderCustomSequenceControls();
   }
 });
-document.getElementById("btn-add-checked-custom").addEventListener("click", () => {
-  addCurrentCustomOperationToSequence();
+document.getElementById("btn-add-custom-operation").addEventListener("click", async () => {
+  await addCurrentCustomOperationToSequence();
 });
 
-function addCurrentCustomOperationToSequence() {
+async function addCurrentCustomOperationToSequence() {
   const resultDiv = document.getElementById("cop-result");
-  if (!copMatrix) {
+  const payload = buildCopPayload();
+  try {
+    const result = await api("/api/check_operation", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({...payload, build_only: true}),
+    });
+    if (result.error || !result.W_frac || !result.t_frac) throw new Error(result.error || "Could not build operation");
+    customOperationSequence.push({
+      type: "custom",
+      label: `custom ${payload.type}`,
+      W_frac: result.W_frac,
+      t_frac: result.t_frac,
+      op_type: payload.type,
+      op_params: payload.params,
+    });
+    hideCustomSequenceResult();
+    renderCustomSequenceControls();
+  } catch (err) {
     resultDiv.className = "cop-result fail";
-    resultDiv.innerHTML = "<strong>Error:</strong> Check a custom operation first.";
+    resultDiv.innerHTML = `<strong>Error:</strong> ${err}`;
     resultDiv.hidden = false;
-    return;
   }
-  customOperationSequence.push({
-    type: "custom",
-    label: `custom ${copMatrix.op_type}`,
-    W_frac: copMatrix.W_frac,
-    t_frac: copMatrix.t_frac,
-    op_type: copMatrix.op_type,
-    op_params: copMatrix.op_params,
-  });
-  hideCustomSequenceResult();
-  renderCustomSequenceControls();
 }
 document.getElementById("btn-compose-custom-sequence").addEventListener("click", sendCustomSequenceCompose);
 document.getElementById("btn-clear-custom-sequence").addEventListener("click", () => {
@@ -2522,21 +2876,6 @@ document.getElementById("btn-clear-custom-sequence").addEventListener("click", (
   hideCustomSequenceResult();
   renderCustomSequenceControls();
 });
-document.getElementById("btn-clear-check").addEventListener("click", async () => {
-  document.getElementById("cop-result").hidden = true;
-  copMatrix = null;
-  copSelectedAtoms = new Set();
-  copAllUnmapped = [];
-  customUnmappedAtoms = new Set();
-  state = await api("/api/state", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({clear_custom_check: true}),
-  });
-  renderAtoms();
-  renderOperationDetails();
-});
-
 async function boot() {
   const st = document.getElementById("status");
   syncExperienceModeControls();

@@ -131,6 +131,15 @@ function pathLength(path, startOverride = null) {
   return Math.sqrt(dot(delta, delta));
 }
 
+function sequentialWeights(path, lengths) {
+  const supplied = path.segment_weights;
+  if (Array.isArray(supplied) && supplied.length === lengths.length
+      && supplied.every(value => Number.isFinite(Number(value)) && Number(value) >= 0)) {
+    return supplied.map(Number);
+  }
+  return lengths;
+}
+
 function phaseFraction(firstLength, secondLength) {
   const total = firstLength + secondLength;
   return total > EPSILON ? firstLength / total : 0.5;
@@ -147,10 +156,11 @@ export function pathBreakpoints(path, startOverride = null) {
       lengths.push(pathLength(segment, segmentStart));
       segmentStart = evaluatePath(segment, 1, segmentStart);
     }
-    const total = lengths.reduce((sum, length) => sum + length, 0);
+    const weights = sequentialWeights(path, lengths);
+    const total = weights.reduce((sum, length) => sum + length, 0);
     let cumulative = 0;
     for (let index = 0; index < path.segments.length; index += 1) {
-      const scale = total > EPSILON ? lengths[index] / total : 1 / lengths.length;
+      const scale = total > EPSILON ? weights[index] / total : 1 / weights.length;
       for (const local of pathBreakpoints(path.segments[index], starts[index])) {
         result.add(cumulative + scale * local);
       }
@@ -167,6 +177,31 @@ export function pathBreakpoints(path, startOverride = null) {
     result.add(Math.max(0, Math.min(Number(path.hold_fraction) || 0.3, 1)));
   }
   return [...result].sort((a, b) => a - b);
+}
+
+export function sequentialSegmentIndex(path, progress, startOverride = null) {
+  if (path.type !== "sequential" || !path.segments?.length) return null;
+  const s = Math.min(1, Math.max(0, Number(progress)));
+  const boundaries = sequentialSegmentBoundaries(path, startOverride);
+  return boundaries.findIndex(boundary => s <= boundary + EPSILON);
+}
+
+export function sequentialSegmentBoundaries(path, startOverride = null) {
+  if (path.type !== "sequential" || !path.segments?.length) return [];
+  let segmentStart = startOverride === null ? [...path.segments[0].start] : [...startOverride];
+  const lengths = [];
+  for (const segment of path.segments) {
+    lengths.push(pathLength(segment, segmentStart));
+    segmentStart = evaluatePath(segment, 1, segmentStart);
+  }
+  const weights = sequentialWeights(path, lengths);
+  const total = weights.reduce((sum, length) => sum + length, 0);
+  if (total <= EPSILON) return weights.map((_, index) => (index + 1) / weights.length);
+  let cumulative = 0;
+  return weights.map(weight => {
+    cumulative += weight / total;
+    return cumulative;
+  });
 }
 
 export function evaluatePath(path, progress, startOverride = null) {
@@ -186,7 +221,8 @@ export function evaluatePath(path, progress, startOverride = null) {
       lengths.push(pathLength(segment, segmentStart));
       segmentStart = evaluatePath(segment, 1, segmentStart);
     }
-    const total = lengths.reduce((sum, length) => sum + length, 0);
+    const weights = sequentialWeights(path, lengths);
+    const total = weights.reduce((sum, length) => sum + length, 0);
     let index;
     let localS;
     if (total <= EPSILON) {
@@ -198,7 +234,7 @@ export function evaluatePath(path, progress, startOverride = null) {
       index = segments.length - 1;
       localS = 1;
       for (let candidate = 0; candidate < segments.length; candidate += 1) {
-        const length = lengths[candidate];
+        const length = weights[candidate];
         if (distance <= cumulative + length || candidate === segments.length - 1) {
           index = candidate;
           localS = length <= EPSILON ? 1 : (distance - cumulative) / length;

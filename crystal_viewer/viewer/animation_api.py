@@ -7,6 +7,7 @@ import numpy as np
 from crystal_viewer.json_export import to_jsonable
 from crystal_viewer.source_kinds import SOURCE_KIND_MOLECULE, normalize_source_kind
 from crystal_viewer.viewer.animation_context import animation_paths, display_equivalent_operation_context
+from crystal_viewer.viewer.custom_animation import build_custom_animation_paths
 from crystal_viewer.viewer.animation_path import animation_path_length, normalized_animation_duration_seconds
 from crystal_viewer.viewer.display_atoms import display_atom_instances, display_scene_span
 from crystal_viewer.viewer.operation_lookup import operation_by_index, selected_mapping
@@ -133,6 +134,48 @@ def serialize_animation_path(path: dict) -> dict[str, Any]:
         else:
             result[key] = to_jsonable(value)
     return result
+
+
+def custom_animation_path_response(
+    render_data: dict,
+    atom_mappings: dict | None,
+    request: dict,
+    *,
+    improper_mode: str = "auto",
+    display_mode: str = "source",
+    cell_origin_mode: str = "center",
+    include_boundary_images: bool = False,
+    animation_boundary_mode: str = "continuous",
+) -> dict[str, Any]:
+    paths = build_custom_animation_paths(
+        render_data, atom_mappings, request, improper_mode=improper_mode,
+        display_mode=display_mode, cell_origin_mode=cell_origin_mode,
+    )
+    items = [{"source_atom": source, "path": serialize_animation_path(path)} for source, path in sorted(paths.items())]
+    maximum = 0.0
+    for instance in display_atom_instances(
+        render_data, display_mode=display_mode, cell_origin_mode=cell_origin_mode,
+        include_boundary_images=include_boundary_images,
+    ):
+        path = paths.get(int(instance["atom"]["index"]))
+        if path is None or (path.get("unit_cell_only") and not instance["is_primary_image"]):
+            continue
+        maximum = max(maximum, animation_path_length(path, start_override=instance["cart"]))
+    return {
+        "schema_version": ANIMATION_PATH_SCHEMA_VERSION,
+        "coordinate_space": ANIMATION_COORDINATE_SPACE,
+        "animate_id": request.get("animate_id"),
+        "maximum_travel_distance": maximum,
+        "animation_duration_seconds": normalized_animation_duration_seconds(
+            maximum, display_scene_span(render_data, display_mode, cell_origin_mode)
+        ),
+        "boundary": animation_boundary_context(
+            render_data,
+            animation_boundary_mode=animation_boundary_mode,
+            cell_origin_mode=cell_origin_mode,
+        ),
+        "paths": items,
+    }
 
 
 def animation_boundary_context(
