@@ -159,6 +159,7 @@ class StaticStructureView {
 
   setData(payload) {
     this.clearContent();
+    this.isMolecule = payload.source_kind === "molecule";
     const renderData = payload.render_data || {};
     const atoms = payload.display_atoms || renderData.atoms || [];
     const styles = new Map((payload.atom_styles || []).map(style => [Number(style.index), style]));
@@ -189,6 +190,9 @@ class StaticStructureView {
       if (!groups.has(key)) groups.set(key, {style, radius, atoms: []});
       groups.get(key).atoms.push(atom);
     }
+    this.maxAtomRadius = groups.size
+      ? Math.max(...[...groups.values()].map(group => group.radius))
+      : 0.35;
 
     const geometry = new THREE.SphereGeometry(1, 28, 18);
     const matrix = new THREE.Matrix4();
@@ -764,8 +768,12 @@ class StaticStructureView {
   addAxis(axis, span) {
     const point = new THREE.Vector3(...axis.point_cart);
     const direction = new THREE.Vector3(...axis.direction_cart).normalize();
-    const length = span * 1.45;
-    const geometry = new THREE.CylinderGeometry(span * 0.009, span * 0.009, length, 16);
+    // Molecules are small and their atoms sit on/near the axis, so a span-based
+    // thread is invisible: give it an atom-relative radius and extend it well
+    // past the atom cloud. Crystals keep their original slender axis.
+    const radius = this.isMolecule ? Math.max(this.maxAtomRadius * 0.18, span * 0.012) : span * 0.009;
+    const length = this.isMolecule ? Math.max(span * 1.8, span + 4 * this.maxAtomRadius) : span * 1.45;
+    const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
     const material = new THREE.MeshBasicMaterial({color: 0x38bdf8, transparent: true, opacity: 0.92});
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(point);
@@ -776,8 +784,9 @@ class StaticStructureView {
 
   addPlane(plane, span) {
     const point = new THREE.Vector3(...plane.point_cart);
-    const basis1 = new THREE.Vector3(...plane.basis1_cart).normalize().multiplyScalar(span * 0.52);
-    const basis2 = new THREE.Vector3(...plane.basis2_cart).normalize().multiplyScalar(span * 0.52);
+    const halfWidth = this.isMolecule ? span * 0.65 : span * 0.52;
+    const basis1 = new THREE.Vector3(...plane.basis1_cart).normalize().multiplyScalar(halfWidth);
+    const basis2 = new THREE.Vector3(...plane.basis2_cart).normalize().multiplyScalar(halfWidth);
     const corners = [
       point.clone().sub(basis1).sub(basis2),
       point.clone().add(basis1).sub(basis2),
@@ -810,7 +819,9 @@ class StaticStructureView {
   }
 
   addCenter(center, span) {
-    const size = Math.max(span * 0.09, 0.18);
+    const size = this.isMolecule
+      ? Math.max(this.maxAtomRadius * 1.1, span * 0.09)
+      : Math.max(span * 0.09, 0.18);
     const boxGeometry = new THREE.BoxGeometry(size, size, size);
     const geometry = new THREE.EdgesGeometry(boxGeometry);
     boxGeometry.dispose();
@@ -1060,6 +1071,15 @@ class StaticStructureView {
       this.playing = false;
       this.animationStartedAt = null;
       this.setStatus(`${this.baseStatus}, animation complete`);
+      // Without the legacy PyVista window there is nothing server-side to
+      // clear the playing flag on completion, so the Start/Stop button would
+      // stay on "Stop". Tell the server ourselves (PyVista handles its own).
+      if (this.serverPlaying && !this.state.pyvista_enabled) {
+        this.serverPlaying = false;
+        if (typeof window.symmetryPostState === "function") {
+          window.symmetryPostState({playing: false}).catch(() => {});
+        }
+      }
     }
     return true;
   }
