@@ -11,9 +11,49 @@ let renderData = null;
 let sceneSpan = 4;
 let questions = [];
 let currentQuestion = null;
+let lastCorrectOrders = [];
+let revealing = false;
 
 function el(id) {
   return document.getElementById(id);
+}
+
+function formatFormula(text) {
+  // Render a chemical formula with subscripted digit runs (C6H6 -> C₆H₆).
+  return String(text).replace(/(\d+)/g, "<sub>$1</sub>");
+}
+
+// The catalog stores reduced formulae (benzene -> "HC"), which are wrong as
+// molecular formulae. For the curated example molecules keep proper, familiar
+// formulae; anything else falls back to the catalog value or the name.
+const MOLECULAR_FORMULA = {
+  water: "H2O",
+  ammonia: "NH3",
+  benzene: "C6H6",
+  methane: "CH4",
+  carbon_dioxide: "CO2",
+  boron_trifluoride: "BF3",
+  sulfur_hexafluoride: "SF6",
+  xenon_tetrafluoride: "XeF4",
+  allene: "C3H4",
+  ethene: "C2H4",
+  hydrogen_chloride: "HCl",
+};
+
+function displayFormula(example) {
+  return formatFormula(MOLECULAR_FORMULA[example.name] || example.formula || example.name);
+}
+
+function showHome() {
+  el("puzzle-picker").hidden = false;
+  el("puzzle-play").hidden = true;
+  el("puzzle-back").hidden = false; // return-to-selection lives on the home screen only
+}
+
+function showPlay() {
+  el("puzzle-picker").hidden = true;
+  el("puzzle-play").hidden = false;
+  el("puzzle-back").hidden = true;
 }
 
 async function getJson(url, options) {
@@ -51,7 +91,7 @@ async function buildPicker() {
     button.type = "button";
     button.className = "puzzle-structure";
     button.innerHTML =
-      `<span class="puzzle-structure-name">${example.name}</span>` +
+      `<span class="puzzle-structure-name">${displayFormula(example)}</span>` +
       `<span class="puzzle-structure-meta">${example.point_group || ""} ・ ` +
       `<span class="puzzle-stars">${starLabel(difficultyStars(example.point_group))}</span></span>`;
     button.addEventListener("click", () => startStructure(example).catch(showError));
@@ -68,8 +108,7 @@ function showError(error) {
 }
 
 async function startStructure(example) {
-  el("puzzle-picker").hidden = true;
-  el("puzzle-play").hidden = false;
+  showPlay();
   el("puzzle-question").textContent = "読み込み中…";
   await getJson("/api/open_example", {
     method: "POST",
@@ -111,6 +150,21 @@ function beginRound() {
   el("puzzle-check").hidden = false;
   el("puzzle-check").disabled = false;
   el("puzzle-again").hidden = true;
+  el("puzzle-replay").hidden = true;
+}
+
+async function revealAnimation(orders) {
+  if (revealing) return;
+  revealing = true;
+  el("puzzle-replay").disabled = true;
+  try {
+    for (const order of orders) {
+      await view.playRotation(360 / order);
+    }
+  } finally {
+    revealing = false;
+    el("puzzle-replay").disabled = false;
+  }
 }
 
 function selectedOrders() {
@@ -131,22 +185,19 @@ async function onCheck() {
   box.textContent = result.correct
     ? `正解！ 正しくは ${result.correct_orders.map((o) => `${o}回`).join("・")} です。`
     : `おしい！ 正しくは ${result.correct_orders.map((o) => `${o}回`).join("・")} です。`;
+  lastCorrectOrders = result.correct_orders;
   el("puzzle-again").hidden = false;
-  // Reveal: spin the molecule once for each correct order.
-  for (const order of result.correct_orders) {
-    await view.playRotation(360 / order);
-  }
+  el("puzzle-replay").hidden = false;
+  await revealAnimation(lastCorrectOrders);
 }
 
 function setupPlayControls() {
   el("puzzle-check").addEventListener("click", () => onCheck().catch(showError));
+  el("puzzle-replay").addEventListener("click", () => revealAnimation(lastCorrectOrders).catch(showError));
   el("puzzle-again").addEventListener("click", () => {
     if (questions.length) beginRound();
   });
-  el("puzzle-other").addEventListener("click", () => {
-    el("puzzle-play").hidden = true;
-    el("puzzle-picker").hidden = false;
-  });
+  el("puzzle-other").addEventListener("click", showHome);
 }
 
 window.addEventListener("symmetry-enter-puzzle", async () => {
