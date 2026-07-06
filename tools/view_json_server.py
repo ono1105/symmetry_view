@@ -52,6 +52,8 @@ from crystal_viewer.viewer.animation_api import (
     custom_animation_path_response,
     symmetry_elements_response,
 )
+from crystal_viewer.game.axis_orders import check_answer as check_axis_order_answer
+from crystal_viewer.game.axis_orders import public_questions as public_axis_order_questions
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
     check_custom_operation,
@@ -871,6 +873,19 @@ def make_handler(
                 }
                 self.send_json(body)
                 return
+            if path == "/api/puzzle/axis_orders":
+                with state_lock:
+                    render_data = session.render_data
+                    source_kind = session.source_kind
+                # The correct answer stays server-side; it is revealed only on
+                # /api/puzzle/axis_orders/check.
+                self.send_json(
+                    {
+                        "source_kind": source_kind,
+                        "questions": public_axis_order_questions(render_data),
+                    }
+                )
+                return
             if path == "/api/state":
                 with state_lock:
                     body = dict(shared_state)
@@ -939,6 +954,22 @@ def make_handler(
                     self.send_json_error(str(exc), status=400)
                     return
                 self.send_bytes(gif_data, content_type="image/gif")
+                return
+
+            if path == "/api/puzzle/axis_orders/check":
+                with state_lock:
+                    render_data = session.render_data
+                try:
+                    question_id = int(payload.get("question_id"))
+                    selected = payload.get("selected_orders", [])
+                    result = check_axis_order_answer(render_data, question_id, selected)
+                except (TypeError, ValueError) as exc:
+                    self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
+                    return
+                if result is None:
+                    self.send_json_error("puzzle question not found", status=404)
+                    return
+                self.send_json(result)
                 return
 
             if path == "/api/compose_operations":

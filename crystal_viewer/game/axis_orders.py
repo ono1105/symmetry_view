@@ -154,3 +154,42 @@ def rotation_axis_questions(
         )
     questions.sort(key=lambda q: (-max(q["correct_orders"]), q["correct_orders"]))
     return questions
+
+
+def public_questions(
+    render_data: dict,
+    *,
+    options: tuple[int, ...] = ROTATION_ORDER_OPTIONS,
+) -> list[dict]:
+    """Questions for the client with the correct answer withheld."""
+    return [
+        {
+            "id": index,
+            "direction_cart": question["direction_cart"],
+            "point_cart": question["point_cart"],
+            "options": list(options),
+            "equivalent_count": question["equivalent_count"],
+            "infinite": question["infinite"],
+        }
+        for index, question in enumerate(rotation_axis_questions(render_data, options=options))
+    ]
+
+
+def check_answer(
+    render_data: dict,
+    question_id: int,
+    selected_orders,
+    *,
+    options: tuple[int, ...] = ROTATION_ORDER_OPTIONS,
+) -> dict | None:
+    """Judge one answer and reveal the correct set. ``None`` if id is unknown."""
+    questions = rotation_axis_questions(render_data, options=options)
+    if not 0 <= question_id < len(questions):
+        return None
+    correct = questions[question_id]["correct_orders"]
+    selected = sorted({int(order) for order in selected_orders})
+    return {
+        "correct": selected == correct,
+        "correct_orders": correct,
+        "selected_orders": selected,
+    }
