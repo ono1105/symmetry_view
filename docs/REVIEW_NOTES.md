@@ -1,5 +1,45 @@
 # コードレビューメモ（Codex向け共有）
 
+## 2026-07-06: Claude 引き継ぎ作業（①Web専用最終確認 ②PyVista依存の一部整理）
+
+**Codex への申し送り。** Codex が上限のため、合意プランの①②を Claude が着手（未コミット）。
+
+### ① Web専用ビューアー最終確認（結果: 合格＋1件の依存問題を発見・修正）
+
+- **パス正当性 end-to-end**: sio2 / halite / ravatite(三斜) / water(XYZ) の全操作について、サーバがシリアライズしたパスを**実際の消費者である JS `evaluatePath` で評価**し目標点に到達するか検証。**1796本すべて機械精度**（標準 worst 9.3e-15、matrixカスタム 0）。対称要素レスポンスも全件有効。
+- **実機スモーク**: `--web-only --no-browser` で起動、`/`・`/api/{state,operations,render_data,atoms,animation_path,symmetry_elements}`・`/static/*.js` すべて 200。`pyvista_enabled=False`。
+- **発見した問題**: web-only なのにプロセスに PyVista/VTK が 156 個ロードされていた。原因は `view_json_server → animation_api → symmetry_elements` の連鎖で `symmetry_elements.py` が **top-level `import pyvista`** していたこと。
+
+### ② PyVista依存の一部整理（上記修正）
+
+- `symmetry_elements.py`: top-level `import pyvista as pv` を削除し、`pv.` を実際に使う3描画関数（`add_symmetry_element_actors` / `add_translation_direction_actor` / `add_glide_direction_actor`）の**body冒頭に遅延import**へ移動。型注釈 `pv.Plotter` は `from __future__ import annotations` により文字列化されるため実行時評価されず安全。
+- 結果: サーバ import で `pyvista` が sys.modules に入らなくなり、**web-only 実機プロセスの pyvista/vtk 共有ライブラリが 156→0**。全テスト 149 件グリーン、PyVista経路の描画関数も遅延importで従来通り動作。
+
+### ②の残タスク（未着手・Codexプランの続き）
+
+- 「通常経路から不要な**状態同期・旧GIF処理**を削除」は未着手。web-only では PyVista controller 自体が起動しないため実害は無いが、`pyvista_controller.py` に比較専用でしか使わない旧経路が残る。整理の価値あり。
+- 他に top-level で pyvista を引く共有モジュール（`glyph_atoms`/`scene_rendering`/`native_gui` 等）は PyVista 経路専用なので現状問題なし（web経路の import 連鎖には出てこないことを確認済み）。
+
+## 2026-07-06: Claude 実装分（軌跡のwrap折り返し）＋前回指摘の解消確認
+
+**Codex への申し送り。** ユーザー指示で軌跡表示の折り返し対応のみ Claude が実装。Codex のプラン（Web専用最終確認・PyVista依存整理・分子ビューアー・パズル仕様）とは非衝突（`three_view.js` の `updateTrajectoryLines` のみ変更）。
+
+### 前回(全体精査)指摘の解消を確認
+
+- **バグ#1（セル基底変換で `animation_boundary_mode`/`pause_at_breakpoints` 非保持）→ 解消済**。Codex が `0bc651b` で修正。
+- **設計提案#2（`preserved` キーの定数化）→ 実装済**。`render_state.py` に `PRESERVED_STATE_KEYS` ＋ `preserved_render_state()` が入り、server 側は `**preserved_render_state(shared_state)` で構築。両キーとも定数に含まれ、再発防止が構造的に効く。
+
+### Claude 実装: 軌跡のwrap折り返し（未コミット）
+
+- `three_view.js` `updateTrajectoryLines`：各サンプル点を `applyBoundaryContext` で折り返し、**セル面を跨ぐ連結線はスキップ**（raw距離は微小なのに wrap後距離が大→交差と判定）。wrapモード時は直線経路も密サンプルして綺麗に折る。
+- continuousモードは `applyBoundaryContext` が恒等のため**従来と完全に同一**（数値確認: 48本/0スキップ）。wrapモードは交差箇所のみスキップし全点がセル内に収まることを確認（例: 4Å立方で 46本/2スキップ、max 3.81<4）。
+- 検証: `node --check` OK、JSパリティ10件グリーン、折り返しロジックの数値シミュレーション済み。
+
+### 未着手（Codex 担当と認識、Claudeは触れていない）
+
+- 非効率#3-5（`operation_fixed_atom_indices` の vectorize、`renderOperationDetails`/`renderOperations` の署名ガード）は browser_ui.js/operation_labels.py に及ぶため保留。
+- 分子ビューアー・不動点フィルターは Codex のプラン項目のため未着手。
+
 ## 2026-07-06: プロジェクト全体精査（Claude, HEAD=69da2e6＋未コミット差分）
 
 依頼により全体（≈16.6k行: 解析層・viewer・web・server・tests）を横断精査。**Python 141件＋JSパリティ10件すべてグリーン**。横断スイープ（mutable default引数・bare except・自コードのTODO/FIXME・O(N²)原子ループ）はすべてゼロ。過去指摘の解消も確認：`send_json` は `json.dumps(body, default=to_jsonable)` 方式（全走査でなく非対応値のみ変換）、`publishAnimationProgress` は1%バケットでthrottle済み（長期未対応だった毎フレーム発火が解消）。

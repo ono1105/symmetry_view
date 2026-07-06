@@ -939,18 +939,30 @@ class StaticStructureView {
       const path = this.animationPaths.get(instance.sourceAtom);
       if (!pathAppliesToDisplayInstance(path, instance)) continue;
       const samples = new Set([0, 1, ...pathBreakpoints(path, instance.start)]);
-      if (pathHasCurvedMotion(path)) {
+      // Wrapped trajectories need dense sampling so each straight segment folds
+      // at the cell face instead of jumping across it.
+      if (pathHasCurvedMotion(path) || this.boundaryContext?.mode === "wrap") {
         for (let index = 1; index < 49; index += 1) samples.add(index / 48);
       }
       const progressValues = [...samples].sort((a, b) => a - b);
-      let previous = evaluatePath(path, progressValues[0], instance.start);
+      let previousRaw = evaluatePath(path, progressValues[0], instance.start);
+      let previousWrapped = applyBoundaryContext(previousRaw, this.boundaryContext);
       for (const progress of progressValues.slice(1)) {
-        const current = evaluatePath(path, progress, instance.start);
-        const distanceSquared = current.reduce((sum, value, axis) => (
-          sum + (value - previous[axis]) ** 2
+        const currentRaw = evaluatePath(path, progress, instance.start);
+        const currentWrapped = applyBoundaryContext(currentRaw, this.boundaryContext);
+        const rawDistanceSquared = currentRaw.reduce((sum, value, axis) => (
+          sum + (value - previousRaw[axis]) ** 2
         ), 0);
-        if (distanceSquared > 1e-16) positions.push(...previous, ...current);
-        previous = current;
+        const wrappedDistanceSquared = currentWrapped.reduce((sum, value, axis) => (
+          sum + (value - previousWrapped[axis]) ** 2
+        ), 0);
+        // A large wrapped step over a tiny raw step means the segment crossed a
+        // cell face; skip that connector so the line folds instead of spanning.
+        if (rawDistanceSquared > 1e-16 && wrappedDistanceSquared <= rawDistanceSquared + 1e-6) {
+          positions.push(...previousWrapped, ...currentWrapped);
+        }
+        previousRaw = currentRaw;
+        previousWrapped = currentWrapped;
       }
     }
     if (!positions.length) {

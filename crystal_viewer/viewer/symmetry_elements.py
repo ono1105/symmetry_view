@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pyvista as pv
 
 from crystal_viewer.geometry import integer_index_vector, normalize, reflect_point
 from crystal_viewer.viewer.animation import (
@@ -70,6 +69,8 @@ def add_symmetry_element_actors(
     display_mode: str = "source",
     cell_origin_mode: str = "center",
 ) -> list:
+    import pyvista as pv
+
     actors = []
     span = display_scene_span(render_data, display_mode, cell_origin_mode)
     axis_length = max(span * 0.75, 1.0)
@@ -157,6 +158,8 @@ def add_translation_direction_actor(
     display_mode: str,
     cell_origin_mode: str,
 ):
+    import pyvista as pv
+
     unit_cell = render_data.get("unit_cell")
     translation_cart = operation.get("translation_cart")
     if translation_cart is None:
@@ -187,6 +190,8 @@ def add_glide_direction_actor(
     displayed_point: np.ndarray,
     line_length: float,
 ):
+    import pyvista as pv
+
     glide_cart = glide_translation_cart(render_data, operation, plane, mapping=mapping)
     if glide_cart is None:
         return None
