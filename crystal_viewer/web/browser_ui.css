@@ -1325,31 +1325,27 @@
       flex-direction: column;
       align-items: center;
       gap: 8px;
-      padding: 28px 20px;
+      padding: 26px 20px;
       border: 0;
-      border-radius: 20px;
+      border-radius: 12px;
       color: #fff;
       cursor: pointer;
-      box-shadow: 0 10px 22px rgba(15, 47, 76, 0.18);
+      box-shadow: 0 6px 16px rgba(15, 47, 76, 0.15);
       transition: transform 0.08s ease, box-shadow 0.08s ease;
     }
     .mode-select-button:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 16px 28px rgba(15, 47, 76, 0.24);
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(15, 47, 76, 0.2);
     }
     .mode-select-button.analysis {
       background: linear-gradient(160deg, #38bdf8, #2f80ed);
     }
     .mode-select-button.puzzle {
-      background: linear-gradient(160deg, #fbbf5c, #f97362);
-    }
-    .mode-select-emoji {
-      font-size: 44px;
-      line-height: 1;
+      background: linear-gradient(160deg, #f0a94b, #ec6a56);
     }
     .mode-select-name {
-      font-size: 22px;
-      font-weight: 800;
+      font-size: 21px;
+      font-weight: 700;
     }
     .mode-select-desc {
       font-size: 14px;
