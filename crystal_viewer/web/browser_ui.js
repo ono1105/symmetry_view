@@ -2925,6 +2925,10 @@ function applyAppMode() {
     // The 3D canvas may have initialized while covered; nudge a resize.
     window.dispatchEvent(new Event("resize"));
   }
+  if (appMode === "puzzle") {
+    // puzzle.js lazily builds its own 3D view the first time this fires.
+    window.dispatchEvent(new Event("symmetry-enter-puzzle"));
+  }
 }
 function setAppMode(mode) {
   appMode = mode;

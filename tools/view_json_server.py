@@ -675,6 +675,14 @@ def make_handler(
                 module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "three_view.js"
                 self.send_javascript_file(module_path)
                 return
+            if path == "/static/puzzle_view.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "puzzle_view.js"
+                self.send_javascript_file(module_path)
+                return
+            if path == "/static/puzzle.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "puzzle.js"
+                self.send_javascript_file(module_path)
+                return
             if path == "/vendor/three/three.module.js":
                 module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "node_modules" / "three" / "build" / "three.module.js"
                 self.send_javascript_file(module_path, vendor=True)

@@ -30,7 +30,20 @@
       <h1>パズルモード</h1>
     </div>
     <div id="puzzle-body" class="puzzle-body">
-      <p class="hint">この画面は今後実装します。</p>
+      <div id="puzzle-picker" class="puzzle-picker"></div>
+      <div id="puzzle-play" class="puzzle-play" hidden>
+        <div id="puzzle-view" class="puzzle-view"><canvas></canvas></div>
+        <div class="puzzle-panel">
+          <p id="puzzle-question" class="puzzle-question"></p>
+          <div id="puzzle-options" class="puzzle-options"></div>
+          <div class="puzzle-actions">
+            <button type="button" id="puzzle-check" class="puzzle-primary">答え合わせ</button>
+            <button type="button" id="puzzle-again" class="secondary" hidden>同じ分子でもう一問</button>
+            <button type="button" id="puzzle-other" class="secondary">別の分子にする</button>
+          </div>
+          <div id="puzzle-result" class="puzzle-result" hidden></div>
+        </div>
+      </div>
     </div>
   </section>
   <div class="topbar">
@@ -490,5 +503,6 @@
 <script id="app-mode-config" type="application/json">__INITIAL_APP_MODE__</script>
 <script src="/static/browser_ui.js" defer></script>
 <script type="module" src="/static/three_loader.js"></script>
+<script type="module" src="/static/puzzle.js"></script>
 </body>
 </html>

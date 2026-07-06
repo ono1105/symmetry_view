@@ -99,9 +99,29 @@ class BrowserUiAssetsTest(unittest.TestCase):
 
     def test_split_assets_exist(self):
         web_dir = Path("crystal_viewer/web")
-        for name in ("browser_ui.html", "browser_ui.css", "browser_ui.js", "three_loader.js"):
+        for name in (
+            "browser_ui.html",
+            "browser_ui.css",
+            "browser_ui.js",
+            "three_loader.js",
+            "puzzle.js",
+            "puzzle_view.js",
+        ):
             with self.subTest(name=name):
                 self.assertTrue((web_dir / name).is_file())
+
+    def test_puzzle_body_skeleton_and_module(self):
+        self.assertIn('src="/static/puzzle.js"', HTML)
+        for marker in (
+            'id="puzzle-picker"',
+            'id="puzzle-view"',
+            'id="puzzle-options"',
+            'id="puzzle-check"',
+            'id="puzzle-again"',
+            'id="puzzle-other"',
+            'id="puzzle-result"',
+        ):
+            self.assertIn(marker, HTML)
 
     def test_three_view_initializes_instance_colors(self):
         source = Path("crystal_viewer/web/three_view.js").read_text(encoding="utf-8")
