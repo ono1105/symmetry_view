@@ -12,10 +12,10 @@
     <h1 id="main-title">Symmetry Controls</h1>
     <div class="topbar-actions">
       <div class="button-row flush" id="experience-controls">
-        <button class="secondary experience-button selected" id="experience-toggle" data-experience="advanced" title="Switch to Full mode">Simple</button>
+        <button class="mode-toggle experience-button" id="experience-toggle" data-experience="advanced" title="Switch to Full mode">Simple</button>
       </div>
       <div class="button-row flush" id="structure-kind-controls">
-        <button class="secondary structure-kind-button selected" id="structure-kind-toggle" data-kind="molecule" title="Switch to Molecule">Crystal</button>
+        <button class="mode-toggle structure-kind-button" id="structure-kind-toggle" data-kind="molecule" title="Switch to Molecule">Crystal</button>
       </div>
       <input id="cif-file" class="file-input" type="file" accept=".cif,.txt">
       <button id="import-cif" class="secondary">Open CIF</button>
@@ -357,8 +357,7 @@
         <div class="camera-block">
           <label id="projection-label">Projection</label>
           <div class="button-row flush" id="projection-controls">
-            <button class="secondary projection-button selected" data-projection-mode="perspective">Perspective</button>
-            <button class="secondary projection-button" data-projection-mode="orthographic">Orthographic</button>
+            <button class="mode-toggle projection-button" id="projection-toggle" data-projection-mode="orthographic">Perspective</button>
           </div>
         </div>
         <div class="advanced-only camera-settings-expanded">
@@ -395,15 +394,13 @@
         <div class="camera-block advanced-only">
           <label>Background</label>
           <div class="button-row flush" id="background-controls">
-            <button class="secondary background-button" data-background-mode="light">White</button>
-            <button class="secondary background-button selected" data-background-mode="dark">Black</button>
+            <button class="mode-toggle background-button" id="background-toggle" data-background-mode="light">Black</button>
           </div>
         </div>
         <div class="camera-block advanced-only">
           <label>Legend</label>
           <div class="button-row flush" id="legend-controls">
-            <button class="secondary legend-button selected" data-legend-visible="false">Hide</button>
-            <button class="secondary legend-button" data-legend-visible="true">Show</button>
+            <button class="mode-toggle legend-button" id="legend-toggle" data-legend-visible="true">Legend off</button>
           </div>
         </div>
         </div>

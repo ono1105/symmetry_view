@@ -1644,24 +1644,30 @@ function setCellSettingBusy(busy, mode = "") {
 }
 
 function syncProjectionButtons() {
-  const projectionMode = state.projection_mode || "perspective";
-  for (const button of document.querySelectorAll(".projection-button")) {
-    button.classList.toggle("selected", button.dataset.projectionMode === projectionMode);
-  }
+  const perspective = (state.projection_mode || "perspective") === "perspective";
+  const button = document.getElementById("projection-toggle");
+  if (!button) return;
+  button.textContent = perspective ? "Perspective" : "Orthographic";
+  button.dataset.projectionMode = perspective ? "orthographic" : "perspective";
+  button.title = perspective ? "Switch to orthographic" : "Switch to perspective";
 }
 
 function syncBackgroundButtons() {
-  const backgroundMode = state.background_mode || "dark";
-  for (const button of document.querySelectorAll(".background-button")) {
-    button.classList.toggle("selected", button.dataset.backgroundMode === backgroundMode);
-  }
+  const dark = (state.background_mode || "dark") === "dark";
+  const button = document.getElementById("background-toggle");
+  if (!button) return;
+  button.textContent = dark ? "Black" : "White";
+  button.dataset.backgroundMode = dark ? "light" : "dark";
+  button.title = dark ? "Switch to white background" : "Switch to black background";
 }
 
 function syncLegendButtons() {
-  const legendVisible = Boolean(state.legend_visible);
-  for (const button of document.querySelectorAll(".legend-button")) {
-    button.classList.toggle("selected", (button.dataset.legendVisible === "true") === legendVisible);
-  }
+  const visible = Boolean(state.legend_visible);
+  const button = document.getElementById("legend-toggle");
+  if (!button) return;
+  button.textContent = visible ? "Legend on" : "Legend off";
+  button.dataset.legendVisible = visible ? "false" : "true";
+  button.title = visible ? "Hide legend" : "Show legend";
 }
 
 function syncImproperModeControl() {

@@ -1,5 +1,25 @@
 # コードレビューメモ（Codex向け共有）
 
+## 2026-07-06: ユーザー目視テストで見つかった不具合の対応（Claude）
+
+ユーザーの目視確認で6件報告。対応状況は以下。
+
+### 修正済み
+
+- **#3 web-first で再生完了後に Start へ戻らない（Stopのまま）** — `three_view.js` `updateAnimation`。原因: 完了時 three.js はローカルで `playing=false` にするが**サーバへ通知しない**。PyVista 無し（web-first 既定）では `shared_state["playing"]` を戻す者がいないため、Start/Stop ボタン（`state.playing` 駆動）が Stop のまま。修正: 完了時、`pyvista_enabled=false` かつ `serverPlaying` の時だけ `window.symmetryPostState({playing:false})` でサーバへ通知（PyVista有効時は従来通り PyVista が戻す）。
+- **#4 分子モードで対称要素（軸/面/中心）が小さく原子に埋もれる（CO2 は軸が見えない）** — `three_view.js` の要素描画は `span` 基準で、分子は span が小さく原子が相対的に大きいため軸半径が原子の3%・軸端が原子内に埋没。修正: `isMolecule` と `maxAtomRadius` を保持し、分子時のみ軸半径=`max(maxAtomR*0.18, span*0.012)`、軸長=`max(span*1.8, span+4*maxAtomR)`（CO2 で原子から1.4Å突出）、面 half=`span*0.65`、中心 size=`max(maxAtomR*1.1, span*0.09)`。**結晶は完全に従来のまま**（span基準）。
+- **#5 凡例/背景/投影を1ボタントグル化 & #6 トグルが常時青で切替と分からない** — `browser_ui.{html,css,js}`。projection/background/legend の2ボタン群を単一ボタンに統合し、simple/full・crystal/molecule も含む**5トグル全て**を新スタイル `.mode-toggle`（「⇄ + 現在値」の暗色ピル、常時青の selected を廃止）に統一。クリックハンドラは既存クラスを単一ボタンに残し dataset=次の値とすることで無改造。sync 関数3つのみ書き換え。
+
+### 保留（要相談）
+
+- **#1 同型操作の見かけ速度差（Halite op131 が op147 より速い）** — 根が深い。原因: 同じ4回回反でも自動選択される軸・中心の幾何が異なり原子の最大移動距離が変わる（op131 max16Å→duration3.19s、op147 max24Å→4.69s）。duration を最大移動距離で正規化しているため、最速原子の速度は一致するが**総再生時間が1.47倍差**になり体感が変わる。根本策は「残差が妥当な候補の中で移動距離最小の軸/中心/周期像を選ぶ」だが、`animation_context`（PyVista 共有・要回帰確認）の深い変更。要方針決定。
+
+### 仕様（バグではない）
+
+- **#2 `--web-only` を付けていないのに PyVista ウィンドウが開かない** — Codex の web-first 化（`0bc651b`）で `set_defaults(pyvista_enabled=False)`、PyVista 比較ウィンドウを出すには **`--with-pyvista`** が必要（`--web-only` は既定・互換保持）。
+
+検証: Python 150件グリーン、JS 全ファイル `node --check` OK、ライブでweb-first既定・静的資産/全エンドポイント200・ブートエラー無しを確認。
+
 ## 2026-07-06: Claude 引き継ぎ作業 ③ 分子ビューアー検証（不動点フィルターのバグ修正）
 
 **Codex への申し送り。** 分子ビューアー完成基準（Schoenflies表記・全操作種・原子選択・不動点フィルター）を代表9分子で検証: water(C2v)/ammonia(C3v)/benzene(D6h)/methane(Td)/allene(D2d)/SF6(Oh)/CO2(D∞h線形)/BF3(D3h)/XeF4(D4h)。
