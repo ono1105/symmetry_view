@@ -2904,3 +2904,34 @@ async function boot() {
 boot().catch(error => {
   document.getElementById("status").textContent = `Boot error: ${error}`;
 });
+
+// --- Top-level Analysis / Puzzle mode (docs/PUZZLE_SPEC.md §1) ---
+// Selection screen is the entry point; you return here with Back before
+// switching, so puzzle and analysis never bleed into each other.
+function readInitialAppMode() {
+  try {
+    const mode = JSON.parse(document.getElementById("app-mode-config").textContent);
+    return mode === "analysis" || mode === "puzzle" ? mode : "select";
+  } catch (error) {
+    return "select";
+  }
+}
+let appMode = readInitialAppMode();
+function applyAppMode() {
+  document.getElementById("mode-select").hidden = appMode !== "select";
+  document.getElementById("puzzle-mode").hidden = appMode !== "puzzle";
+  document.body.classList.toggle("in-puzzle", appMode === "puzzle");
+  if (appMode === "analysis") {
+    // The 3D canvas may have initialized while covered; nudge a resize.
+    window.dispatchEvent(new Event("resize"));
+  }
+}
+function setAppMode(mode) {
+  appMode = mode;
+  applyAppMode();
+}
+document.getElementById("enter-analysis").addEventListener("click", () => setAppMode("analysis"));
+document.getElementById("enter-puzzle").addEventListener("click", () => setAppMode("puzzle"));
+document.getElementById("analysis-back").addEventListener("click", () => setAppMode("select"));
+document.getElementById("puzzle-back").addEventListener("click", () => setAppMode("select"));
+applyAppMode();

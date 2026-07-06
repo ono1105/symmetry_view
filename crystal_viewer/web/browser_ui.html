@@ -8,7 +8,31 @@
 </head>
 <body class="beginner-mode">
 <main>
+  <section id="mode-select" class="mode-overlay">
+    <div class="mode-select-card">
+      <h1 class="mode-select-title">Symmetry</h1>
+      <p class="mode-select-sub">モードを選んでください / Choose a mode</p>
+      <div class="mode-select-buttons">
+        <button type="button" id="enter-analysis" class="mode-select-button">
+          解析モード<span>Analysis — 構造の表示・対称操作アニメ</span>
+        </button>
+        <button type="button" id="enter-puzzle" class="mode-select-button">
+          パズルモード<span>Puzzle — 対称性を当てるクイズ</span>
+        </button>
+      </div>
+    </div>
+  </section>
+  <section id="puzzle-mode" class="mode-overlay" hidden>
+    <div class="mode-topbar">
+      <button type="button" id="puzzle-back" class="secondary mode-back">← 戻る / Back</button>
+      <h1>パズル / Puzzle</h1>
+    </div>
+    <div id="puzzle-body" class="puzzle-body">
+      <p class="hint">パズルUIは次のステップで実装します。</p>
+    </div>
+  </section>
   <div class="topbar">
+    <button type="button" id="analysis-back" class="secondary mode-back">← 戻る / Back</button>
     <h1 id="main-title">Symmetry Controls</h1>
     <div class="topbar-actions">
       <div class="button-row flush" id="experience-controls">
@@ -461,6 +485,7 @@
   <div class="status" id="status">Loading...</div>
 </main>
 <script id="structure-kind-config" type="application/json">__STRUCTURE_KIND_CONFIG__</script>
+<script id="app-mode-config" type="application/json">__INITIAL_APP_MODE__</script>
 <script src="/static/browser_ui.js" defer></script>
 <script type="module" src="/static/three_loader.js"></script>
 </body>

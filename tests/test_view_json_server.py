@@ -42,6 +42,21 @@ class BrowserUiAssetsTest(unittest.TestCase):
         self.assertFalse(parser.parse_args(["--web-only"]).pyvista_enabled)
         self.assertTrue(parser.parse_args(["--with-pyvista"]).pyvista_enabled)
 
+    def test_mode_flag_and_selection_skeleton(self):
+        parser = build_argument_parser()
+        self.assertIsNone(parser.parse_args([]).mode)
+        self.assertEqual(parser.parse_args(["--mode", "puzzle"]).mode, "puzzle")
+        self.assertEqual(parser.parse_args(["--mode", "analysis"]).mode, "analysis")
+        for marker in (
+            'id="mode-select"',
+            'id="enter-analysis"',
+            'id="enter-puzzle"',
+            'id="puzzle-mode"',
+            'id="analysis-back"',
+            "__INITIAL_APP_MODE__",  # replaced with the mode at serve time
+        ):
+            self.assertIn(marker, HTML)
+
     def test_html_references_external_styles_and_scripts(self):
         self.assertIn('href="/static/browser_ui.css"', HTML)
         self.assertIn('src="/static/browser_ui.js"', HTML)

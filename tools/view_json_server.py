@@ -645,13 +645,15 @@ def make_handler(
     indent: int,
     analysis_timeout_sec: float,
     default_display_mode: str,
+    initial_app_mode: str = "select",
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed_url = urlparse(self.path)
             path = parsed_url.path
             if path == "/":
-                self.send_bytes(HTML.encode("utf-8"), content_type="text/html; charset=utf-8")
+                page = HTML.replace("__INITIAL_APP_MODE__", json.dumps(initial_app_mode))
+                self.send_bytes(page.encode("utf-8"), content_type="text/html; charset=utf-8")
                 return
             if path == "/static/animation_path.js":
                 module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "animation_path.js"
@@ -1658,6 +1660,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="HTTP port. Defaults to an automatically selected free port.",
     )
     parser.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically.")
+    parser.add_argument(
+        "--mode",
+        choices=("analysis", "puzzle"),
+        default=None,
+        help="Open directly in this mode. Default: show the Analysis/Puzzle selection screen.",
+    )
     view_backend = parser.add_mutually_exclusive_group()
     view_backend.add_argument(
         "--with-pyvista",
@@ -1753,6 +1761,7 @@ def main() -> int:
         indent=args.indent,
         analysis_timeout_sec=args.analysis_timeout_sec,
         default_display_mode=display_mode,
+        initial_app_mode=args.mode or "select",
     )
     example_catalog()
     server = start_server(args.host, args.port, handler)

@@ -1277,3 +1277,80 @@
         grid-column: 1 / -1;
       }
     }
+
+    /* Top-level Analysis / Puzzle mode split (see docs/PUZZLE_SPEC.md §1). */
+    .mode-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      background: #0b0f14;
+      display: flex;
+      flex-direction: column;
+      overflow: auto;
+    }
+    .mode-overlay[hidden] {
+      display: none;
+    }
+    #mode-select {
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .mode-select-card {
+      width: 100%;
+      max-width: 560px;
+      text-align: center;
+    }
+    .mode-select-title {
+      font-size: 34px;
+      margin: 0 0 6px;
+      color: #f8fafc;
+    }
+    .mode-select-sub {
+      color: #aeb8c5;
+      margin: 0 0 24px;
+    }
+    .mode-select-buttons {
+      display: grid;
+      gap: 16px;
+    }
+    .mode-select-button {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: center;
+      padding: 22px 18px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #081017;
+      background: #7dd3fc;
+      border: 0;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    .mode-select-button span {
+      font-size: 13px;
+      font-weight: 500;
+      color: #0b2233;
+    }
+    .mode-select-button:hover {
+      background: #9fe0ff;
+    }
+    .mode-topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 20px;
+      border-bottom: 1px solid #29313c;
+    }
+    .mode-topbar h1 {
+      font-size: 18px;
+      margin: 0;
+      color: #f8fafc;
+    }
+    .puzzle-body {
+      padding: 20px;
+    }
+    .mode-back {
+      flex: 0 0 auto;
+    }
