@@ -98,7 +98,9 @@ Open a CIF or XYZ directly:
 .venv/bin/python tools/view_json_server.py examples/molecules/water.xyz --no-browser
 ```
 
-The browser panel talks to a local stdlib HTTP server. PyVista remains responsible for the 3D scene.
+The browser panel talks to a local stdlib HTTP server. Three.js renders the 3D scene.
+The server selects a free local port automatically. Use `--port 5173` only when
+a fixed port is required.
 
 Atom display defaults live in:
 
@@ -120,16 +122,15 @@ atom color controls
 selected atom animation scope
 play / stop / reset
 camera controls and view center controls
-PNG screenshots, WebM recording, and debug JSON export
+PNG screenshots and animated GIF export
 custom operation check and animation
 ```
 
-The default server path still opens PyVista for final comparison and legacy
-three-view GIF output. Use `--web-only` to test the Web-only path; the UI hides
-PyVista GIF controls in that mode. Standard, custom, and custom-sequence
-animations run in Three.js. The Web viewer can save the current canvas as PNG,
-record the current animation as WebM when supported by the browser, and export a JSON bundle
-containing the state, render data, animation path, and symmetry elements.
+The default server path is Web-only. Use `--with-pyvista` only for final
+comparison of the retained renderer. `--web-only` remains accepted for command
+compatibility. Standard, custom, and custom-sequence animations run in Three.js.
+The Web viewer can save the current canvas as PNG or export the current animation
+as an animated GIF.
 
 `tools/view_json_server.py` should stay a thin entry point and HTTP API. Shared viewer code belongs under `crystal_viewer/viewer/`; browser-facing UI assets belong under `crystal_viewer/web/`.
 

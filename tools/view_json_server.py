@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import io
 import json
 import os
 import subprocess
@@ -20,6 +23,7 @@ except ModuleNotFoundError:
 
 import logging
 import numpy as np
+from PIL import Image
 
 from crystal_viewer.export_pipeline import (
     DEFAULT_JSON_EXPORT_DIR,
@@ -42,7 +46,7 @@ from crystal_viewer.symmetry_operations import (
 from crystal_viewer.viewer.atom_style import atom_color, display_atom_radius
 from crystal_viewer.viewer.animation_context import animation_paths
 from crystal_viewer.viewer.animation_path import evaluate_path, phase_fraction, two_phase_geometry
-from crystal_viewer.viewer.display_atoms import display_atom_instances, display_fractional_bounds
+from crystal_viewer.viewer.display_atoms import display_atom_instances, display_fractional_bounds, display_scene_center
 from crystal_viewer.viewer.animation_api import (
     animation_path_response,
     custom_animation_path_response,
@@ -59,6 +63,7 @@ from crystal_viewer.viewer.operation_lookup import operation_by_index, selected_
 from crystal_viewer.viewer.render_state import (
     apply_render_state_update,
     initial_render_state,
+    preserved_render_state,
 )
 from crystal_viewer.viewer.session import ViewerSession
 
@@ -71,6 +76,7 @@ UPLOAD_CIF_DIR = Path(tempfile.gettempdir()) / "symmetry_view_cif_uploads"
 UPLOAD_MOLECULE_DIR = Path(tempfile.gettempdir()) / "symmetry_view_molecule_uploads"
 DEFAULT_BROWSER_IMPORT_JSON_DIR = DEFAULT_JSON_EXPORT_DIR / "imported"
 DEFAULT_ANALYSIS_TIMEOUT_SEC = 120.0
+MAX_REQUEST_BODY_BYTES = 128 * 1024 * 1024
 EXAMPLE_DIRS = {
     SOURCE_KIND_CRYSTAL: PROJECT_ROOT / "examples/cif",
     SOURCE_KIND_MOLECULE: PROJECT_ROOT / "examples/molecules",
@@ -416,6 +422,85 @@ def cartesian_operation_items(unit_cell: dict, W_frac, t_frac) -> dict:
         "matrix_cart": W_cart.tolist(),
         "translation_cart": t_cart.tolist(),
     }
+
+
+def update_view_coordinate_state(render_data: dict, state: dict, update: dict) -> None:
+    """Attach Python-computed Cartesian camera inputs to shared browser state."""
+    unit_cell = render_data.get("unit_cell")
+    lattice = None if unit_cell is None else np.asarray(unit_cell["lattice"], dtype=float)
+
+    def vector(key: str) -> np.ndarray:
+        value = np.asarray(update.get(key), dtype=float)
+        if value.shape != (3,) or not np.all(np.isfinite(value)):
+            raise ValueError(f"{key} must contain three finite numbers")
+        return value
+
+    if "reset_view_request_id" in update:
+        state["reset_view_center_cart"] = display_scene_center(
+            render_data,
+            str(state.get("display_mode", "source")),
+            str(state.get("cell_origin_mode", "center")),
+        ).tolist()
+    if "view_center_request_id" in update:
+        center = vector("view_center_frac")
+        state["view_center_cart"] = (center if lattice is None else center @ lattice).tolist()
+    if "view_direction_request_id" in update:
+        if lattice is None:
+            raise ValueError("direction indices require a crystal unit cell")
+        direction = vector("view_direction_frac") @ lattice
+        if np.linalg.norm(direction) < 1e-10:
+            raise ValueError("view direction must not be zero")
+        state["view_direction_cart"] = (direction / np.linalg.norm(direction)).tolist()
+        state["indexed_view_center_cart"] = display_scene_center(
+            render_data,
+            str(state.get("display_mode", "source")),
+            str(state.get("cell_origin_mode", "center")),
+        ).tolist()
+    if "view_plane_request_id" in update:
+        if lattice is None:
+            raise ValueError("Miller indices require a crystal unit cell")
+        normal = np.linalg.inv(lattice) @ vector("view_plane_hkl")
+        if np.linalg.norm(normal) < 1e-10:
+            raise ValueError("plane normal must not be zero")
+        state["view_plane_normal_cart"] = (normal / np.linalg.norm(normal)).tolist()
+        state["indexed_view_center_cart"] = display_scene_center(
+            render_data,
+            str(state.get("display_mode", "source")),
+            str(state.get("cell_origin_mode", "center")),
+        ).tolist()
+
+
+def gif_bytes_from_data_urls(frames: list[str], frame_duration_ms: int) -> bytes:
+    if not frames or len(frames) > 180:
+        raise ValueError("GIF export requires between 1 and 180 frames")
+    images = []
+    try:
+        for frame in frames:
+            prefix = "data:image/png;base64,"
+            if not isinstance(frame, str) or not frame.startswith(prefix):
+                raise ValueError("GIF frames must be PNG data URLs")
+            encoded = frame[len(prefix):]
+            if len(encoded) > 8_000_000:
+                raise ValueError("A GIF frame is too large")
+            with Image.open(io.BytesIO(base64.b64decode(encoded, validate=True))) as source:
+                image = source.convert("RGB")
+            images.append(image)
+        output = io.BytesIO()
+        images[0].save(
+            output,
+            format="GIF",
+            save_all=True,
+            append_images=images[1:],
+            duration=max(20, min(int(frame_duration_ms), 1000)),
+            loop=0,
+            optimize=False,
+        )
+        return output.getvalue()
+    except (ValueError, TypeError, binascii.Error, OSError) as exc:
+        raise ValueError(f"Invalid GIF frame data: {exc}") from exc
+    finally:
+        for image in images:
+            image.close()
 
 
 def find_operation_sequence_for_target(
@@ -799,6 +884,9 @@ def make_handler(
         def do_POST(self) -> None:
             path = urlparse(self.path).path
             length = int(self.headers.get("Content-Length", "0"))
+            if length > MAX_REQUEST_BODY_BYTES:
+                self.send_json_error("request body is too large", status=413)
+                return
             try:
                 payload = json.loads(self.rfile.read(length) or b"{}")
             except json.JSONDecodeError as exc:
@@ -839,6 +927,18 @@ def make_handler(
                 with state_lock:
                     shared_state["custom_op_result"] = check_result
                 self.send_json(check_result)
+                return
+
+            if path == "/api/export_gif":
+                try:
+                    gif_data = gif_bytes_from_data_urls(
+                        payload.get("frames", []),
+                        int(payload.get("frame_duration_ms", 100)),
+                    )
+                except (TypeError, ValueError) as exc:
+                    self.send_json_error(str(exc), status=400)
+                    return
+                self.send_bytes(gif_data, content_type="image/gif")
                 return
 
             if path == "/api/compose_operations":
@@ -911,8 +1011,19 @@ def make_handler(
                 return
 
             with state_lock:
-                apply_render_state_update(shared_state, payload)
-                body = dict(shared_state)
+                try:
+                    candidate_state = dict(shared_state)
+                    apply_render_state_update(candidate_state, payload)
+                    update_view_coordinate_state(session.render_data, candidate_state, payload)
+                    shared_state.clear()
+                    shared_state.update(candidate_state)
+                    body = dict(candidate_state)
+                except (ValueError, np.linalg.LinAlgError) as exc:
+                    body = None
+                    error = str(exc)
+            if body is None:
+                self.send_json_error(error, status=400)
+                return
             self.send_json(body)
 
         def handle_open_example(self, payload: dict) -> None:
@@ -1051,15 +1162,8 @@ def make_handler(
                     if session.json_path != current_json_path or session.payload is not current_payload:
                         raise RuntimeError("The loaded structure changed before cell setting conversion finished.")
                     preserved = {
-                        "speed": shared_state.get("speed", 1.0),
-                        "projection_mode": shared_state.get("projection_mode", "perspective"),
-                        "background_mode": shared_state.get("background_mode", "dark"),
-                        "legend_visible": shared_state.get("legend_visible", False),
-                        "cell_origin_mode": shared_state.get("cell_origin_mode", "center"),
+                        **preserved_render_state(shared_state),
                         "cell_setting_mode": mode,
-                        "improper_mode": shared_state.get("improper_mode", "auto"),
-                        "display_mode": shared_state.get("display_mode", default_display_mode),
-                        "include_boundary_images": shared_state.get("include_boundary_images", False),
                         "reload_request_id": shared_state.get("reload_request_id"),
                         "import_status": preserved_status,
                         "json_path": shared_state.get("json_path", str(current_json_path)),
@@ -1243,8 +1347,14 @@ def open_url(url: str) -> None:
     webbrowser.open(url)
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+    block_on_close = False
+
+
 def start_server(host: str, port: int, handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
-    server = ThreadingHTTPServer((host, port), handler)
+    server = ReusableThreadingHTTPServer((host, port), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server
@@ -1498,9 +1608,9 @@ def default_starter_path() -> Path:
     )
 
 
-def main() -> int:
+def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Browser controls + PyVista view for exported symmetry JSON, CIF, or XYZ."
+        description="Web symmetry viewer for exported JSON, CIF, or XYZ structures."
     )
     parser.add_argument(
         "input_path",
@@ -1510,13 +1620,27 @@ def main() -> int:
     )
     parser.add_argument("--operation", type=int, default=None, help="Initial operation index.")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=5173)
-    parser.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically.")
     parser.add_argument(
-        "--web-only",
-        action="store_true",
-        help="Run without the legacy PyVista window (custom animation and GIF output unavailable).",
+        "--port",
+        type=int,
+        default=0,
+        help="HTTP port. Defaults to an automatically selected free port.",
     )
+    parser.add_argument("--no-browser", action="store_true", help="Do not open the browser automatically.")
+    view_backend = parser.add_mutually_exclusive_group()
+    view_backend.add_argument(
+        "--with-pyvista",
+        dest="pyvista_enabled",
+        action="store_true",
+        help="Also open the legacy PyVista comparison window and enable legacy GIF export.",
+    )
+    view_backend.add_argument(
+        "--web-only",
+        dest="pyvista_enabled",
+        action="store_false",
+        help="Run only the Web viewer (default; retained for command compatibility).",
+    )
+    parser.set_defaults(pyvista_enabled=False)
     parser.add_argument(
         "--json-output",
         type=Path,
@@ -1558,7 +1682,11 @@ def main() -> int:
         action="store_true",
         help="Show quarter-cell periodic display clones. Slower, but useful for boundary checks.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = build_argument_parser().parse_args()
 
     input_path = args.input_path if args.input_path is not None else write_empty_viewer_json()
     json_path = resolve_viewer_json_path(
@@ -1582,7 +1710,7 @@ def main() -> int:
     shared_state["reset"] = False
     shared_state["reload_request_id"] = 0
     shared_state["json_path"] = str(json_path)
-    shared_state["pyvista_enabled"] = not args.web_only
+    shared_state["pyvista_enabled"] = args.pyvista_enabled
 
     handler = make_handler(
         session,
@@ -1603,7 +1731,7 @@ def main() -> int:
         open_url(url)
 
     try:
-        if not args.web_only:
+        if args.pyvista_enabled:
             from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
 
             app = BrowserControlledViewer(

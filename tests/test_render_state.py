@@ -1,9 +1,11 @@
 import unittest
 
 from crystal_viewer.viewer.render_state import (
+    PRESERVED_STATE_KEYS,
     apply_render_state_update,
     initial_render_state,
     pop_render_state_snapshot,
+    preserved_render_state,
 )
 
 
@@ -19,6 +21,14 @@ def minimal_payload() -> dict:
 
 
 class RenderStateTest(unittest.TestCase):
+    def test_cell_basis_preferences_have_one_shared_preservation_list(self):
+        state = {key: f"value-{key}" for key in PRESERVED_STATE_KEYS}
+
+        self.assertEqual(preserved_render_state(state), state)
+        self.assertIn("animation_boundary_mode", PRESERVED_STATE_KEYS)
+        self.assertIn("pause_at_breakpoints", PRESERVED_STATE_KEYS)
+        self.assertIn("show_trajectories", PRESERVED_STATE_KEYS)
+
     def test_initial_render_state_preserves_view_preferences(self):
         state = initial_render_state(
             minimal_payload(),
@@ -35,6 +45,7 @@ class RenderStateTest(unittest.TestCase):
                 "include_boundary_images": True,
                 "animation_boundary_mode": "wrap",
                 "pause_at_breakpoints": True,
+                "show_trajectories": True,
                 "reload_request_id": 7,
             },
         )
@@ -49,6 +60,7 @@ class RenderStateTest(unittest.TestCase):
         self.assertTrue(state["include_boundary_images"])
         self.assertEqual(state["animation_boundary_mode"], "wrap")
         self.assertTrue(state["pause_at_breakpoints"])
+        self.assertTrue(state["show_trajectories"])
         self.assertEqual(state["reload_request_id"], 7)
 
     def test_initial_render_state_defaults_to_dark_background(self):
@@ -59,6 +71,7 @@ class RenderStateTest(unittest.TestCase):
         self.assertEqual(state["cell_origin_mode"], "center")
         self.assertEqual(state["animation_boundary_mode"], "continuous")
         self.assertFalse(state["pause_at_breakpoints"])
+        self.assertFalse(state["show_trajectories"])
         self.assertFalse(state["include_boundary_images"])
 
     def test_apply_render_state_update_ignores_unknown_keys(self):

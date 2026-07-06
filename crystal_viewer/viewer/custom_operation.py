@@ -237,6 +237,7 @@ def check_custom_operation(
     validity_error = custom_matrix_validity_error(W_frac, lattice)
     if validity_error is not None:
         return {"error": validity_error}
+    matrix_issue = custom_matrix_symmetry_issue(W_frac, lattice)
 
     fracs = {}
     for atom in atoms:
@@ -275,23 +276,35 @@ def check_custom_operation(
                 "source": atom["index"],
                 "target": best_idx,
                 "element": atom["element"],
+                "source_frac": [round(float(v), 4) for v in frac],
+                "transformed_frac": [round(float(v), 4) for v in x_prime_w],
+                "target_frac": [round(float(v), 4) for v in fracs[best_idx]],
                 "distance": round(best_dist, 6),
             })
         else:
             unmapped.append({
                 "source": atom["index"],
                 "element": atom["element"],
+                "source_frac": [round(float(v), 4) for v in frac],
+                "transformed_frac": [round(float(v), 4) for v in x_prime_w],
                 "frac": [round(float(v), 4) for v in x_prime_w],
+                "nearest_atom": best_idx,
+                "nearest_frac": (
+                    [round(float(v), 4) for v in fracs[best_idx]]
+                    if best_idx is not None else None
+                ),
                 "distance": round(best_dist, 6),
             })
 
     return {
-        "is_symmetry": len(unmapped) == 0,
+        "is_symmetry": len(unmapped) == 0 and matrix_issue is None,
         "total": len(atoms),
         "mapped_count": len(mapped),
         "unmapped_count": len(unmapped),
+        "mapped": mapped,
         "unmapped": unmapped,
         "tolerance_cart": tolerance_cart,
+        "matrix_issue": matrix_issue,
     }
 
 
@@ -300,13 +313,19 @@ def custom_matrix_validity_error(W_frac: np.ndarray, lattice: np.ndarray) -> str
     if W_frac.shape != (3, 3) or not np.all(np.isfinite(W_frac)):
         return "Operation matrix W must be a finite 3x3 matrix"
     try:
-        W_cart = lattice.T @ W_frac @ np.linalg.inv(lattice.T)
+        np.linalg.inv(lattice.T)
     except np.linalg.LinAlgError:
         return "Unit-cell lattice is singular"
+    return None
+
+
+def custom_matrix_symmetry_issue(W_frac: np.ndarray, lattice: np.ndarray) -> str | None:
+    """Explain why a finite affine matrix cannot be a symmetry isometry."""
+    W_cart = lattice.T @ np.asarray(W_frac, dtype=float) @ np.linalg.inv(lattice.T)
     determinant = float(np.linalg.det(W_cart))
     if abs(abs(determinant) - 1.0) > 1e-5:
-        return "Operation matrix must preserve volume (determinant must be ±1)"
+        return "The matrix does not preserve volume (determinant must be ±1)."
     metric = W_cart.T @ W_cart
     if not np.allclose(metric, np.eye(3), atol=1e-5):
-        return "Operation matrix must preserve distances; scaling/shear is not a symmetry operation"
+        return "The matrix does not preserve distances; scaling/shear is not a symmetry operation."
     return None

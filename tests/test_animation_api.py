@@ -75,6 +75,26 @@ class SerializeAnimationPathTest(unittest.TestCase):
 
 
 class AnimationPathResponseTest(unittest.TestCase):
+    def test_non_symmetry_custom_transform_can_still_be_animated(self):
+        payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
+        response = custom_animation_path_response(
+            payload["render_data"],
+            payload["atom_mappings"],
+            {
+                "atom_indices": [2],
+                "animate_id": 99,
+                "W_frac": np.diag([1.2, 1.0, 1.0]).tolist(),
+                "t_frac": [0.0, 0.0, 0.0],
+                "op_type": "matrix",
+                "op_params": {},
+            },
+        )
+
+        self.assertEqual(response["animate_id"], 99)
+        self.assertEqual(len(response["paths"]), 1)
+        self.assertEqual(response["paths"][0]["path"]["type"], "affine_linear")
+        self.assertGreater(response["maximum_travel_distance"], 0.0)
+
     def test_custom_rotation_and_sequence_publish_cartesian_paths(self):
         payload = json.loads(Path("exports/json/halite.json").read_text(encoding="utf-8"))
         common = {

@@ -46,6 +46,7 @@
   <section class="panel" id="three-view-panel">
     <div class="three-view-shell" id="three-view">
       <canvas aria-label="Interactive three-dimensional structure view"></canvas>
+      <div class="atom-legend" data-atom-legend hidden></div>
       <div class="three-view-status" data-three-status hidden></div>
     </div>
   </section>
@@ -67,6 +68,10 @@
           <label>Operation symbol</label>
           <div class="direction-filter-list" id="operation-type-filter"></div>
         </div>
+        <label class="inline-checkbox operation-fixed-filter advanced-only" for="fixed-atom-filter">
+          <input id="fixed-atom-filter" type="checkbox">
+          <span title="Show only operations that leave every selected atom fixed">Fix selected atoms</span>
+        </label>
         <details class="compact-details advanced-only">
           <summary>List settings</summary>
           <div class="control-stack">
@@ -283,6 +288,10 @@
             <input id="pause-at-breakpoints" type="checkbox">
             <span title="Pause at each operation boundary">Stepwise</span>
           </label>
+          <label class="inline-checkbox" for="show-trajectories">
+            <input id="show-trajectories" type="checkbox">
+            <span title="Show atom movement paths">Path</span>
+          </label>
         </div>
         <label class="movement-slider-row" for="movement-progress">
           <input id="movement-progress" type="range" min="0" max="1000" value="0" step="1" list="movement-stops">
@@ -319,13 +328,7 @@
           <h3 class="subsection-title">Export</h3>
           <div class="button-row flush">
             <button id="save-png" class="secondary">Save PNG</button>
-            <button id="record-webm" class="secondary">Record WebM</button>
-            <button id="export-debug-json" class="secondary">Export debug JSON</button>
-          </div>
-          <div class="button-row flush" id="pyvista-export-controls" hidden>
             <button id="save-gif" class="secondary">Save GIF</button>
-            <button id="save-gif-3view" class="secondary">Save 3-view GIFs</button>
-            <button id="save-gif-3view-current" class="secondary">Save current 3-view</button>
           </div>
         </details>
       </section>

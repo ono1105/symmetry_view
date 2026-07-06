@@ -9,6 +9,7 @@ let lastStructureInfoSignature = "";
 let state = {};
 let directionFilterValue = "";
 let operationTypeFilterValue = "";
+let fixedAtomFilterEnabled = false;
 let atomElementFilterValue = "";
 let operationLabelMode = "itc_like";
 let customOperationSequence = [];
@@ -356,6 +357,7 @@ function renderOperations() {
   for (const operation of sorted) {
     if (operationTypeFilterValue && operationSymbolFilterKey(operation) !== operationTypeFilterValue) continue;
     if (directionFilterValue && operationFilterKey(operation) !== directionFilterValue) continue;
+    if (fixedAtomFilterEnabled && !operationFixesSelectedAtoms(operation)) continue;
     const text = optionText(operation);
     const row = document.createElement("button");
     row.type = "button";
@@ -389,6 +391,15 @@ function renderOperations() {
   if (activeMode === "custom" && experienceMode === "advanced" && sourceKind === "crystal") {
     renderCustomSequenceControls(sorted);
   }
+}
+
+function operationFixesSelectedAtoms(operation) {
+  const selected = String(state.scope).startsWith("selected")
+    ? (state.selected_atoms || []).map(Number)
+    : [];
+  if (!selected.length) return true;
+  const fixed = new Set((operation.fixed_atom_indices || []).map(Number));
+  return selected.every(index => fixed.has(index));
 }
 
 function operationSymbolFilterKey(operation) {
@@ -1555,6 +1566,7 @@ function syncSpeedButtons() {
   output.value = `${speed.toFixed(2)}×`;
   output.textContent = output.value;
   document.getElementById("pause-at-breakpoints").checked = Boolean(state.pause_at_breakpoints);
+  document.getElementById("show-trajectories").checked = Boolean(state.show_trajectories);
 }
 
 function syncBoundaryButtons() {
@@ -1728,47 +1740,15 @@ function syncGifSavingControls() {
   const saving = isGifSaving();
   document.body.classList.toggle("saving-gif", saving);
   for (const id of [
-    "save-gif", "save-gif-3view", "save-gif-3view-current", "play-toggle", "reset",
+    "save-gif", "play-toggle", "reset",
     "previous-frame", "next-frame",
   ]) {
     const button = document.getElementById(id);
     if (button) button.disabled = saving;
   }
   const saveGif = document.getElementById("save-gif");
-  const save3 = document.getElementById("save-gif-3view");
-  const save3current = document.getElementById("save-gif-3view-current");
   if (saveGif) saveGif.textContent = saving ? "Saving..." : "Save GIF";
   setMovementProgress(movementProgressValue);
-  if (save3) save3.textContent = saving ? "Saving..." : "Save 3-view GIFs";
-  if (save3current) save3current.textContent = saving ? "Saving..." : "Save 3-view GIFs (current view)";
-  document.getElementById("pyvista-export-controls").hidden = !state.pyvista_enabled;
-}
-
-function downloadJson(filename, value) {
-  const blob = new Blob([JSON.stringify(value, null, 2)], {type: "application/json"});
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-async function exportDebugJson() {
-  const operationIndex = Number(state.operation_index);
-  const [stateData, renderData, animationPath, symmetryElements] = await Promise.all([
-    api("/api/state"),
-    api("/api/render_data"),
-    api(`/api/animation_path?operation_index=${operationIndex}`),
-    api(`/api/symmetry_elements?operation_index=${operationIndex}`),
-  ]);
-  downloadJson(`symmetry-debug-op${operationIndex}.json`, {
-    exported_at: new Date().toISOString(),
-    state: stateData,
-    render: renderData,
-    animation: animationPath,
-    symmetry_elements: symmetryElements,
-  });
 }
 
 function selectedAtomIndices() {
@@ -2179,17 +2159,13 @@ function syncActiveModeControls() {
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-selected", String(selected));
   }
-  const recordWebm = document.getElementById("record-webm");
-  if (recordWebm) {
-    recordWebm.disabled = false;
-    recordWebm.title = "";
-  }
 }
 
 function syncExperienceModeControls() {
   const beginner = experienceMode === "beginner";
   document.body.classList.toggle("beginner-mode", beginner);
   document.body.classList.toggle("advanced-mode", !beginner);
+  document.querySelector(".operation-fixed-filter").hidden = beginner;
   const modeButton = document.getElementById("experience-toggle");
   modeButton.textContent = beginner ? "Simple" : "Full";
   modeButton.dataset.experience = beginner ? "advanced" : "beginner";
@@ -2210,6 +2186,8 @@ function setExperienceMode(mode) {
   experienceMode = mode === "advanced" ? "advanced" : "beginner";
   if (experienceMode === "beginner") {
     directionFilterValue = "";
+    fixedAtomFilterEnabled = false;
+    document.getElementById("fixed-atom-filter").checked = false;
     const update = {};
     if (activeMode !== "standard") {
       activeMode = "standard";
@@ -2419,6 +2397,13 @@ document.getElementById("pause-at-breakpoints").addEventListener("change", event
     showLoadError("Animation setting failed", error);
   });
 });
+document.getElementById("show-trajectories").addEventListener("change", event => {
+  postState({show_trajectories: event.target.checked});
+});
+document.getElementById("fixed-atom-filter").addEventListener("change", event => {
+  fixedAtomFilterEnabled = event.target.checked;
+  renderOperations();
+});
 for (const button of document.querySelectorAll(".boundary-button")) {
   button.addEventListener("click", () => postState({
     animation_boundary_mode: button.dataset.boundaryMode,
@@ -2487,47 +2472,16 @@ document.getElementById("reset-view").addEventListener("click", () => {
 document.getElementById("apply-view-center").addEventListener("click", applyViewCenter);
 document.getElementById("view-direction-index").addEventListener("click", applyViewDirectionIndex);
 document.getElementById("view-plane-index").addEventListener("click", applyViewPlaneIndex);
-document.getElementById("save-gif").addEventListener("click", () => {
-  state.gif_status = "writing GIF...";
-  syncGifSavingControls();
-  renderStatus();
+document.getElementById("save-gif").addEventListener("click", async () => {
   if (activeMode === "custom") {
-    sendCurrentCustomAnimation(false);
-    window.setTimeout(() => postState({gif_request_id: Date.now(), playing: false}), 120);
-    return;
+    if (!await sendCurrentCustomAnimation(false)) return;
+  } else {
+    await postState({playing: false});
   }
-  postState({gif_request_id: Date.now(), playing: false});
+  window.dispatchEvent(new CustomEvent("symmetry-save-gif"));
 });
 document.getElementById("save-png").addEventListener("click", () => {
   window.dispatchEvent(new CustomEvent("symmetry-save-png"));
-});
-document.getElementById("record-webm").addEventListener("click", () => {
-  window.dispatchEvent(new CustomEvent("symmetry-record-webm"));
-});
-document.getElementById("export-debug-json").addEventListener("click", () => {
-  exportDebugJson().catch(error => showLoadError("Debug export failed", error));
-});
-document.getElementById("save-gif-3view").addEventListener("click", () => {
-  state.gif_status = "writing 3-view GIFs...";
-  syncGifSavingControls();
-  renderStatus();
-  if (activeMode === "custom") {
-    sendCurrentCustomAnimation(false);
-    window.setTimeout(() => postState({gif_3view_request_id: Date.now(), playing: false}), 120);
-    return;
-  }
-  postState({gif_3view_request_id: Date.now(), playing: false});
-});
-document.getElementById("save-gif-3view-current").addEventListener("click", () => {
-  state.gif_status = "writing 3-view GIFs...";
-  syncGifSavingControls();
-  renderStatus();
-  if (activeMode === "custom") {
-    sendCurrentCustomAnimation(false);
-    window.setTimeout(() => postState({gif_3view_current_request_id: Date.now(), playing: false}), 120);
-    return;
-  }
-  postState({gif_3view_current_request_id: Date.now(), playing: false});
 });
 function cameraAngle() {
   const value = Number(document.getElementById("camera-angle").value);
@@ -2669,24 +2623,38 @@ function displayCopResult(result, opType, opParams) {
     div.className = "cop-result fail";
     div.innerHTML = `<strong>Error:</strong> ${result.error}`;
     div.hidden = false;
-    return;
+    return false;
   }
   const ok = result.is_symmetry;
   div.className = "cop-result " + (ok ? "ok" : "fail");
   let html = ok
     ? `<strong>✓ All ${result.total} atoms map correctly — this IS a symmetry operation</strong>`
-    : `<strong>✗ ${result.unmapped_count} / ${result.total} atoms do not map — NOT a symmetry operation</strong>`;
+    : result.matrix_issue
+      ? `<strong>✗ The matrix is NOT a symmetry operation</strong>`
+      : `<strong>✗ ${result.unmapped_count} / ${result.total} atoms do not map — NOT a symmetry operation</strong>`;
+  if (result.matrix_issue) html += `<div class="matrix-issue">${result.matrix_issue} It can still be animated as an affine transform.</div>`;
+
+  const coordinateText = values => Array.isArray(values)
+    ? `(${values.map(value => Number(value).toFixed(4).replace(/\.?0+$/, "")).join(", ")})`
+    : "—";
+  if (Array.isArray(result.mapped) && result.mapped.length) {
+    html += `<details class="mapping-result-details"><summary>Matched atoms (${result.mapped.length})</summary>`;
+    html += `<div class="unmapped-list">`;
+    for (const item of result.mapped) {
+      html += `<div>atom ${item.source}: <b>${item.element}</b> ${coordinateText(item.source_frac)} → ${coordinateText(item.transformed_frac)} → atom ${item.target} ${coordinateText(item.target_frac)}</div>`;
+    }
+    html += `</div></details>`;
+  }
 
   if (!ok && result.unmapped && result.unmapped.length > 0) {
     copAllUnmapped = result.unmapped.map(u => u.source);
     customUnmappedAtoms = new Set(copAllUnmapped);
-    html += `<div style="margin:8px 0 4px;font-size:12px;color:#94a3b8">Unmapped atoms are listed below. Use the shared Atoms and Animation panels to animate this custom operation.</div>`;
+    html += `<details class="mapping-result-details" open><summary>Unmatched atoms (${result.unmapped.length})</summary>`;
     html += `<div class="unmapped-list" id="cop-unmapped-list">`;
     for (const u of result.unmapped) {
-      const frac = u.frac ? u.frac.map(v => v.toFixed(3)).join(", ") : "—";
-      html += `<div>atom ${u.source}: <b>${u.element}</b>  →  (${frac})  nearest: ${u.distance.toFixed(3)} Å</div>`;
+      html += `<div>atom ${u.source}: <b>${u.element}</b> ${coordinateText(u.source_frac)} → ${coordinateText(u.transformed_frac)} · nearest atom ${u.nearest_atom ?? "—"} ${coordinateText(u.nearest_frac)} · ${u.distance.toFixed(3)} Å</div>`;
     }
-    html += `</div>`;
+    html += `</div></details>`;
   }
   if (result.W_frac && result.t_frac) {
     copMatrix = {W_frac: result.W_frac, t_frac: result.t_frac, op_type: opType || "matrix", op_params: opParams || {}, result};
@@ -2738,16 +2706,16 @@ function sendCurrentCustomAnimation(startPlaying = true) {
     result.className = "cop-result fail";
     result.textContent = "Check the operation sequence first.";
     result.hidden = false;
-    return;
+    return false;
   }
   const indices = currentAnimationAtoms();
   if (!indices.length) {
     result.className = "cop-result fail";
     result.textContent = "No atoms selected.";
     result.hidden = false;
-    return;
+    return false;
   }
-  sendCopAnimate(indices, currentAnimationUnitCellOnly(), startPlaying);
+  return sendCopAnimate(indices, currentAnimationUnitCellOnly(), startPlaying).then(() => true);
 }
 
 async function sendCopAnimate(atomIndices, unitCellOnly = false, startPlaying = true) {

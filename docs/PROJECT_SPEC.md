@@ -113,7 +113,7 @@ The first GUI intentionally avoids Qt/PyVistaQt. WSL/X11 showed `BadWindow` fail
 For responsiveness, it defaults to source atoms only and offers `--expanded` for the half-cell periodic clone display used in visual checks.
 The expanded GUI display uses a quarter-cell margin rather than the wider half-cell margin used by earlier checks.
 
-`tools/view_json_server.py` is the preferred interactive viewer. It can start from JSON, CIF, XYZ, or an empty state. CIF/XYZ inputs are analyzed and exported to JSON before the existing viewer path is loaded. `--web-only` skips PyVista; the default retains it temporarily for final comparison and legacy three-view GIF output.
+`tools/view_json_server.py` is the preferred interactive viewer. It can start from JSON, CIF, XYZ, or an empty state. CIF/XYZ inputs are analyzed and exported to JSON before the existing viewer path is loaded. The default is Web-only; `--with-pyvista` explicitly opens the retained comparison renderer and enables legacy GIF output.
 
 It is now a thin entry point plus stdlib HTTP API. Shared viewer responsibilities live under `crystal_viewer/viewer/`:
 

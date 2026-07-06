@@ -3,7 +3,11 @@ import unittest
 from pathlib import Path
 
 from crystal_viewer.viewer.cell_settings import standardized_payload
-from crystal_viewer.viewer.operation_labels import operation_notation_order, operation_summaries
+from crystal_viewer.viewer.operation_labels import (
+    operation_fixed_atom_indices,
+    operation_notation_order,
+    operation_summaries,
+)
 import numpy as np
 
 from crystal_viewer.viewer.animation_context import select_animation_context, shared_step_translation
@@ -12,6 +16,37 @@ from crystal_viewer.viewer.symmetry_elements import display_symmetry_elements, g
 
 
 class OperationLabelsTest(unittest.TestCase):
+    def test_fixed_crystal_atoms_are_compared_modulo_lattice_translations(self):
+        render_data = {
+            "unit_cell": {"lattice": np.eye(3).tolist()},
+            "atoms": [
+                {"index": 0, "frac": [0.0, 0.0, 0.0]},
+                {"index": 1, "frac": [0.25, 0.0, 0.0]},
+                {"index": 2, "frac": [1.0, 0.0, 0.0]},
+            ],
+        }
+        inversion = {
+            "matrix_frac": (-np.eye(3)).tolist(),
+            "translation_frac": [0.0, 0.0, 0.0],
+        }
+
+        self.assertEqual(operation_fixed_atom_indices(render_data, inversion), [0, 2])
+
+    def test_fixed_molecule_atoms_use_cartesian_positions(self):
+        render_data = {
+            "unit_cell": None,
+            "atoms": [
+                {"index": 0, "cart": [0.0, 0.0, 0.0]},
+                {"index": 1, "cart": [1.0, 0.0, 0.0]},
+            ],
+        }
+        half_turn = {
+            "matrix_cart": [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]],
+            "translation_cart": [0.0, 0.0, 0.0],
+        }
+
+        self.assertEqual(operation_fixed_atom_indices(render_data, half_turn), [0])
+
     def test_rotoinversion_notation_order_comes_from_symbol(self):
         operation = {
             "kind": "rotoinversion_or_improper_6",

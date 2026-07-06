@@ -112,6 +112,9 @@ JSON export:
 .venv/bin/python tools/view_json_server.py exports/json/halite.json
 ```
 
+通常起動はWebビューアーのみです。比較確認や旧GIF出力が必要な場合だけ
+`--with-pyvista`を付けてPyVistaを同時起動します。
+
 `tools/` ディレクトリに移動している場合:
 
 ```bash
@@ -119,7 +122,7 @@ JSON export:
 ```
 
 `exports/json/` は共有用のJSON本体、`exports/gifs/<structure>/` はローカル確認用のGIF出力置き場です。
-ブラウザビューアーの `Save GIF` / `Save 3-view GIFs` もこの `exports/gifs/<structure>/` へ保存します。
+WebビューアーのExportはPNGとアニメーションGIFに対応しています。
 
 ## 現在の設計方針
 

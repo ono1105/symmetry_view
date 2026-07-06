@@ -68,6 +68,7 @@ def operation_summaries(
                 "translation_frac": operation.get("translation_frac"),
                 "matrix_cart": operation.get("matrix_cart"),
                 "translation_cart": operation.get("translation_cart"),
+                "fixed_atom_indices": operation_fixed_atom_indices(render_data, operation),
             }
         )
     return summaries
@@ -97,9 +98,51 @@ def minimal_operation_summaries(render_data: dict) -> list[dict]:
                 "translation_frac": operation.get("translation_frac"),
                 "matrix_cart": operation.get("matrix_cart"),
                 "translation_cart": operation.get("translation_cart"),
+                "fixed_atom_indices": operation_fixed_atom_indices(render_data, operation),
             }
         )
     return summaries
+
+
+def operation_fixed_atom_indices(
+    render_data: dict,
+    operation: dict,
+    *,
+    tolerance_cart: float = 1e-6,
+) -> list[int]:
+    """Return atoms whose positions are unchanged by an operation.
+
+    Crystal positions are compared modulo lattice translations. Molecule
+    positions are compared directly in Cartesian coordinates.
+    """
+    atoms = render_data.get("atoms", [])
+    unit_cell = render_data.get("unit_cell")
+    fixed = []
+    if unit_cell is not None:
+        matrix = np.asarray(operation.get("matrix_frac"), dtype=float)
+        translation = np.asarray(operation.get("translation_frac"), dtype=float)
+        lattice = np.asarray(unit_cell.get("lattice"), dtype=float)
+        if matrix.shape != (3, 3) or translation.shape != (3,) or lattice.shape != (3, 3):
+            return fixed
+        for atom in atoms:
+            position = np.asarray(atom.get("frac"), dtype=float)
+            if position.shape != (3,):
+                continue
+            displacement = matrix @ position + translation - position
+            displacement -= np.rint(displacement)
+            if np.linalg.norm(displacement @ lattice) <= tolerance_cart:
+                fixed.append(int(atom["index"]))
+        return fixed
+
+    matrix = np.asarray(operation.get("matrix_cart"), dtype=float)
+    translation = np.asarray(operation.get("translation_cart"), dtype=float)
+    if matrix.shape != (3, 3) or translation.shape != (3,):
+        return fixed
+    for atom in atoms:
+        position = np.asarray(atom.get("cart"), dtype=float)
+        if position.shape == (3,) and np.linalg.norm(matrix @ position + translation - position) <= tolerance_cart:
+            fixed.append(int(atom["index"]))
+    return fixed
 
 
 def operation_notation_order(operation: dict) -> int | None:

@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 import os
 import tempfile
@@ -5,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from crystal_viewer.json_export import EXPORT_SCHEMA_VERSION
 from crystal_viewer.web.browser_ui import HTML
@@ -13,6 +16,7 @@ from crystal_viewer.viewer.display_atoms import display_atom_instances
 from tools.view_json_server import (
     atom_motion_api_items,
     atom_render_style_items,
+    build_argument_parser,
     cached_export_json_path,
     compose_operation_indices,
     compose_operation_sequence_items,
@@ -21,12 +25,23 @@ from tools.view_json_server import (
     display_unit_cell_api_item,
     export_cell_setting_json_worker,
     find_operation_sequence_for_target,
+    gif_bytes_from_data_urls,
     replace_shared_state_for_load,
     resolve_example_path,
+    ReusableThreadingHTTPServer,
+    update_view_coordinate_state,
 )
 
 
 class BrowserUiAssetsTest(unittest.TestCase):
+    def test_server_defaults_to_web_only_and_pyvista_is_opt_in(self):
+        parser = build_argument_parser()
+
+        self.assertFalse(parser.parse_args([]).pyvista_enabled)
+        self.assertEqual(parser.parse_args([]).port, 0)
+        self.assertFalse(parser.parse_args(["--web-only"]).pyvista_enabled)
+        self.assertTrue(parser.parse_args(["--with-pyvista"]).pyvista_enabled)
+
     def test_html_references_external_styles_and_scripts(self):
         self.assertIn('href="/static/browser_ui.css"', HTML)
         self.assertIn('src="/static/browser_ui.js"', HTML)
@@ -35,6 +50,11 @@ class BrowserUiAssetsTest(unittest.TestCase):
         self.assertIn('id="next-frame"', HTML)
         self.assertIn('id="animation-speed"', HTML)
         self.assertIn('id="pause-at-breakpoints"', HTML)
+        self.assertIn('id="show-trajectories"', HTML)
+        self.assertIn('id="fixed-atom-filter"', HTML)
+        self.assertIn('data-atom-legend', HTML)
+        self.assertIn('operation-fixed-filter advanced-only', HTML)
+        self.assertNotIn('animation-action-row', HTML)
         self.assertIn('>Stepwise</span>', HTML)
         self.assertNotIn('id="continue-boundary"', HTML)
         self.assertIn('class="inline-checkbox advanced-only"', HTML)
@@ -42,9 +62,12 @@ class BrowserUiAssetsTest(unittest.TestCase):
         self.assertLess(HTML.index('id="reset"'), HTML.index('id="pause-at-breakpoints"'))
         self.assertNotIn('class="secondary speed-button', HTML)
         self.assertIn('id="save-png"', HTML)
-        self.assertIn('id="record-webm"', HTML)
-        self.assertIn('id="export-debug-json"', HTML)
+        self.assertIn('id="save-gif"', HTML)
+        self.assertNotIn('id="record-webm"', HTML)
+        self.assertNotIn('id="export-debug-json"', HTML)
+        self.assertNotIn('id="save-gif-3view"', HTML)
         self.assertNotIn('id="btn-load-existing-op"', HTML)
+        self.assertNotIn("btn-animate-custom-result", Path("crystal_viewer/web/browser_ui.js").read_text(encoding="utf-8"))
         self.assertIn('id="btn-add-custom-operation"', HTML)
         self.assertIn('id="reset-atom-appearance"', HTML)
         self.assertIn('id="example-select-menu"', HTML)
@@ -74,6 +97,62 @@ class BrowserUiAssetsTest(unittest.TestCase):
         source = Path("crystal_viewer/web/three_view.js").read_text(encoding="utf-8")
         self.assertIn("customAnimationChanged || pathOptionsChanged", source)
         self.assertIn("this.state.pause_at_breakpoints && !this.recording", source)
+        self.assertIn("updateTrajectoryLines()", source)
+        self.assertIn("new THREE.LineSegments(geometry, material)", source)
+        self.assertIn("async recordGif()", source)
+        self.assertNotIn("recordWebm", source)
+        self.assertIn("viewAlongCartesianDirection", source)
+        self.assertIn("setCameraCenter", source)
+        self.assertIn("setBackgroundMode", source)
+        self.assertIn("setLegendVisible", source)
+
+    def test_empty_atom_selection_does_not_hide_operations(self):
+        source = Path("crystal_viewer/web/browser_ui.js").read_text(encoding="utf-8")
+        self.assertIn('String(state.scope).startsWith("selected")', source)
+        self.assertIn("if (!selected.length) return true", source)
+        self.assertIn("fixedAtomFilterEnabled = false", source)
+        self.assertIn('.operation-fixed-filter").hidden = beginner', source)
+        self.assertIn("sendCurrentCustomAnimation(true)", source)
+
+
+class WebCameraStateTest(unittest.TestCase):
+    def test_fractional_camera_inputs_are_converted_by_python(self):
+        render_data = {
+            "unit_cell": {"lattice": [[2.0, 0.0, 0.0], [0.5, 3.0, 0.0], [0.0, 0.0, 4.0]]},
+            "atoms": [{"cart": [0.0, 0.0, 0.0]}],
+        }
+        state = {"display_mode": "source", "cell_origin_mode": "center"}
+
+        update_view_coordinate_state(render_data, state, {
+            "view_center_request_id": 1,
+            "view_center_frac": [0.5, 0.5, 0.5],
+            "view_direction_request_id": 2,
+            "view_direction_frac": [1.0, 0.0, 0.0],
+            "view_plane_request_id": 3,
+            "view_plane_hkl": [1.0, 0.0, 0.0],
+        })
+
+        np.testing.assert_allclose(state["view_center_cart"], [1.25, 1.5, 2.0])
+        np.testing.assert_allclose(state["view_direction_cart"], [1.0, 0.0, 0.0])
+        self.assertAlmostEqual(np.linalg.norm(state["view_plane_normal_cart"]), 1.0)
+
+    def test_http_server_reuses_address_and_does_not_wait_for_request_threads(self):
+        self.assertTrue(ReusableThreadingHTTPServer.allow_reuse_address)
+        self.assertTrue(ReusableThreadingHTTPServer.daemon_threads)
+        self.assertFalse(ReusableThreadingHTTPServer.block_on_close)
+
+    def test_browser_frames_are_encoded_as_animated_gif(self):
+        frames = []
+        for color in ((255, 0, 0), (0, 0, 255)):
+            buffer = io.BytesIO()
+            Image.new("RGB", (2, 2), color).save(buffer, format="PNG")
+            frames.append("data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii"))
+
+        encoded = gif_bytes_from_data_urls(frames, 80)
+
+        self.assertTrue(encoded.startswith(b"GIF89a"))
+        image = Image.open(io.BytesIO(encoded))
+        self.assertEqual(image.n_frames, 2)
 
 
 class AtomRenderStyleItemsTest(unittest.TestCase):

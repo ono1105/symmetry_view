@@ -12,12 +12,21 @@ import {
 const CAMERA_FOV = 42;
 const ORTHOGRAPHIC_HEIGHT = 10;
 const STATIONARY_ANIMATION_SECONDS = 0.4;
+const CURVED_PATH_TYPES = new Set(["rotation", "screw", "rotoinversion", "rotoreflection"]);
+
+
+function pathHasCurvedMotion(path) {
+  if (!path) return false;
+  if (path.type === "sequential") return (path.segments || []).some(pathHasCurvedMotion);
+  return CURVED_PATH_TYPES.has(path.type);
+}
 
 
 class StaticStructureView {
   constructor(container) {
     this.container = container;
     this.status = container.querySelector("[data-three-status]");
+    this.legend = container.querySelector("[data-atom-legend]");
     this.canvas = container.querySelector("canvas");
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0b0f14);
@@ -64,6 +73,7 @@ class StaticStructureView {
     this.operationFocusPoint = null;
     this.symmetryObjects = [];
     this.startMarkerObjects = [];
+    this.trajectoryObjects = [];
     this.selectionMarkers = new Map();
     this.selectionSignature = null;
     this.animationProgress = 0;
@@ -78,6 +88,8 @@ class StaticStructureView {
     this.syncQueue = Promise.resolve();
     this.serverPlaying = false;
     this.recording = false;
+    this.backgroundMode = null;
+    this.legendItems = [];
     this.tempMatrix = new THREE.Matrix4();
     this.tempPosition = new THREE.Vector3();
     this.tempScale = new THREE.Vector3();
@@ -91,7 +103,9 @@ class StaticStructureView {
       this.setAnimationProgress(event.detail?.progress);
     });
     window.addEventListener("symmetry-save-png", () => this.savePng());
-    window.addEventListener("symmetry-record-webm", () => this.recordWebm());
+    window.addEventListener("symmetry-save-gif", () => {
+      this.syncQueue.then(() => this.recordGif());
+    });
     requestAnimationFrame(this.animate);
   }
 
@@ -139,6 +153,7 @@ class StaticStructureView {
       }
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
+    this.setLegendItems(payload.display_atoms || [], payload.atom_styles || []);
     this.render();
   }
 
@@ -147,6 +162,7 @@ class StaticStructureView {
     const renderData = payload.render_data || {};
     const atoms = payload.display_atoms || renderData.atoms || [];
     const styles = new Map((payload.atom_styles || []).map(style => [Number(style.index), style]));
+    this.setLegendItems(atoms, payload.atom_styles || []);
     this.addAtoms(atoms, styles);
     if (payload.source_kind === "crystal" && payload.display_unit_cell) {
       this.addUnitCell(payload.display_unit_cell);
@@ -234,6 +250,7 @@ class StaticStructureView {
   clearContent() {
     this.symmetryObjects = [];
     this.startMarkerObjects = [];
+    this.trajectoryObjects = [];
     this.selectionMarkers.clear();
     this.selectionSignature = null;
     this.atomInstances.clear();
@@ -431,7 +448,10 @@ class StaticStructureView {
       .some(key => Object.prototype.hasOwnProperty.call(update, key));
     const atomColorsChanged = ["element_colors", "atom_colors"]
       .some(key => Object.prototype.hasOwnProperty.call(update, key));
+    const trajectorySettingChanged = Object.prototype.hasOwnProperty.call(update, "show_trajectories");
     this.state = {...state};
+    this.setBackgroundMode(state.background_mode);
+    this.setLegendVisible(state.legend_visible);
     if (displayLayoutChanged || atomVisibilityChanged) {
       await this.refresh(atomVisibilityChanged && !displayLayoutChanged);
       if (state.active_mode === "custom") {
@@ -461,6 +481,7 @@ class StaticStructureView {
     const customPathOptionsChanged = state.active_mode === "custom"
       && customRequest
       && (customAnimationChanged || pathOptionsChanged);
+    let pathsUpdated = false;
     if (customPathOptionsChanged) {
       const generation = ++this.pathGeneration;
       await this.loadCustomAnimationPaths(generation);
@@ -468,6 +489,7 @@ class StaticStructureView {
       this.loadCustomSymmetryElements(state.custom_op_result);
       this.resetAnimation();
       this.updateCustomSequenceElements();
+      pathsUpdated = true;
     } else if (state.active_mode !== "custom" && (pathOptionsChanged || this.animationOperationIndex === null)) {
       const generation = ++this.pathGeneration;
       await Promise.all([
@@ -476,7 +498,9 @@ class StaticStructureView {
       ]);
       if (generation !== this.pathGeneration) return;
       this.resetAnimation();
+      pathsUpdated = true;
     }
+    if (pathsUpdated || atomVisibilityChanged || trajectorySettingChanged) this.updateTrajectoryLines();
     if (update.reset) {
       this.resetAnimation();
     }
@@ -485,6 +509,18 @@ class StaticStructureView {
     }
     if (Object.prototype.hasOwnProperty.call(update, "view_request_id")) {
       this.viewAlongCurrentOperation();
+    }
+    if (Object.prototype.hasOwnProperty.call(update, "reset_view_request_id")) {
+      this.setCameraCenter(state.reset_view_center_cart);
+    }
+    if (Object.prototype.hasOwnProperty.call(update, "view_center_request_id")) {
+      this.setCameraCenter(state.view_center_cart);
+    }
+    if (Object.prototype.hasOwnProperty.call(update, "view_direction_request_id")) {
+      this.viewAlongCartesianDirection(state.view_direction_cart, state.indexed_view_center_cart);
+    }
+    if (Object.prototype.hasOwnProperty.call(update, "view_plane_request_id")) {
+      this.viewAlongCartesianDirection(state.view_plane_normal_cart, state.indexed_view_center_cart);
     }
     if (this.recording) return;
     const nextServerPlaying = Boolean(state.playing);
@@ -647,12 +683,16 @@ class StaticStructureView {
   }
 
   viewAlongCurrentOperation() {
-    if (!Array.isArray(this.operationViewDirection) || !this.controls) return;
-    const direction = new THREE.Vector3(...this.operationViewDirection);
+    this.viewAlongCartesianDirection(this.operationViewDirection, this.operationFocusPoint);
+  }
+
+  viewAlongCartesianDirection(directionValues, focusValues = null) {
+    if (!Array.isArray(directionValues) || !this.controls) return;
+    const direction = new THREE.Vector3(...directionValues);
     if (direction.lengthSq() <= 1e-12) return;
     direction.normalize();
-    const focus = Array.isArray(this.operationFocusPoint)
-      ? new THREE.Vector3(...this.operationFocusPoint)
+    const focus = Array.isArray(focusValues)
+      ? new THREE.Vector3(...focusValues)
       : this.controls.target.clone();
     const currentDistance = this.activeCamera.position.distanceTo(this.controls.target);
     const distance = Math.max(currentDistance, this.sceneSpan() * 1.2, 1);
@@ -667,6 +707,58 @@ class StaticStructureView {
     this.activeCamera.lookAt(focus);
     this.controls.update();
     this.render();
+  }
+
+  setCameraCenter(centerValues) {
+    if (!Array.isArray(centerValues) || !this.controls) return;
+    const center = new THREE.Vector3(...centerValues);
+    const offset = center.clone().sub(this.controls.target);
+    this.controls.target.copy(center);
+    this.activeCamera.position.add(offset);
+    this.activeCamera.lookAt(center);
+    this.controls.update();
+    this.render();
+  }
+
+  setBackgroundMode(mode) {
+    const resolved = mode === "light" ? "light" : "dark";
+    if (resolved === this.backgroundMode) return;
+    this.backgroundMode = resolved;
+    this.scene.background.set(resolved === "light" ? 0xf4f6f8 : 0x0b0f14);
+    this.render();
+  }
+
+  setLegendItems(atoms, styles) {
+    const styleByAtom = new Map(styles.map(style => [Number(style.index), style]));
+    const items = new Map();
+    for (const atom of atoms) {
+      if (items.has(atom.element)) continue;
+      items.set(atom.element, styleByAtom.get(Number(atom.source_atom ?? atom.index))?.color || "#9aa5b1");
+    }
+    this.legendItems = [...items.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    this.renderLegend();
+  }
+
+  setLegendVisible(visible) {
+    if (!this.legend) return;
+    this.legend.hidden = !visible;
+    this.renderLegend();
+  }
+
+  renderLegend() {
+    if (!this.legend) return;
+    this.legend.replaceChildren();
+    for (const [element, color] of this.legendItems) {
+      const item = document.createElement("div");
+      item.className = "atom-legend-item";
+      const swatch = document.createElement("span");
+      swatch.className = "atom-legend-swatch";
+      swatch.style.backgroundColor = color;
+      const label = document.createElement("span");
+      label.textContent = element;
+      item.append(swatch, label);
+      this.legend.appendChild(item);
+    }
   }
 
   addAxis(axis, span) {
@@ -827,6 +919,59 @@ class StaticStructureView {
     this.updateCustomSequenceElements();
   }
 
+  clearTrajectoryLines() {
+    for (const object of this.trajectoryObjects) {
+      this.content.remove(object);
+      object.geometry?.dispose();
+      object.material?.dispose();
+    }
+    this.trajectoryObjects = [];
+  }
+
+  updateTrajectoryLines() {
+    this.clearTrajectoryLines();
+    if (!this.state.show_trajectories || !this.animationPaths.size) {
+      this.render();
+      return;
+    }
+    const positions = [];
+    for (const instance of this.atomInstances.values()) {
+      const path = this.animationPaths.get(instance.sourceAtom);
+      if (!pathAppliesToDisplayInstance(path, instance)) continue;
+      const samples = new Set([0, 1, ...pathBreakpoints(path, instance.start)]);
+      if (pathHasCurvedMotion(path)) {
+        for (let index = 1; index < 49; index += 1) samples.add(index / 48);
+      }
+      const progressValues = [...samples].sort((a, b) => a - b);
+      let previous = evaluatePath(path, progressValues[0], instance.start);
+      for (const progress of progressValues.slice(1)) {
+        const current = evaluatePath(path, progress, instance.start);
+        const distanceSquared = current.reduce((sum, value, axis) => (
+          sum + (value - previous[axis]) ** 2
+        ), 0);
+        if (distanceSquared > 1e-16) positions.push(...previous, ...current);
+        previous = current;
+      }
+    }
+    if (!positions.length) {
+      this.render();
+      return;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    const material = new THREE.LineBasicMaterial({
+      color: 0xf6c85f,
+      transparent: true,
+      opacity: 0.62,
+      depthWrite: false,
+    });
+    const lines = new THREE.LineSegments(geometry, material);
+    lines.renderOrder = 4;
+    this.trajectoryObjects.push(lines);
+    this.content.add(lines);
+    this.render();
+  }
+
   publishAnimationProgress(force = false) {
     const bucket = Math.round(this.animationProgress * 100);
     if (!force && bucket === this.lastPublishedProgressBucket) return;
@@ -928,40 +1073,44 @@ class StaticStructureView {
     }, "image/png");
   }
 
-  async recordWebm() {
-    if (this.recording || !this.canvas.captureStream || typeof MediaRecorder === "undefined") {
-      this.setStatus(`${this.baseStatus}, WebM recording is unavailable`);
-      return;
-    }
-    const mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]
-      .find(type => MediaRecorder.isTypeSupported(type));
-    if (!mimeType) {
-      this.setStatus(`${this.baseStatus}, WebM recording is unsupported`);
-      return;
-    }
+  async recordGif() {
+    if (this.recording || !this.animationPaths.size) return;
     this.recording = true;
-    const stream = this.canvas.captureStream(30);
-    const chunks = [];
-    const recorder = new MediaRecorder(stream, {mimeType});
-    recorder.addEventListener("dataavailable", event => {
-      if (event.data.size) chunks.push(event.data);
-    });
-    const stopped = new Promise(resolve => recorder.addEventListener("stop", resolve, {once: true}));
+    const previousProgress = this.animationProgress;
+    const durationMs = this.animationDurationMs();
+    const frameCount = Math.max(2, Math.min(90, Math.ceil(durationMs / 100) + 1));
+    const frames = [];
     try {
-      this.resetAnimation();
-      this.showStartMarkers();
-      recorder.start();
-      this.playing = true;
+      this.playing = false;
+      this.serverPlaying = false;
       this.animationStartedAt = null;
-      await new Promise(resolve => setTimeout(resolve, this.animationDurationMs() + 500));
-      recorder.stop();
-      await stopped;
-      this.downloadBlob(new Blob(chunks, {type: mimeType}), "webm");
-      this.setStatus(`${this.baseStatus}, WebM recorded`);
+      this.animationProgress = 0;
+      this.showStartMarkers();
+      for (let index = 0; index < frameCount; index += 1) {
+        this.animationProgress = index / (frameCount - 1);
+        this.applyAnimationProgress();
+        this.render();
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        frames.push(this.canvas.toDataURL("image/png"));
+      }
+      const response = await fetch("/api/export_gif", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          frames,
+          frame_duration_ms: Math.round(durationMs / (frameCount - 1)),
+        }),
+      });
+      if (!response.ok) throw new Error(await response.text() || `${response.status} ${response.statusText}`);
+      this.downloadBlob(await response.blob(), "gif");
+    } catch (error) {
+      this.setStatus(`GIF export error: ${error.message}`);
     } finally {
       this.recording = false;
       this.playing = false;
-      stream.getTracks().forEach(track => track.stop());
+      this.animationProgress = previousProgress;
+      this.applyAnimationProgress();
+      this.render();
     }
   }
 

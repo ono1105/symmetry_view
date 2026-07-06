@@ -1,5 +1,46 @@
 # コードレビューメモ（Codex向け共有）
 
+## 2026-07-06: プロジェクト全体精査（Claude, HEAD=69da2e6＋未コミット差分）
+
+依頼により全体（≈16.6k行: 解析層・viewer・web・server・tests）を横断精査。**Python 141件＋JSパリティ10件すべてグリーン**。横断スイープ（mutable default引数・bare except・自コードのTODO/FIXME・O(N²)原子ループ）はすべてゼロ。過去指摘の解消も確認：`send_json` は `json.dumps(body, default=to_jsonable)` 方式（全走査でなく非対応値のみ変換）、`publishAnimationProgress` は1%バケットでthrottle済み（長期未対応だった毎フレーム発火が解消）。
+
+### 健全性を確認した領域
+
+- **サーバのスレッド安全性**: 全ハンドラが `state_lock` 下で `session.render_data`/`atom_mappings` を同一ブロックで snapshot。非同期サマリ worker は request_id＋payload同一性ガード付きで `session.operation_summary_items` を差し替え。`send_bytes` は BrokenPipe/ConnectionReset を握って静かに終了。
+- **コア数学** (`geometry.py`): Rodrigues回転・符号付き角・整数指数化とも正しく、`signed_rotation_angle_from_matrix` は cos≈−1 の縮退もガード。`periodic_shifts` は lru_cache＋writeable=False。
+- **要素選択** (`animation_context.select_animation_context`): 候補総当たりだが `threshold` 打ち切り＋残差1e-10で早期break。
+- **ブラウザの状態同期**: `refreshAtomMotion` は requestKey＋世代ガードで重複fetch抑止。1秒ポーリング `refreshState` は operations 再構築をサマリ完了時のみに限定。
+- **未コミット分**（固定原子フィルタ・軌跡表示）: `operation_fixed_atom_indices` の座標規約（列ベクトル `W@x+t`、`rint` で格子並進除去、`@lattice` でÅ換算）は既存規約と整合。軌跡は経路更新・表示切替時のみ再構築。
+
+### バグ（1件）
+
+1. **セル基底変換で `animation_boundary_mode`/`pause_at_breakpoints` が保持されない** — `tools/view_json_server.py` のセル設定ハンドラ内 `preserved` dict にこの2キーが無い。`initial_render_state`（`render_state.py:144-145`）は両方を `preserved` から読むため、Primitive/Bravais 切替で Wrap 設定と breakpoint 一時停止が無言でデフォルトへ戻る。`speed`/`include_boundary_images`/`show_trajectories` 等の兄弟設定は保持されるので不整合。**`include_boundary_images` 漏れ（07-03指摘・修正済）と同一バグクラスの3度目の再発。**
+
+### 設計提案（再発防止）
+
+2. **preserved キーの共有定数化** — 上記クラスのバグは「状態キー追加のたびに `preserved` dict 2箇所への追記を忘れる」構造が原因。`render_state.py` に `PRESERVED_STATE_KEYS`（セル変換用）を定義し、server 側は `{key: shared_state.get(key, default) for key in ...}` で構築する形へ寄せると、キー追加が1箇所で済み再発しない。
+
+### 非効率（軽微・任意）
+
+3. **`operation_fixed_atom_indices` が per-atom Python ループ** — minimal/full 両サマリで全操作×全原子。実測は最大エクスポートで minimal 7ms/full 25ms と許容範囲だが、192操作×56原子級では約10^4回の 3×3 matmul。`positions @ matrix.T + translation` の一括計算に vectorize 可能（import 高速パスの minimal 側だけでも価値あり）。
+4. **`renderOperationDetails` が毎秒＋毎postStateで全再構築** — 1秒ポーリングから署名ガード無しで `replaceChildren()`。atoms/structureInfo は署名ガード済みなので同じパターンを適用可能。
+5. **`postState` が毎回 `renderOperations` を全再構築** — 192行規模では実害無しだが、選択だけの変更なら既存 `syncOperationSelection` で足りる。
+
+### 考慮事項（体裁・既知）
+
+6. **軌跡表示は wrap 境界モードを無視** — `updateTrajectoryLines` は `applyBoundaryContext` を通さないため、Wrap 再生中は原子がセル内へ折り返す一方、軌跡は非折返しで描かれる。教育上は非折返しの方が分かりやすい可能性もあるので意図確認のこと。
+7. **定数の二重定義** — `STATIONARY_ANIMATION_SECONDS`（Py 0.4 / three_view.js 0.4）等はサーバ値が真実でJS側はフォールバックのみ。変更時は両方更新のこと（コメント追記推奨）。
+8. **既知・意図的な点（変更不要の再確認）**: `DEFAULT_LEGACY_CORE` の絶対パス依存（他環境では CLI/env で上書き要）、CIF の pymatgen/CifParser 二重パース（低優先）、混合占有サイトの最高占有元素代表。
+
+**総評**: プロジェクト全体として品質は高い。ロック規律・世代ガード・パリティテストの構えは堅牢で、横断スイープでも悪臭コードなし。要対応はバグ#1（1行×2キー）と、その再発を断つ設計提案#2のみ。
+
+### Codex対応（2026-07-06）
+
+- セル基底変換で `animation_boundary_mode` と `pause_at_breakpoints` を含む表示設定を保持するよう修正した。
+- `PRESERVED_STATE_KEYS` と `preserved_render_state()` を `render_state.py` に集約し、セル変換側の個別キー列挙を廃止した。
+- 軌跡は周期境界で分断せず、対称操作そのものの連続経路を示す方針を維持する。
+- 通常起動をWeb専用へ変更し、PyVistaは `--with-pyvista` 指定時だけ比較・旧GIF用途で起動する。
+
 ## 2026-07-04 (追補): WebM録画・時間正規化・前回指摘の修正確認（Claude, 未コミット差分）
 
 前回レビュー後の未コミット差分（さらに拡大: 1718+/642−）を再精査。**前回の指摘2件は両方修正済みを確認**。

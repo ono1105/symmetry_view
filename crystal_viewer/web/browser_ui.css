@@ -290,15 +290,13 @@
       max-height: 180px;
       overflow: auto;
     }
-    .saving-gif button:not(#save-gif):not(#save-gif-3view):not(#save-gif-3view-current),
+    .saving-gif button:not(#save-gif),
     .saving-gif input,
     .saving-gif select {
       pointer-events: none;
       opacity: 0.55;
     }
-    .saving-gif #save-gif,
-    .saving-gif #save-gif-3view,
-    .saving-gif #save-gif-3view-current {
+    .saving-gif #save-gif {
       background: #f8fafc;
       color: #111418;
       cursor: wait;
@@ -506,6 +504,22 @@
       font-size: 11px;
       pointer-events: none;
     }
+    .atom-legend {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      display: grid;
+      gap: 4px;
+      padding: 7px 9px;
+      border-radius: 6px;
+      background: rgba(11, 15, 20, 0.78);
+      color: #e2e8f0;
+      font-size: 11px;
+      pointer-events: none;
+    }
+    .atom-legend[hidden] { display: none; }
+    .atom-legend-item { display: flex; gap: 6px; align-items: center; }
+    .atom-legend-swatch { width: 10px; height: 10px; border-radius: 50%; }
     .movement-slider-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 48px;
@@ -667,6 +681,9 @@
     .inline-checkbox input {
       margin: 0;
       accent-color: #7dd3fc;
+    }
+    .operation-fixed-filter[hidden] {
+      display: none !important;
     }
     .camera-block {
       display: grid;
@@ -1142,6 +1159,8 @@
       margin-top: 6px;
       color: #e2e8f0;
     }
+    .mapping-result-details { margin-top: 8px; }
+    .mapping-result-details > summary { cursor: pointer; color: #cbd5e1; }
     .sequence-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;

@@ -27,6 +27,7 @@ STATE_UPDATE_KEYS = frozenset(
         "include_boundary_images",
         "animation_boundary_mode",
         "pause_at_breakpoints",
+        "show_trajectories",
         "active_mode",
         "scope",
         "view_request_id",
@@ -50,6 +51,27 @@ STATE_UPDATE_KEYS = frozenset(
         "import_status",
     }
 )
+
+# Preferences retained when the same structure is rebuilt in another cell
+# basis. Keep this list as the single source of truth for that transition.
+PRESERVED_STATE_KEYS = (
+    "speed",
+    "projection_mode",
+    "background_mode",
+    "legend_visible",
+    "cell_origin_mode",
+    "cell_setting_mode",
+    "improper_mode",
+    "display_mode",
+    "include_boundary_images",
+    "animation_boundary_mode",
+    "pause_at_breakpoints",
+    "show_trajectories",
+)
+
+
+def preserved_render_state(state: dict) -> dict:
+    return {key: state[key] for key in PRESERVED_STATE_KEYS if key in state}
 
 
 @dataclass(frozen=True)
@@ -142,6 +164,7 @@ def initial_render_state(
         "include_boundary_images": bool(preserved.get("include_boundary_images", False)),
         "animation_boundary_mode": preserved.get("animation_boundary_mode", "continuous"),
         "pause_at_breakpoints": bool(preserved.get("pause_at_breakpoints", False)),
+        "show_trajectories": bool(preserved.get("show_trajectories", False)),
         "active_mode": "standard",
         "gif_status": "",
         "gif_request_id": None,
