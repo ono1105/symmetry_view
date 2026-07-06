@@ -1,5 +1,28 @@
 # コードレビューメモ（Codex向け共有）
 
+## 2026-07-06: ② PyVista依存の整理 — 旧GIF経路のデッドコード削除（Claude）
+
+web-first 既定化で不要になった**旧PyVista GIF経路を削除**（新GIFは three.js フレーム→`/api/export_gif` で稼働、`--with-pyvista` も維持）。
+
+### 削除の根拠（デッド確認済み）
+
+- GIF出力は現在ブラウザ主導: `save-gif` ボタン→`symmetry-save-gif`→`three_view.js` が canvas フレーム捕捉→`POST /api/export_gif`（`gif_bytes_from_data_urls`）。PyVista 不要。
+- 旧経路 `gif_request_id` / `gif_3view_request_id` / `gif_3view_current_request_id` は **ブラウザがもう post しない**（3-viewボタンもHTMLから消去済み）。`pyvista_controller` だけが消費していた＝到達不能。
+
+### 削除内容
+
+- `pyvista_controller.py`（**1272→1043行, -229**）: GIFリクエスト処理ブロック、`save_current_gif`/`save_three_view_gifs`/`save_three_view_gifs_from_current_view`/`gif_output_path`、モジュール関数 `export_gif_dir`/`add_gif_label`/`gif_label_font`、`last_gif_*` フィールド、未使用化した `from PIL import ...`。
+- `render_state.py`: `gif_request_id`/`gif_3view_request_id`/`gif_3view_current_request_id` を STATE_UPDATE_KEYS・`RenderStateSnapshot`・`initial_render_state`・`pop_render_state_snapshot` の4箇所から削除。
+- **保持**: `set_gif_status`（一般ステータス設定に流用されているため）、`gif_status`（ブラウザが防御的に読む。現状常に空だが無害）、`/api/export_gif` と `gif_bytes_from_data_urls`（新経路）。
+
+### 検証
+
+Python 150件グリーン、`pyvista_controller` import OK（`--with-pyvista` 経路健全）、render_state roundtrip で gif request_id 消滅・`gif_status` 残存を確認、ライブ web-first で全エンドポイント200＋`/api/export_gif` の2フレームPOSTが200。
+
+### 残（任意）
+
+- `gif_status` は現状 vestigial（新GIFは同期的で status を設定しない）。将来 browser_ui の `syncGifSavingControls`/`isGifSaving` ごと整理可能だが、browser_ui 変更を伴うため今回は非対象。
+
 ## 2026-07-06: ユーザー目視テストで見つかった不具合の対応（Claude）
 
 ユーザーの目視確認で6件報告。対応状況は以下。

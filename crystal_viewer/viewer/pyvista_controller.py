@@ -9,7 +9,6 @@ from pathlib import Path
 import imageio.v2 as imageio
 import numpy as np
 import pyvista as pv
-from PIL import Image, ImageDraw, ImageFont
 
 from crystal_viewer.geometry import normalize
 from crystal_viewer.viewer.native_gui import NativePyVistaViewer
@@ -97,9 +96,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.last_view_direction_request_id: int | None = None
         self.last_view_plane_request_id: int | None = None
         self.last_camera_request_id: int | None = None
-        self.last_gif_request_id: int | None = None
-        self.last_gif_3view_request_id: int | None = None
-        self.last_gif_3view_current_request_id: int | None = None
         self.last_custom_op_check_id: object = None
         self.custom_check_actors: list = []
         self.custom_sequence_element_actors: list = []
@@ -366,27 +362,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
         if snapshot.camera_request_id is not None and snapshot.camera_request_id != self.last_camera_request_id:
             self.rotate_current_camera(snapshot.camera_direction, snapshot.camera_angle)
             self.last_camera_request_id = snapshot.camera_request_id
-            should_render = True
-
-        if snapshot.gif_request_id is not None and snapshot.gif_request_id != self.last_gif_request_id:
-            self.playing = False
-            self.save_current_gif()
-            self.last_gif_request_id = snapshot.gif_request_id
-            should_update_status = True
-            should_render = True
-
-        if snapshot.gif_3view_request_id is not None and snapshot.gif_3view_request_id != self.last_gif_3view_request_id:
-            self.playing = False
-            self.save_three_view_gifs()
-            self.last_gif_3view_request_id = snapshot.gif_3view_request_id
-            should_update_status = True
-            should_render = True
-
-        if snapshot.gif_3view_current_request_id is not None and snapshot.gif_3view_current_request_id != self.last_gif_3view_current_request_id:
-            self.playing = False
-            self.save_three_view_gifs_from_current_view()
-            self.last_gif_3view_current_request_id = snapshot.gif_3view_current_request_id
-            should_update_status = True
             should_render = True
 
         if snapshot.clear_custom_check:
@@ -923,156 +898,6 @@ class BrowserControlledViewer(NativePyVistaViewer):
         ]
         self.plotter.reset_camera_clipping_range()
 
-    def save_current_gif(
-        self,
-        *,
-        suffix: str | None = None,
-        timestamp: str | None = None,
-        label_text: str | None = None,
-    ) -> bool:
-        if not self.paths:
-            self.set_gif_status("skipped: no animation path")
-            return False
-        operation = self.current_operation()
-        output_path = self.gif_output_path(operation, custom=self.using_custom_paths, suffix=suffix, timestamp=timestamp)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        original_frame = float(self.frame_position)
-        frames = max(self.frame_count // 2, 24)
-        duration = self.animation_duration_seconds()
-        fps = max((frames - 1) / duration, 1.0)
-        last_image = None
-        saved = False
-        self.set_gif_status(f"writing {output_path}")
-        try:
-            with imageio.get_writer(output_path, fps=fps, loop=0) as writer:
-                for frame in range(frames):
-                    s = frame / max(frames - 1, 1)
-                    self.update_atoms(s)
-                    self.plotter.render()
-                    image = self.plotter.screenshot(return_img=True)
-                    if image is not None:
-                        if label_text:
-                            image = add_gif_label(image, label_text)
-                        writer.append_data(image)
-                        last_image = image
-                if last_image is not None:
-                    hold_frames = max(1, int(round(fps)))
-                    for _ in range(hold_frames):
-                        writer.append_data(last_image)
-            if last_image is not None:
-                self.set_gif_status(f"saved {output_path}")
-                saved = True
-            else:
-                self.set_gif_status("failed: no frames captured")
-        except Exception as exc:
-            self.set_gif_status(f"failed: {exc}")
-        finally:
-            self.frame_position = original_frame
-            self.update_atoms(original_frame / max(self.frame_count - 1, 1))
-        return saved
-
-    def save_three_view_gifs(self) -> None:
-        if not self.paths:
-            self.set_gif_status("skipped: no animation path")
-            return
-        basis = self.operation_camera_basis()
-        if basis is None:
-            self.set_gif_status("skipped: no view direction")
-            return
-
-        center, front_direction, front_up, distance = basis
-        front_direction = normalize(front_direction)
-        front_up = normalize(front_up)
-        right_direction = normalize(np.cross(front_direction, front_up))
-        top_direction = front_up
-        top_up = normalize(-front_direction)
-        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        original_camera_position = self.plotter.camera_position
-        views = [
-            ("front", front_direction, front_up),
-            ("right", right_direction, front_up),
-            ("top", top_direction, top_up),
-        ]
-        failed_labels = []
-        try:
-            for label, direction, up in views:
-                self.set_camera_view(center, direction, up, distance)
-                if not self.save_current_gif(suffix=label, timestamp=timestamp, label_text=label):
-                    failed_labels.append(label)
-            if failed_labels:
-                self.set_gif_status(f"3-view GIF incomplete; failed: {', '.join(failed_labels)}")
-            else:
-                self.set_gif_status(f"saved 3-view GIFs ({timestamp})")
-        finally:
-            self.plotter.camera_position = original_camera_position
-            self.plotter.reset_camera_clipping_range()
-
-    def save_three_view_gifs_from_current_view(self) -> None:
-        if not self.paths:
-            self.set_gif_status("skipped: no animation path")
-            return
-
-        camera = self.plotter.camera
-        focal_point = np.asarray(camera.GetFocalPoint(), dtype=float)
-        position = np.asarray(camera.GetPosition(), dtype=float)
-        raw_up = normalize(np.asarray(camera.GetViewUp(), dtype=float))
-
-        front_direction = focal_point - position
-        if np.linalg.norm(front_direction) < 1e-10:
-            self.set_gif_status("skipped: cannot determine view direction")
-            return
-        front_direction = normalize(front_direction)
-
-        center = focal_point
-        distance = self.camera_distance_for_view(center, front_direction)
-
-        front_up = raw_up - np.dot(raw_up, front_direction) * front_direction
-        if np.linalg.norm(front_up) < 1e-10:
-            front_up = camera_up_vector(front_direction)
-        else:
-            front_up = normalize(front_up)
-
-        right_direction = normalize(np.cross(front_direction, front_up))
-        top_direction = front_up
-        top_up = normalize(-front_direction)
-
-        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        original_camera_position = self.plotter.camera_position
-        views = [
-            ("front", front_direction, front_up),
-            ("right", right_direction, front_up),
-            ("top", top_direction, top_up),
-        ]
-        failed_labels = []
-        try:
-            for label, direction, up in views:
-                self.set_camera_view(center, direction, up, distance)
-                if not self.save_current_gif(suffix=label, timestamp=timestamp, label_text=label):
-                    failed_labels.append(label)
-            if failed_labels:
-                self.set_gif_status(f"3-view GIF incomplete; failed: {', '.join(failed_labels)}")
-            else:
-                self.set_gif_status(f"saved 3-view GIFs (current view, {timestamp})")
-        finally:
-            self.plotter.camera_position = original_camera_position
-            self.plotter.reset_camera_clipping_range()
-
-    def gif_output_path(
-        self,
-        operation: dict,
-        *,
-        custom: bool = False,
-        suffix: str | None = None,
-        timestamp: str | None = None,
-    ) -> Path:
-        stem = self.json_path.stem
-        scope = self.scope or "representative"
-        timestamp = timestamp or dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        op_label = "custom" if custom else f"op{int(operation['index']):03d}"
-        suffix_part = f"_{suffix}" if suffix else ""
-        filename = f"{stem}_{op_label}_{scope}{suffix_part}_{timestamp}.gif"
-        return export_gif_dir(self.json_path) / stem / filename
-
     def set_gif_status(self, status: str) -> None:
         with self.state_lock:
             self.shared_state["gif_status"] = status
@@ -1216,57 +1041,3 @@ class BrowserControlledViewer(NativePyVistaViewer):
         self.custom_check_actors = []
         self.custom_view_direction_cart = None
         self.custom_focus_cart = None
-
-
-
-
-
-def export_gif_dir(json_path: Path) -> Path:
-    for parent in json_path.parents:
-        if parent.name == "json" and parent.parent.name == "exports":
-            return parent.parent / "gifs"
-    if json_path.parent.name == "exports":
-        return json_path.parent / "gifs"
-    return json_path.parent / "gifs"
-
-
-def add_gif_label(image: np.ndarray, label: str) -> np.ndarray:
-    pil_image = Image.fromarray(np.asarray(image))
-    draw = ImageDraw.Draw(pil_image, "RGBA")
-    text = str(label).lower()
-    width, height = pil_image.size
-    font_size = max(24, min(width, height) // 12)
-    font = gif_label_font(font_size)
-    bbox = draw.textbbox((0, 0), text, font=font)
-    padding_x = max(12, font_size // 2)
-    padding_y = max(8, font_size // 3)
-    box_width = bbox[2] - bbox[0] + padding_x * 2
-    box_height = bbox[3] - bbox[1] + padding_y * 2
-    x = 14
-    y = 14
-    draw.rectangle(
-        (x, y, x + box_width, y + box_height),
-        fill=(0, 0, 0, 185),
-        outline=(255, 255, 255, 230),
-        width=max(2, font_size // 14),
-    )
-    draw.text(
-        (x + padding_x, y + padding_y - bbox[1]),
-        text,
-        font=font,
-        fill=(255, 255, 255, 255),
-    )
-    return np.asarray(pil_image)
-
-
-def gif_label_font(font_size: int):
-    for font_name in (
-        "Inter-Bold.otf",
-        "NotoSans-Bold.ttf",
-        "DejaVuSans-Bold.ttf",
-    ):
-        try:
-            return ImageFont.truetype(font_name, font_size)
-        except OSError:
-            continue
-    return ImageFont.load_default()

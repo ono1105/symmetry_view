@@ -41,9 +41,6 @@ STATE_UPDATE_KEYS = frozenset(
         "camera_request_id",
         "camera_direction",
         "camera_angle",
-        "gif_request_id",
-        "gif_3view_request_id",
-        "gif_3view_current_request_id",
         "custom_op_check_id",
         "clear_custom_check",
         "custom_op_animate",
@@ -107,9 +104,6 @@ class RenderStateSnapshot:
     camera_request_id: Any
     camera_direction: str
     camera_angle: float
-    gif_request_id: Any
-    gif_3view_request_id: Any
-    gif_3view_current_request_id: Any
     reload_request_id: Any
     custom_op_check_id: Any
     clear_custom_check: bool
@@ -167,9 +161,6 @@ def initial_render_state(
         "show_trajectories": bool(preserved.get("show_trajectories", False)),
         "active_mode": "standard",
         "gif_status": "",
-        "gif_request_id": None,
-        "gif_3view_request_id": None,
-        "gif_3view_current_request_id": None,
         "view_request_id": None,
         "reset_view_request_id": None,
         "view_center_request_id": None,
@@ -236,9 +227,6 @@ def pop_render_state_snapshot(state: dict) -> RenderStateSnapshot:
         camera_request_id=state.get("camera_request_id"),
         camera_direction=str(state.get("camera_direction", "")),
         camera_angle=float(state.get("camera_angle", 90.0)),
-        gif_request_id=state.get("gif_request_id"),
-        gif_3view_request_id=state.get("gif_3view_request_id"),
-        gif_3view_current_request_id=state.get("gif_3view_current_request_id"),
         reload_request_id=state.get("reload_request_id"),
         custom_op_check_id=state.get("custom_op_check_id"),
         clear_custom_check=bool(state.pop("clear_custom_check", False)),
