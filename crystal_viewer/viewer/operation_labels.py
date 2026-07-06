@@ -109,11 +109,15 @@ def operation_fixed_atom_indices(
     operation: dict,
     *,
     tolerance_cart: float = 1e-6,
+    molecule_tolerance_cart: float = 1e-2,
 ) -> list[int]:
     """Return atoms whose positions are unchanged by an operation.
 
-    Crystal positions are compared modulo lattice translations. Molecule
-    positions are compared directly in Cartesian coordinates.
+    Crystal positions are compared modulo lattice translations with a tight
+    tolerance (spglib operations are numerically exact). Molecule positions are
+    compared directly in Cartesian coordinates with a looser tolerance, since
+    point-group operations from the analyzer carry ~1e-4 A imprecision that
+    would otherwise reject genuine on-axis / in-plane fixed atoms.
     """
     atoms = render_data.get("atoms", [])
     unit_cell = render_data.get("unit_cell")
@@ -140,7 +144,7 @@ def operation_fixed_atom_indices(
         return fixed
     for atom in atoms:
         position = np.asarray(atom.get("cart"), dtype=float)
-        if position.shape == (3,) and np.linalg.norm(matrix @ position + translation - position) <= tolerance_cart:
+        if position.shape == (3,) and np.linalg.norm(matrix @ position + translation - position) <= molecule_tolerance_cart:
             fixed.append(int(atom["index"]))
     return fixed
 

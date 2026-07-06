@@ -47,6 +47,17 @@ class OperationLabelsTest(unittest.TestCase):
 
         self.assertEqual(operation_fixed_atom_indices(render_data, half_turn), [0])
 
+    def test_fixed_molecule_atoms_tolerate_analyzer_imprecision(self):
+        # The water C2 axis passes through O only. Point-group operations from
+        # the analyzer carry ~1e-4 A imprecision, so a tight (1e-6) tolerance
+        # would wrongly report no fixed atom; O must still register as fixed.
+        payload = json.loads(Path("exports/json/water.json").read_text(encoding="utf-8"))
+        render_data = payload["render_data"]
+        oxygen = next(atom["index"] for atom in render_data["atoms"] if atom["element"] == "O")
+        c2 = next(op for op in render_data["operations"] if op["kind"] == "rotation_2")
+
+        self.assertEqual(operation_fixed_atom_indices(render_data, c2), [oxygen])
+
     def test_rotoinversion_notation_order_comes_from_symbol(self):
         operation = {
             "kind": "rotoinversion_or_improper_6",

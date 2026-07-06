@@ -1,5 +1,21 @@
 # コードレビューメモ（Codex向け共有）
 
+## 2026-07-06: Claude 引き継ぎ作業 ③ 分子ビューアー検証（不動点フィルターのバグ修正）
+
+**Codex への申し送り。** 分子ビューアー完成基準（Schoenflies表記・全操作種・原子選択・不動点フィルター）を代表9分子で検証: water(C2v)/ammonia(C3v)/benzene(D6h)/methane(Td)/allene(D2d)/SF6(Oh)/CO2(D∞h線形)/BF3(D3h)/XeF4(D4h)。
+
+### バグ修正: 不動点フィルターが分子で機能していなかった
+
+- **症状**: `operation_fixed_atom_indices` の許容誤差 `tolerance_cart=1e-6` が分子には厳しすぎ、**真の不動点を取りこぼす**。例: 水の C2軸・σ⊥面は O を通る（不動のはず）が、PointGroupAnalyzer 由来の `matrix_cart` が ~1e-4 Å の精度しか無いため（C2 の残差 1.96e-4）、O が fixed=0 と判定されていた。
+- **修正**: 分子分岐に `molecule_tolerance_cart=1e-2`（`atom_mapping` の分子許容誤差と一致）を導入。結晶分岐は spglib 由来で厳密なため `1e-6` を維持。非不動原子は残差 1.5Å 級で分離は明確、誤検出リスク無し。
+- **検証**: 水 C2→O(1)、σ⊥→O(1)、σ面内→全(3)、CO2 恒等→全(3)、SF6 C4→S+軸F2(3)、i→S(1) と物理的に正しい。`tests/test_operation_labels.py` に水実データの回帰テスト追加（旧1e-6なら失敗）。全テスト **150件グリーン**。結晶(sio2/halite)の不動点数は不変。
+
+### 検証OK（変更不要）
+
+- **全操作種のパス**: 9分子979本を JS `evaluatePath` で評価し全て目標到達（worst 1.8e-15）。improper_4/6・rotation_infinite(線形)・inversion・mirror 全種正常。
+- **Schoenflies表記**: `molecularSchoenfliesSymbol` は C_n/S_n/C∞ の下付き化、`sigma`/`sigma_v`/`sigma_h`/`sigma_d` の σ 表示、i/E を全て正しく処理（CO2 の σ_v/σ_h 含め確認済み）。
+- **原子選択**: 分子は周期像が無く `selected_displayed` は `selected` と同等に動作。ピッキング機構は既存レビュー済み。
+
 ## 2026-07-06: Claude 引き継ぎ作業（①Web専用最終確認 ②PyVista依存の一部整理）
 
 **Codex への申し送り。** Codex が上限のため、合意プランの①②を Claude が着手（未コミット）。
