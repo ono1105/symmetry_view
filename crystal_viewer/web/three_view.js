@@ -768,10 +768,10 @@ class StaticStructureView {
   addAxis(axis, span) {
     const point = new THREE.Vector3(...axis.point_cart);
     const direction = new THREE.Vector3(...axis.direction_cart).normalize();
-    // Molecules are small and their atoms sit on/near the axis, so a span-based
-    // thread is invisible: give it an atom-relative radius and extend it well
-    // past the atom cloud. Crystals keep their original slender axis.
-    const radius = this.isMolecule ? Math.max(this.maxAtomRadius * 0.18, span * 0.012) : span * 0.009;
+    // Molecules are small and their atoms sit on/near the axis, so extend the
+    // axis well past the atom cloud to keep it visible. Keep the original
+    // slender radius for both molecules and crystals.
+    const radius = span * 0.009;
     const length = this.isMolecule ? Math.max(span * 1.8, span + 4 * this.maxAtomRadius) : span * 1.45;
     const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
     const material = new THREE.MeshBasicMaterial({color: 0x38bdf8, transparent: true, opacity: 0.92});
