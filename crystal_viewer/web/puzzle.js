@@ -13,6 +13,7 @@ let questions = [];
 let currentQuestion = null;
 let lastCorrectOrders = [];
 let revealing = false;
+let activeOrder = null;
 
 function el(id) {
   return document.getElementById(id);
@@ -158,26 +159,52 @@ function beginRound() {
   el("puzzle-check").disabled = false;
   el("puzzle-again").hidden = true;
   el("puzzle-playback").hidden = true; // reveal controls appear after answering
+  el("puzzle-order-tabs").innerHTML = "";
   el("puzzle-slider").value = "0";
-  view.setRotationFraction(0);
+  activeOrder = null;
+  view.setRotation(0);
+}
+
+function foldAngle(order) {
+  return (2 * Math.PI) / order;
 }
 
 function setSlider(fraction) {
   el("puzzle-slider").value = String(Math.round(fraction * 1000));
 }
 
-// Rotate up to the first overlap (360/n for the finest correct order) so the
-// molecule lands back on the start markers. The slider (a full turn) still lets
-// the user explore further. Playback drives the slider so they stay in sync.
-async function playReveal() {
-  if (revealing) return;
+function buildOrderTabs(orders) {
+  const tabs = el("puzzle-order-tabs");
+  tabs.innerHTML = "";
+  for (const order of orders) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "puzzle-order-tab";
+    button.dataset.order = String(order);
+    button.textContent = `${order}回`;
+    button.addEventListener("click", () => selectOrder(order));
+    tabs.appendChild(button);
+  }
+}
+
+function selectOrder(order) {
+  activeOrder = order;
+  for (const tab of el("puzzle-order-tabs").querySelectorAll(".puzzle-order-tab")) {
+    tab.classList.toggle("selected", Number(tab.dataset.order) === order);
+  }
+  playActive().catch(showError);
+}
+
+// Rotate one fold-step (360/n) for the selected order; the molecule lands back
+// on the start markers. The slider covers exactly that one step.
+async function playActive() {
+  if (revealing || !activeOrder) return;
   revealing = true;
   el("puzzle-replay").disabled = true;
   try {
     setSlider(0);
-    view.setRotationFraction(0);
-    const target = lastCorrectOrders.length ? 1 / Math.max(...lastCorrectOrders) : 1;
-    await view.playRotation(target, 1600, setSlider);
+    view.setRotation(0);
+    await view.playRotation(foldAngle(activeOrder), 1600, setSlider);
   } finally {
     revealing = false;
     el("puzzle-replay").disabled = false;
@@ -203,16 +230,18 @@ async function onCheck() {
     ? "正解"
     : `不正解（正解は ${result.correct_orders.map((o) => `${o}回`).join("・")}）`;
   lastCorrectOrders = result.correct_orders;
+  buildOrderTabs(lastCorrectOrders);
   el("puzzle-again").hidden = false;
   el("puzzle-playback").hidden = false;
-  await playReveal();
+  if (lastCorrectOrders.length) selectOrder(lastCorrectOrders[0]);
 }
 
 function setupPlayControls() {
   el("puzzle-check").addEventListener("click", () => onCheck().catch(showError));
-  el("puzzle-replay").addEventListener("click", () => playReveal().catch(showError));
+  el("puzzle-replay").addEventListener("click", () => playActive().catch(showError));
   el("puzzle-slider").addEventListener("input", (event) => {
-    view.setRotationFraction(Number(event.target.value) / 1000);
+    if (!activeOrder) return;
+    view.setRotation(foldAngle(activeOrder) * (Number(event.target.value) / 1000));
   });
   el("puzzle-again").addEventListener("click", () => {
     if (questions.length) beginRound();

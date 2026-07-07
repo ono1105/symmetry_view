@@ -8,7 +8,6 @@ import { TrackballControls } from "/vendor/three/addons/controls/TrackballContro
 // not share state with the analysis viewer (StaticStructureView).
 
 const CAMERA_FOV = 42;
-const TWO_PI = Math.PI * 2;
 
 export class PuzzleView {
   constructor(container) {
@@ -40,7 +39,6 @@ export class PuzzleView {
     this.axisObject = null;
     this.maxAtomRadius = 0.4;
     this.spinAxis = new THREE.Vector3(0, 0, 1);
-    this.rotationFraction = 0;
     this.rotationAnim = null;
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -53,7 +51,7 @@ export class PuzzleView {
     this.clearAxis();
     this.clearAtoms();
     this.clearMarkers();
-    this.setRotationFraction(0);
+    this.setRotation(0);
     const renderData = payload.render_data || {};
     const atoms = payload.display_atoms || renderData.atoms || [];
     const styles = new Map((payload.atom_styles || []).map((s) => [Number(s.index), s]));
@@ -169,22 +167,18 @@ export class PuzzleView {
     this.controls.update();
   }
 
-  // Fraction of a full turn (0..1) about the highlighted axis. Cancels any
-  // running animation so the slider takes over.
-  setRotationFraction(fraction, { fromAnimation = false } = {}) {
+  // Rotate the molecule to an absolute angle (radians) about the highlighted
+  // axis. Cancels any running animation so the slider takes over.
+  setRotation(angleRad, { fromAnimation = false } = {}) {
     if (!fromAnimation) this.rotationAnim = null;
-    this.rotationFraction = Math.min(Math.max(fraction, 0), 1);
-    this.spin.matrix.makeRotationAxis(this.spinAxis, TWO_PI * this.rotationFraction);
+    this.spin.matrix.makeRotationAxis(this.spinAxis, angleRad);
     this.spin.matrixWorldNeedsUpdate = true;
     this.render();
   }
 
-  // Animate a turn about the axis up to targetFraction of a full turn (e.g.
-  // 1/6 to land on the first overlap of a 6-fold axis); onProgress drives the
-  // slider.
-  playRotation(targetFraction = 1, durationMs = 1600, onProgress = null) {
-    const target = Math.min(Math.max(targetFraction, 0), 1);
-    this.rotationAnim = { resolve: null, start: performance.now(), durationMs, onProgress, target };
+  // Animate from 0 to targetAngleRad; onProgress(fraction) drives the slider.
+  playRotation(targetAngleRad, durationMs = 1600, onProgress = null) {
+    this.rotationAnim = { resolve: null, start: performance.now(), durationMs, onProgress, target: targetAngleRad };
     return new Promise((resolve) => {
       this.rotationAnim.resolve = resolve;
     });
@@ -194,9 +188,8 @@ export class PuzzleView {
     if (!this.rotationAnim) return false;
     const { start, durationMs, onProgress, resolve, target } = this.rotationAnim;
     const t = Math.min((now - start) / durationMs, 1);
-    const fraction = target * t;
-    this.setRotationFraction(fraction, { fromAnimation: true });
-    if (onProgress) onProgress(fraction);
+    this.setRotation(target * t, { fromAnimation: true });
+    if (onProgress) onProgress(t);
     if (t >= 1) {
       this.rotationAnim = null;
       if (resolve) resolve();

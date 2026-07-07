@@ -1396,10 +1396,34 @@
     }
     .puzzle-playback {
       display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .puzzle-order-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .puzzle-order-tab {
+      padding: 6px 14px;
+      border-radius: 999px;
+      border: 1px solid #cfe0f0;
+      background: #fff;
+      color: #0f2f4c;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .puzzle-order-tab.selected {
+      border-color: #2f80ed;
+      background: #2f80ed;
+      color: #fff;
+    }
+    .puzzle-playback-row {
+      display: flex;
       align-items: center;
       gap: 12px;
     }
-    .puzzle-playback input[type="range"] {
+    .puzzle-playback-row input[type="range"] {
       flex: 1;
       accent-color: #2f80ed;
     }
