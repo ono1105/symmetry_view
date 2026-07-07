@@ -150,30 +150,16 @@ export class PuzzleView {
     return new THREE.Matrix4().makeRotationAxis(this.spinAxis, angle);
   }
 
-  // Reflection through the plane perpendicular to the axis, faded in by s in
-  // [0,1] (I - 2s·nnᵀ). At s=1 it is a full mirror; the pass through s=0.5
-  // reads as folding the molecule through the plane.
-  reflectionMatrix(s) {
-    const { x, y, z } = this.spinAxis;
-    return new THREE.Matrix4().set(
-      1 - 2 * s * x * x, -2 * s * x * y, -2 * s * x * z, 0,
-      -2 * s * x * y, 1 - 2 * s * y * y, -2 * s * y * z, 0,
-      -2 * s * x * z, -2 * s * y * z, 1 - 2 * s * z * z, 0,
-      0, 0, 0, 1,
-    );
-  }
-
-  // Play the operation once about the highlighted axis: a rotation by angleDeg,
-  // or (improper) that rotation followed by a reflection through the
-  // perpendicular plane. A valid order lands the molecule back on itself.
-  playReveal(angleDeg, improper = false, durationMs = 1700) {
+  // Rotate the whole molecule once about the highlighted axis by angleDeg (like
+  // the analysis animation: each atom follows its arc). A valid order lands the
+  // molecule back on itself.
+  playReveal(angleDeg, durationMs = 1500) {
     return new Promise((resolve) => {
       this.reveal = {
         resolve,
         start: performance.now(),
         durationMs,
         angle: (angleDeg * Math.PI) / 180,
-        improper,
       };
     }).then(() => {
       this.spin.matrix.identity();
@@ -184,18 +170,10 @@ export class PuzzleView {
 
   updateAnimation(now) {
     if (!this.reveal) return false;
-    const { start, durationMs, angle, improper } = this.reveal;
+    const { start, durationMs, angle } = this.reveal;
     const t = Math.min((now - start) / durationMs, 1);
-    const ease = (u) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
-    let matrix;
-    if (!improper) {
-      matrix = this.rotationMatrix(angle * ease(t));
-    } else if (t < 0.5) {
-      matrix = this.rotationMatrix(angle * ease(t / 0.5));
-    } else {
-      matrix = this.reflectionMatrix((t - 0.5) / 0.5).multiply(this.rotationMatrix(angle));
-    }
-    this.spin.matrix.copy(matrix);
+    const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    this.spin.matrix.copy(this.rotationMatrix(angle * eased));
     this.spin.matrixWorldNeedsUpdate = true;
     if (t >= 1) {
       const resolve = this.reveal.resolve;

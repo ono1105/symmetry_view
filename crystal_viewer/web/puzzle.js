@@ -13,12 +13,6 @@ let questions = [];
 let currentQuestion = null;
 let lastCorrectOrders = [];
 let revealing = false;
-let currentType = "rotation";
-
-const PROBLEM_TYPES = [
-  { type: "rotation", label: "回転軸クイズ", note: "簡単" },
-  { type: "improper", label: "回映軸クイズ", note: "普通" },
-];
 
 function el(id) {
   return document.getElementById(id);
@@ -68,51 +62,13 @@ async function getJson(url, options) {
   return response.json();
 }
 
-function difficultyStars(pointGroup) {
-  const pg = String(pointGroup || "").trim();
-  if (/^[OTI]/.test(pg)) return 3; // cubic / icosahedral: Oh, O, Td, Th, T, Ih, I
-  if (/^D/.test(pg)) return 2; // dihedral: D6h, D4h, D3h, D2d, D∞h…
-  return 1; // C-/S-groups
-}
-
-function starLabel(count) {
-  return "★".repeat(count) + "☆".repeat(3 - count);
-}
-
 async function buildPicker() {
   const catalog = await getJson("/api/examples");
-  moleculeExamples = (catalog.molecule || []).slice().sort(
-    (a, b) => difficultyStars(a.point_group) - difficultyStars(b.point_group),
-  );
+  moleculeExamples = catalog.molecule || [];
   const root = el("puzzle-picker");
   root.innerHTML = "";
-
-  const typeHeading = document.createElement("h2");
-  typeHeading.className = "puzzle-picker-title";
-  typeHeading.textContent = "問題を選んでください";
-  root.appendChild(typeHeading);
-  const typeRow = document.createElement("div");
-  typeRow.className = "puzzle-type-row";
-  for (const item of PROBLEM_TYPES) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `puzzle-type${item.type === currentType ? " selected" : ""}`;
-    button.dataset.type = item.type;
-    button.innerHTML =
-      `<span class="puzzle-type-label">${item.label}</span>` +
-      `<span class="puzzle-type-note">${item.note}</span>`;
-    button.addEventListener("click", () => {
-      currentType = item.type;
-      for (const other of typeRow.querySelectorAll(".puzzle-type")) {
-        other.classList.toggle("selected", other.dataset.type === currentType);
-      }
-    });
-    typeRow.appendChild(button);
-  }
-  root.appendChild(typeRow);
-
-  const heading = document.createElement("h3");
-  heading.className = "puzzle-picker-subtitle";
+  const heading = document.createElement("h2");
+  heading.className = "puzzle-picker-title";
   heading.textContent = "分子を選んでください";
   root.appendChild(heading);
   const list = document.createElement("div");
@@ -123,12 +79,30 @@ async function buildPicker() {
     button.className = "puzzle-structure";
     button.innerHTML =
       `<span class="puzzle-structure-name">${displayFormula(example)}</span>` +
-      `<span class="puzzle-structure-meta">${example.point_group || ""} ・ ` +
-      `<span class="puzzle-stars">${starLabel(difficultyStars(example.point_group))}</span></span>`;
+      `<span class="puzzle-structure-meta">${example.point_group || ""}</span>`;
     button.addEventListener("click", () => startStructure(example).catch(showError));
     list.appendChild(button);
   }
   root.appendChild(list);
+}
+
+function buildLegend(payload) {
+  const legend = el("puzzle-legend");
+  if (!legend) return;
+  const atoms = (payload.render_data && payload.render_data.atoms) || payload.display_atoms || [];
+  const styles = new Map((payload.atom_styles || []).map((s) => [Number(s.index), s]));
+  const colors = new Map();
+  for (const atom of atoms) {
+    const style = styles.get(Number(atom.source_atom ?? atom.index));
+    if (style && !colors.has(atom.element)) colors.set(atom.element, style.color);
+  }
+  legend.innerHTML = "";
+  for (const [element, color] of colors) {
+    const item = document.createElement("span");
+    item.className = "puzzle-legend-item";
+    item.innerHTML = `<span class="puzzle-legend-swatch" style="background:${color}"></span>${element}`;
+    legend.appendChild(item);
+  }
 }
 
 function showError(error) {
@@ -147,16 +121,16 @@ async function startStructure(example) {
     body: JSON.stringify({ kind: "molecule", path: example.path, request_id: Date.now() }),
   });
   const [puzzlePayload, dataPayload] = await Promise.all([
-    getJson(`/api/puzzle/axis_orders?type=${currentType}`),
+    getJson("/api/puzzle/axis_orders"),
     getJson("/api/render_data"),
   ]);
   questions = puzzlePayload.questions || [];
   renderData = dataPayload.render_data || {};
   sceneSpan = view.sceneSpan(renderData);
   view.setMolecule(dataPayload);
+  buildLegend(dataPayload);
   if (!questions.length) {
-    const axisName = currentType === "improper" ? "回映軸" : "回転軸";
-    el("puzzle-question").textContent = `この分子には出題できる${axisName}がありません。別の分子を選んでください。`;
+    el("puzzle-question").textContent = "この分子には出題できる回転軸がありません。別の分子を選んでください。";
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
     el("puzzle-again").hidden = true;
@@ -169,9 +143,7 @@ async function startStructure(example) {
 function beginRound() {
   currentQuestion = questions[Math.floor(Math.random() * questions.length)];
   view.showAxis(currentQuestion.direction_cart, currentQuestion.point_cart, sceneSpan);
-  el("puzzle-question").textContent = currentType === "improper"
-    ? "青い軸で回映（回してから鏡うつし）すると、何回のときに重なりますか？（当てはまるものをすべて選ぶ）"
-    : "青い軸のまわりで、何回回すと重なりますか？（当てはまるものをすべて選ぶ）";
+  el("puzzle-question").textContent = "青い軸のまわりで、何回回すと重なりますか？（当てはまるものをすべて選ぶ）";
   const options = el("puzzle-options");
   options.innerHTML = "";
   for (const order of currentQuestion.options) {
@@ -194,7 +166,7 @@ async function revealAnimation(orders) {
   el("puzzle-replay").disabled = true;
   try {
     for (const order of orders) {
-      await view.playReveal(360 / order, currentType === "improper");
+      await view.playReveal(360 / order);
     }
   } finally {
     revealing = false;
@@ -212,14 +184,12 @@ async function onCheck() {
   const result = await getJson("/api/puzzle/axis_orders/check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: currentType, question_id: currentQuestion.id, selected_orders: selectedOrders() }),
+    body: JSON.stringify({ question_id: currentQuestion.id, selected_orders: selectedOrders() }),
   });
   const box = el("puzzle-result");
   box.hidden = false;
   box.className = `puzzle-result ${result.correct ? "hit" : "miss"}`;
-  box.textContent = result.correct
-    ? `正解！ 正しくは ${result.correct_orders.map((o) => `${o}回`).join("・")} です。`
-    : `おしい！ 正しくは ${result.correct_orders.map((o) => `${o}回`).join("・")} です。`;
+  box.textContent = result.correct ? "正解" : "不正解";
   lastCorrectOrders = result.correct_orders;
   el("puzzle-again").hidden = false;
   el("puzzle-replay").hidden = false;

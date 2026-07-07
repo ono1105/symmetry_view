@@ -67,7 +67,7 @@ class RenderStateTest(unittest.TestCase):
         state = initial_render_state(minimal_payload(), initial_operation=None, display_mode="source")
 
         self.assertEqual(state["background_mode"], "dark")
-        self.assertFalse(state["legend_visible"])
+        self.assertTrue(state["legend_visible"])  # legend is shown by default
         self.assertEqual(state["cell_origin_mode"], "center")
         self.assertEqual(state["animation_boundary_mode"], "continuous")
         self.assertFalse(state["pause_at_breakpoints"])
