@@ -11,7 +11,6 @@ let renderData = null;
 let sceneSpan = 4;
 let questions = [];
 let currentQuestion = null;
-let lastCorrectOrders = [];
 let revealing = false;
 
 function el(id) {
@@ -134,7 +133,7 @@ async function startStructure(example) {
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
     el("puzzle-again").hidden = true;
-    el("puzzle-replay").hidden = true;
+    el("puzzle-playback").hidden = true;
     return;
   }
   beginRound();
@@ -157,17 +156,25 @@ function beginRound() {
   el("puzzle-check").hidden = false;
   el("puzzle-check").disabled = false;
   el("puzzle-again").hidden = true;
-  el("puzzle-replay").hidden = true;
+  el("puzzle-playback").hidden = true; // reveal controls appear after answering
+  el("puzzle-slider").value = "0";
+  view.setRotationFraction(0);
 }
 
-async function revealAnimation(orders) {
+function setSlider(fraction) {
+  el("puzzle-slider").value = String(Math.round(fraction * 1000));
+}
+
+// One full turn about the axis; the molecule lands on the start markers at each
+// valid order. Drives the slider so scrubbing and playback stay in sync.
+async function playReveal() {
   if (revealing) return;
   revealing = true;
   el("puzzle-replay").disabled = true;
   try {
-    for (const order of orders) {
-      await view.playReveal(360 / order);
-    }
+    setSlider(0);
+    view.setRotationFraction(0);
+    await view.playRotation(3200, setSlider);
   } finally {
     revealing = false;
     el("puzzle-replay").disabled = false;
@@ -189,16 +196,20 @@ async function onCheck() {
   const box = el("puzzle-result");
   box.hidden = false;
   box.className = `puzzle-result ${result.correct ? "hit" : "miss"}`;
-  box.textContent = result.correct ? "正解" : "不正解";
-  lastCorrectOrders = result.correct_orders;
+  box.textContent = result.correct
+    ? "正解"
+    : `不正解（正解は ${result.correct_orders.map((o) => `${o}回`).join("・")}）`;
   el("puzzle-again").hidden = false;
-  el("puzzle-replay").hidden = false;
-  await revealAnimation(lastCorrectOrders);
+  el("puzzle-playback").hidden = false;
+  await playReveal();
 }
 
 function setupPlayControls() {
   el("puzzle-check").addEventListener("click", () => onCheck().catch(showError));
-  el("puzzle-replay").addEventListener("click", () => revealAnimation(lastCorrectOrders).catch(showError));
+  el("puzzle-replay").addEventListener("click", () => playReveal().catch(showError));
+  el("puzzle-slider").addEventListener("input", (event) => {
+    view.setRotationFraction(Number(event.target.value) / 1000);
+  });
   el("puzzle-again").addEventListener("click", () => {
     if (questions.length) beginRound();
   });

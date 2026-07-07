@@ -2,11 +2,13 @@ import * as THREE from "/vendor/three/three.module.js";
 import { TrackballControls } from "/vendor/three/addons/controls/TrackballControls.js";
 
 // A small, self-contained 3D view for the puzzle: it draws the molecule, one
-// highlighted rotation axis, and can spin the whole molecule about that axis to
-// reveal whether a candidate order maps it onto itself. It deliberately does
+// highlighted rotation axis, faint markers at the atoms' start positions, and
+// can spin the molecule about the axis (by a slider or an animation) so a valid
+// order visibly lands each atom back on a start marker. It deliberately does
 // not share state with the analysis viewer (StaticStructureView).
 
 const CAMERA_FOV = 42;
+const TWO_PI = Math.PI * 2;
 
 export class PuzzleView {
   constructor(container) {
@@ -14,11 +16,13 @@ export class PuzzleView {
     this.canvas = container.querySelector("canvas");
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xf4fbff);
-    this.spin = new THREE.Group(); // transforms for the reveal (rotation or Sn)
+    this.spin = new THREE.Group(); // rotates about the axis
     this.spin.matrixAutoUpdate = false;
     this.content = new THREE.Group(); // atoms + axis, child of spin
     this.spin.add(this.content);
     this.scene.add(this.spin);
+    this.markerGroup = new THREE.Group(); // start markers, fixed (never rotate)
+    this.scene.add(this.markerGroup);
 
     this.camera = new THREE.PerspectiveCamera(CAMERA_FOV, 1, 0.01, 10000);
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
@@ -32,10 +36,12 @@ export class PuzzleView {
 
     this.controls = null;
     this.atomObjects = [];
+    this.markerObjects = [];
     this.axisObject = null;
     this.maxAtomRadius = 0.4;
     this.spinAxis = new THREE.Vector3(0, 0, 1);
-    this.reveal = null;
+    this.rotationFraction = 0;
+    this.rotationAnim = null;
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.container);
@@ -46,7 +52,8 @@ export class PuzzleView {
   setMolecule(payload) {
     this.clearAxis();
     this.clearAtoms();
-    this.resetSpin();
+    this.clearMarkers();
+    this.setRotationFraction(0);
     const renderData = payload.render_data || {};
     const atoms = payload.display_atoms || renderData.atoms || [];
     const styles = new Map((payload.atom_styles || []).map((s) => [Number(s.index), s]));
@@ -63,12 +70,26 @@ export class PuzzleView {
       const style = styles.get(Number(atom.source_atom ?? atom.index)) || { color: "#9aa5b1", radius: 0.35 };
       const radius = Math.max(Number(style.radius) || 0.35, 0.05);
       maxRadius = Math.max(maxRadius, radius);
-      const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(style.color), roughness: 0.4, metalness: 0.03 });
+      const color = new THREE.Color(style.color);
+      const material = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.03 });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.fromArray(atom.cart);
       mesh.scale.setScalar(radius);
       this.content.add(mesh);
       this.atomObjects.push(mesh);
+
+      // A faint marker left at the start position; the atoms move over it.
+      const markerMaterial = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.28,
+        depthWrite: false,
+      });
+      const marker = new THREE.Mesh(geometry, markerMaterial);
+      marker.position.fromArray(atom.cart);
+      marker.scale.setScalar(radius * 1.02);
+      this.markerGroup.add(marker);
+      this.markerObjects.push(marker);
     }
     this.maxAtomRadius = maxRadius;
   }
@@ -80,6 +101,14 @@ export class PuzzleView {
       mesh.material.dispose();
     }
     this.atomObjects = [];
+  }
+
+  clearMarkers() {
+    for (const marker of this.markerObjects) {
+      this.markerGroup.remove(marker);
+      marker.material.dispose();
+    }
+    this.markerObjects = [];
   }
 
   showAxis(directionCart, pointCart, span) {
@@ -140,45 +169,33 @@ export class PuzzleView {
     this.controls.update();
   }
 
-  resetSpin() {
-    this.spin.matrix.identity();
+  // Fraction of a full turn (0..1) about the highlighted axis. Cancels any
+  // running animation so the slider takes over.
+  setRotationFraction(fraction, { fromAnimation = false } = {}) {
+    if (!fromAnimation) this.rotationAnim = null;
+    this.rotationFraction = Math.min(Math.max(fraction, 0), 1);
+    this.spin.matrix.makeRotationAxis(this.spinAxis, TWO_PI * this.rotationFraction);
     this.spin.matrixWorldNeedsUpdate = true;
-    this.reveal = null;
+    this.render();
   }
 
-  rotationMatrix(angle) {
-    return new THREE.Matrix4().makeRotationAxis(this.spinAxis, angle);
-  }
-
-  // Rotate the whole molecule once about the highlighted axis by angleDeg (like
-  // the analysis animation: each atom follows its arc). A valid order lands the
-  // molecule back on itself.
-  playReveal(angleDeg, durationMs = 1500) {
+  // Animate a full turn about the axis; onProgress(fraction) drives the slider.
+  playRotation(durationMs = 3200, onProgress = null) {
+    this.rotationAnim = { resolve: null, start: performance.now(), durationMs, onProgress };
     return new Promise((resolve) => {
-      this.reveal = {
-        resolve,
-        start: performance.now(),
-        durationMs,
-        angle: (angleDeg * Math.PI) / 180,
-      };
-    }).then(() => {
-      this.spin.matrix.identity();
-      this.spin.matrixWorldNeedsUpdate = true;
-      this.render();
+      this.rotationAnim.resolve = resolve;
     });
   }
 
   updateAnimation(now) {
-    if (!this.reveal) return false;
-    const { start, durationMs, angle } = this.reveal;
-    const t = Math.min((now - start) / durationMs, 1);
-    const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-    this.spin.matrix.copy(this.rotationMatrix(angle * eased));
-    this.spin.matrixWorldNeedsUpdate = true;
-    if (t >= 1) {
-      const resolve = this.reveal.resolve;
-      this.reveal = null;
-      resolve();
+    if (!this.rotationAnim) return false;
+    const { start, durationMs, onProgress, resolve } = this.rotationAnim;
+    const fraction = Math.min((now - start) / durationMs, 1);
+    this.setRotationFraction(fraction, { fromAnimation: true });
+    if (onProgress) onProgress(fraction);
+    if (fraction >= 1) {
+      this.rotationAnim = null;
+      if (resolve) resolve();
     }
     return true;
   }

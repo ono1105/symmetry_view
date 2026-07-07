@@ -34,6 +34,10 @@
       <div id="puzzle-play" class="puzzle-play" hidden>
         <div class="puzzle-stage">
           <div id="puzzle-view" class="puzzle-view"><canvas></canvas></div>
+          <div id="puzzle-playback" class="puzzle-playback" hidden>
+            <button type="button" id="puzzle-replay" class="secondary">再生</button>
+            <input id="puzzle-slider" type="range" min="0" max="1000" value="0" step="1" aria-label="回転">
+          </div>
           <div id="puzzle-legend" class="puzzle-legend"></div>
         </div>
         <div class="puzzle-panel">
@@ -41,7 +45,6 @@
           <div id="puzzle-options" class="puzzle-options"></div>
           <div class="puzzle-actions">
             <button type="button" id="puzzle-check" class="puzzle-primary">回答</button>
-            <button type="button" id="puzzle-replay" class="secondary" hidden>再生</button>
             <button type="button" id="puzzle-again" class="secondary" hidden>次の問題</button>
             <button type="button" id="puzzle-other" class="secondary">別の分子</button>
           </div>

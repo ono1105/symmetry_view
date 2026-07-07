@@ -1394,6 +1394,15 @@
       flex-direction: column;
       gap: 10px;
     }
+    .puzzle-playback {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .puzzle-playback input[type="range"] {
+      flex: 1;
+      accent-color: #2f80ed;
+    }
     .puzzle-legend {
       display: flex;
       flex-wrap: wrap;
@@ -1444,8 +1453,9 @@
     }
     .puzzle-play {
       display: grid;
-      grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
-      gap: 18px;
+      grid-template-columns: minmax(0, 560px) minmax(280px, 380px);
+      justify-content: center;
+      gap: 24px;
       align-items: start;
     }
     .puzzle-view {
