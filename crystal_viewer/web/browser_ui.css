@@ -1389,6 +1389,40 @@
       color: #0f2f4c;
       margin: 0 0 14px;
     }
+    .puzzle-picker-subtitle {
+      font-size: 16px;
+      color: #0f2f4c;
+      margin: 22px 0 12px;
+    }
+    .puzzle-type-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .puzzle-type {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: flex-start;
+      padding: 12px 18px;
+      background: #fff;
+      border: 2px solid #cfe0f0;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .puzzle-type.selected {
+      border-color: #2f80ed;
+      background: #eaf2fb;
+    }
+    .puzzle-type-label {
+      font-size: 16px;
+      font-weight: 700;
+      color: #0f2f4c;
+    }
+    .puzzle-type-note {
+      font-size: 12px;
+      color: #52708a;
+    }
     .puzzle-picker-list {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

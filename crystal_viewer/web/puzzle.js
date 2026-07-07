@@ -13,6 +13,12 @@ let questions = [];
 let currentQuestion = null;
 let lastCorrectOrders = [];
 let revealing = false;
+let currentType = "rotation";
+
+const PROBLEM_TYPES = [
+  { type: "rotation", label: "回転軸クイズ", note: "簡単" },
+  { type: "improper", label: "回映軸クイズ", note: "普通" },
+];
 
 function el(id) {
   return document.getElementById(id);
@@ -80,8 +86,33 @@ async function buildPicker() {
   );
   const root = el("puzzle-picker");
   root.innerHTML = "";
-  const heading = document.createElement("h2");
-  heading.className = "puzzle-picker-title";
+
+  const typeHeading = document.createElement("h2");
+  typeHeading.className = "puzzle-picker-title";
+  typeHeading.textContent = "問題を選んでください";
+  root.appendChild(typeHeading);
+  const typeRow = document.createElement("div");
+  typeRow.className = "puzzle-type-row";
+  for (const item of PROBLEM_TYPES) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `puzzle-type${item.type === currentType ? " selected" : ""}`;
+    button.dataset.type = item.type;
+    button.innerHTML =
+      `<span class="puzzle-type-label">${item.label}</span>` +
+      `<span class="puzzle-type-note">${item.note}</span>`;
+    button.addEventListener("click", () => {
+      currentType = item.type;
+      for (const other of typeRow.querySelectorAll(".puzzle-type")) {
+        other.classList.toggle("selected", other.dataset.type === currentType);
+      }
+    });
+    typeRow.appendChild(button);
+  }
+  root.appendChild(typeRow);
+
+  const heading = document.createElement("h3");
+  heading.className = "puzzle-picker-subtitle";
   heading.textContent = "分子を選んでください";
   root.appendChild(heading);
   const list = document.createElement("div");
@@ -116,7 +147,7 @@ async function startStructure(example) {
     body: JSON.stringify({ kind: "molecule", path: example.path, request_id: Date.now() }),
   });
   const [puzzlePayload, dataPayload] = await Promise.all([
-    getJson("/api/puzzle/axis_orders"),
+    getJson(`/api/puzzle/axis_orders?type=${currentType}`),
     getJson("/api/render_data"),
   ]);
   questions = puzzlePayload.questions || [];
@@ -124,10 +155,12 @@ async function startStructure(example) {
   sceneSpan = view.sceneSpan(renderData);
   view.setMolecule(dataPayload);
   if (!questions.length) {
-    el("puzzle-question").textContent = "この分子には出題できる回転軸がありません。別の分子を選んでください。";
+    const axisName = currentType === "improper" ? "回映軸" : "回転軸";
+    el("puzzle-question").textContent = `この分子には出題できる${axisName}がありません。別の分子を選んでください。`;
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
     el("puzzle-again").hidden = true;
+    el("puzzle-replay").hidden = true;
     return;
   }
   beginRound();
@@ -136,7 +169,9 @@ async function startStructure(example) {
 function beginRound() {
   currentQuestion = questions[Math.floor(Math.random() * questions.length)];
   view.showAxis(currentQuestion.direction_cart, currentQuestion.point_cart, sceneSpan);
-  el("puzzle-question").textContent = "青い軸のまわりで、何回回すと重なりますか？（当てはまるものをすべて選ぶ）";
+  el("puzzle-question").textContent = currentType === "improper"
+    ? "青い軸で回映（回してから鏡うつし）すると、何回のときに重なりますか？（当てはまるものをすべて選ぶ）"
+    : "青い軸のまわりで、何回回すと重なりますか？（当てはまるものをすべて選ぶ）";
   const options = el("puzzle-options");
   options.innerHTML = "";
   for (const order of currentQuestion.options) {
@@ -159,7 +194,7 @@ async function revealAnimation(orders) {
   el("puzzle-replay").disabled = true;
   try {
     for (const order of orders) {
-      await view.playRotation(360 / order);
+      await view.playReveal(360 / order, currentType === "improper");
     }
   } finally {
     revealing = false;
@@ -177,7 +212,7 @@ async function onCheck() {
   const result = await getJson("/api/puzzle/axis_orders/check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question_id: currentQuestion.id, selected_orders: selectedOrders() }),
+    body: JSON.stringify({ type: currentType, question_id: currentQuestion.id, selected_orders: selectedOrders() }),
   });
   const box = el("puzzle-result");
   box.hidden = false;

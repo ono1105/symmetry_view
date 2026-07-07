@@ -14,7 +14,8 @@ export class PuzzleView {
     this.canvas = container.querySelector("canvas");
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0xf4fbff);
-    this.spin = new THREE.Group(); // rotates for the reveal
+    this.spin = new THREE.Group(); // transforms for the reveal (rotation or Sn)
+    this.spin.matrixAutoUpdate = false;
     this.content = new THREE.Group(); // atoms + axis, child of spin
     this.spin.add(this.content);
     this.scene.add(this.spin);
@@ -34,8 +35,7 @@ export class PuzzleView {
     this.axisObject = null;
     this.maxAtomRadius = 0.4;
     this.spinAxis = new THREE.Vector3(0, 0, 1);
-    this.spinAngle = 0;
-    this.animation = null;
+    this.reveal = null;
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(this.container);
@@ -141,34 +141,65 @@ export class PuzzleView {
   }
 
   resetSpin() {
-    this.spinAngle = 0;
-    this.spin.quaternion.identity();
-    this.animation = null;
+    this.spin.matrix.identity();
+    this.spin.matrixWorldNeedsUpdate = true;
+    this.reveal = null;
   }
 
-  // Rotate the whole molecule once about the highlighted axis by angleDeg.
-  // A valid order lands it back on itself; an invalid one clearly does not.
-  playRotation(angleDeg, durationMs = 1400) {
+  rotationMatrix(angle) {
+    return new THREE.Matrix4().makeRotationAxis(this.spinAxis, angle);
+  }
+
+  // Reflection through the plane perpendicular to the axis, faded in by s in
+  // [0,1] (I - 2s·nnᵀ). At s=1 it is a full mirror; the pass through s=0.5
+  // reads as folding the molecule through the plane.
+  reflectionMatrix(s) {
+    const { x, y, z } = this.spinAxis;
+    return new THREE.Matrix4().set(
+      1 - 2 * s * x * x, -2 * s * x * y, -2 * s * x * z, 0,
+      -2 * s * x * y, 1 - 2 * s * y * y, -2 * s * y * z, 0,
+      -2 * s * x * z, -2 * s * y * z, 1 - 2 * s * z * z, 0,
+      0, 0, 0, 1,
+    );
+  }
+
+  // Play the operation once about the highlighted axis: a rotation by angleDeg,
+  // or (improper) that rotation followed by a reflection through the
+  // perpendicular plane. A valid order lands the molecule back on itself.
+  playReveal(angleDeg, improper = false, durationMs = 1700) {
     return new Promise((resolve) => {
-      const total = (angleDeg * Math.PI) / 180;
-      const start = performance.now();
-      this.animation = { resolve, start, durationMs, total };
+      this.reveal = {
+        resolve,
+        start: performance.now(),
+        durationMs,
+        angle: (angleDeg * Math.PI) / 180,
+        improper,
+      };
     }).then(() => {
-      this.spin.quaternion.identity();
+      this.spin.matrix.identity();
+      this.spin.matrixWorldNeedsUpdate = true;
       this.render();
     });
   }
 
   updateAnimation(now) {
-    if (!this.animation) return false;
-    const { start, durationMs, total } = this.animation;
+    if (!this.reveal) return false;
+    const { start, durationMs, angle, improper } = this.reveal;
     const t = Math.min((now - start) / durationMs, 1);
-    // ease in/out so the landing reads clearly
-    const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-    this.spin.quaternion.setFromAxisAngle(this.spinAxis, total * eased);
+    const ease = (u) => (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2);
+    let matrix;
+    if (!improper) {
+      matrix = this.rotationMatrix(angle * ease(t));
+    } else if (t < 0.5) {
+      matrix = this.rotationMatrix(angle * ease(t / 0.5));
+    } else {
+      matrix = this.reflectionMatrix((t - 0.5) / 0.5).multiply(this.rotationMatrix(angle));
+    }
+    this.spin.matrix.copy(matrix);
+    this.spin.matrixWorldNeedsUpdate = true;
     if (t >= 1) {
-      const resolve = this.animation.resolve;
-      this.animation = null;
+      const resolve = this.reveal.resolve;
+      this.reveal = null;
       resolve();
     }
     return true;
