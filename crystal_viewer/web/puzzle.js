@@ -11,6 +11,7 @@ let renderData = null;
 let sceneSpan = 4;
 let questions = [];
 let currentQuestion = null;
+let lastCorrectOrders = [];
 let revealing = false;
 
 function el(id) {
@@ -165,8 +166,9 @@ function setSlider(fraction) {
   el("puzzle-slider").value = String(Math.round(fraction * 1000));
 }
 
-// One full turn about the axis; the molecule lands on the start markers at each
-// valid order. Drives the slider so scrubbing and playback stay in sync.
+// Rotate up to the first overlap (360/n for the finest correct order) so the
+// molecule lands back on the start markers. The slider (a full turn) still lets
+// the user explore further. Playback drives the slider so they stay in sync.
 async function playReveal() {
   if (revealing) return;
   revealing = true;
@@ -174,7 +176,8 @@ async function playReveal() {
   try {
     setSlider(0);
     view.setRotationFraction(0);
-    await view.playRotation(3200, setSlider);
+    const target = lastCorrectOrders.length ? 1 / Math.max(...lastCorrectOrders) : 1;
+    await view.playRotation(target, 1600, setSlider);
   } finally {
     revealing = false;
     el("puzzle-replay").disabled = false;
@@ -199,6 +202,7 @@ async function onCheck() {
   box.textContent = result.correct
     ? "正解"
     : `不正解（正解は ${result.correct_orders.map((o) => `${o}回`).join("・")}）`;
+  lastCorrectOrders = result.correct_orders;
   el("puzzle-again").hidden = false;
   el("puzzle-playback").hidden = false;
   await playReveal();

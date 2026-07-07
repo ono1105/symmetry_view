@@ -179,9 +179,12 @@ export class PuzzleView {
     this.render();
   }
 
-  // Animate a full turn about the axis; onProgress(fraction) drives the slider.
-  playRotation(durationMs = 3200, onProgress = null) {
-    this.rotationAnim = { resolve: null, start: performance.now(), durationMs, onProgress };
+  // Animate a turn about the axis up to targetFraction of a full turn (e.g.
+  // 1/6 to land on the first overlap of a 6-fold axis); onProgress drives the
+  // slider.
+  playRotation(targetFraction = 1, durationMs = 1600, onProgress = null) {
+    const target = Math.min(Math.max(targetFraction, 0), 1);
+    this.rotationAnim = { resolve: null, start: performance.now(), durationMs, onProgress, target };
     return new Promise((resolve) => {
       this.rotationAnim.resolve = resolve;
     });
@@ -189,11 +192,12 @@ export class PuzzleView {
 
   updateAnimation(now) {
     if (!this.rotationAnim) return false;
-    const { start, durationMs, onProgress, resolve } = this.rotationAnim;
-    const fraction = Math.min((now - start) / durationMs, 1);
+    const { start, durationMs, onProgress, resolve, target } = this.rotationAnim;
+    const t = Math.min((now - start) / durationMs, 1);
+    const fraction = target * t;
     this.setRotationFraction(fraction, { fromAnimation: true });
     if (onProgress) onProgress(fraction);
-    if (fraction >= 1) {
+    if (t >= 1) {
       this.rotationAnim = null;
       if (resolve) resolve();
     }

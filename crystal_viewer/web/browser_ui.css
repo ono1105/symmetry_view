@@ -1458,6 +1458,11 @@
       gap: 24px;
       align-items: start;
     }
+    /* The display rules above beat the [hidden] user-agent rule, so restore it. */
+    .puzzle-play[hidden],
+    .puzzle-playback[hidden] {
+      display: none;
+    }
     .puzzle-view {
       background: #f4fbff;
       border: 1px solid #cfe0f0;
