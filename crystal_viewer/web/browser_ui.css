@@ -1384,6 +1384,25 @@
     .mode-back:hover {
       background: #eaf2fb;
     }
+    .puzzle-kind-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .puzzle-kind {
+      padding: 8px 22px;
+      border-radius: 999px;
+      border: 1px solid #cfe0f0;
+      background: #fff;
+      color: #0f2f4c;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .puzzle-kind.selected {
+      border-color: #2f80ed;
+      background: #2f80ed;
+      color: #fff;
+    }
     .puzzle-picker-title {
       font-size: 20px;
       color: #0f2f4c;

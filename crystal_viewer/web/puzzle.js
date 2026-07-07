@@ -6,7 +6,8 @@ import { PuzzleView } from "/static/puzzle_view.js";
 
 let view = null;
 let started = false;
-let moleculeExamples = [];
+let catalog = null;
+let currentKind = "molecule";
 let renderData = null;
 let sceneSpan = 4;
 let questions = [];
@@ -41,8 +42,16 @@ const MOLECULAR_FORMULA = {
   hydrogen_chloride: "HCl",
 };
 
-function displayFormula(example) {
-  return formatFormula(MOLECULAR_FORMULA[example.name] || example.formula || example.name);
+function displayLabel(example) {
+  // Molecules keep a curated molecular formula; crystals use the catalog
+  // (reduced) formula, which is the correct formula unit for them.
+  const source = example.kind === "molecule" ? MOLECULAR_FORMULA[example.name] : null;
+  return formatFormula(source || example.formula || example.name);
+}
+
+function structureMeta(example) {
+  // Space group for crystals, point group for molecules.
+  return example.kind === "crystal" ? example.symmetry || example.point_group || "" : example.point_group || "";
 }
 
 function showHome() {
@@ -63,24 +72,45 @@ async function getJson(url, options) {
   return response.json();
 }
 
+const STRUCTURE_KINDS = [
+  { kind: "molecule", label: "分子" },
+  { kind: "crystal", label: "結晶" },
+];
+
 async function buildPicker() {
-  const catalog = await getJson("/api/examples");
-  moleculeExamples = catalog.molecule || [];
+  if (!catalog) catalog = await getJson("/api/examples");
   const root = el("puzzle-picker");
   root.innerHTML = "";
+
+  const kindRow = document.createElement("div");
+  kindRow.className = "puzzle-kind-row";
+  for (const item of STRUCTURE_KINDS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `puzzle-kind${item.kind === currentKind ? " selected" : ""}`;
+    button.textContent = item.label;
+    button.addEventListener("click", () => {
+      if (currentKind === item.kind) return;
+      currentKind = item.kind;
+      buildPicker();
+    });
+    kindRow.appendChild(button);
+  }
+  root.appendChild(kindRow);
+
   const heading = document.createElement("h2");
   heading.className = "puzzle-picker-title";
-  heading.textContent = "分子を選んでください";
+  heading.textContent = currentKind === "crystal" ? "結晶を選んでください" : "分子を選んでください";
   root.appendChild(heading);
   const list = document.createElement("div");
   list.className = "puzzle-picker-list";
-  for (const example of moleculeExamples) {
+  for (const example of catalog[currentKind] || []) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "puzzle-structure";
     button.innerHTML =
-      `<span class="puzzle-structure-name">${displayFormula(example)}</span>` +
-      `<span class="puzzle-structure-meta">${example.point_group || ""}</span>`;
+      `<span class="puzzle-structure-name">${displayLabel(example)}</span>` +
+      `<span class="puzzle-structure-meta">${structureMeta(example)}</span>`;
     button.addEventListener("click", () => startStructure(example).catch(showError));
     list.appendChild(button);
   }
@@ -119,7 +149,7 @@ async function startStructure(example) {
   await getJson("/api/open_example", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind: "molecule", path: example.path, request_id: Date.now() }),
+    body: JSON.stringify({ kind: example.kind, path: example.path, request_id: Date.now() }),
   });
   const [puzzlePayload, dataPayload] = await Promise.all([
     getJson("/api/puzzle/axis_orders"),

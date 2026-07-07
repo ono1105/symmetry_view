@@ -39,6 +39,7 @@ export class PuzzleView {
     this.axisObject = null;
     this.maxAtomRadius = 0.4;
     this.spinAxis = new THREE.Vector3(0, 0, 1);
+    this.spinPoint = new THREE.Vector3(0, 0, 0);
     this.rotationAnim = null;
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -113,6 +114,7 @@ export class PuzzleView {
     this.clearAxis();
     const direction = new THREE.Vector3(...directionCart).normalize();
     this.spinAxis = direction.clone();
+    this.spinPoint = new THREE.Vector3(...(pointCart || [0, 0, 0]));
     const length = Math.max(span * 1.8, span + 4 * this.maxAtomRadius);
     const radius = Math.max(span * 0.012, this.maxAtomRadius * 0.12);
     const geometry = new THREE.CylinderGeometry(radius, radius, length, 20);
@@ -179,7 +181,13 @@ export class PuzzleView {
   // axis. Cancels any running animation so the slider takes over.
   setRotation(angleRad, { fromAnimation = false } = {}) {
     if (!fromAnimation) this.cancelRotation();
-    this.spin.matrix.makeRotationAxis(this.spinAxis, angleRad);
+    // Rotate about the axis line (through spinPoint), not the world origin, so
+    // it works whether the atoms are centred (molecules) or offset (crystals).
+    const p = this.spinPoint;
+    const rot = new THREE.Matrix4().makeRotationAxis(this.spinAxis, angleRad);
+    const toOrigin = new THREE.Matrix4().makeTranslation(-p.x, -p.y, -p.z);
+    const back = new THREE.Matrix4().makeTranslation(p.x, p.y, p.z);
+    this.spin.matrix.multiplyMatrices(back, rot).multiply(toOrigin);
     this.spin.matrixWorldNeedsUpdate = true;
     this.render();
   }
