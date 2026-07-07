@@ -884,6 +884,10 @@ def make_handler(
                 self.send_json(body)
                 return
             if path == "/api/puzzle/axis_orders":
+                puzzle_type = parse_qs(parsed_url.query).get("type", ["rotation"])[0]
+                if puzzle_type not in ("rotation", "improper"):
+                    self.send_json_error("unknown puzzle type", status=400)
+                    return
                 with state_lock:
                     render_data = session.render_data
                     source_kind = session.source_kind
@@ -892,7 +896,8 @@ def make_handler(
                 self.send_json(
                     {
                         "source_kind": source_kind,
-                        "questions": public_axis_order_questions(render_data),
+                        "puzzle_type": puzzle_type,
+                        "questions": public_axis_order_questions(render_data, puzzle_type),
                     }
                 )
                 return
@@ -972,7 +977,10 @@ def make_handler(
                 try:
                     question_id = int(payload.get("question_id"))
                     selected = payload.get("selected_orders", [])
-                    result = check_axis_order_answer(render_data, question_id, selected)
+                    puzzle_type = str(payload.get("type", "rotation"))
+                    if puzzle_type not in ("rotation", "improper"):
+                        raise ValueError("unknown puzzle type")
+                    result = check_axis_order_answer(render_data, question_id, selected, puzzle_type)
                 except (TypeError, ValueError) as exc:
                     self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
                     return

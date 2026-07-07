@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from crystal_viewer.game.axis_orders import (
+    axis_questions,
     check_answer,
     public_questions,
     rotation_axis_questions,
@@ -13,8 +14,8 @@ def _render_data(name):
     return json.loads(Path(f"exports/json/{name}.json").read_text(encoding="utf-8"))["render_data"]
 
 
-def _summary(name):
-    questions = rotation_axis_questions(_render_data(name))
+def _summary(name, kind="rotation"):
+    questions = axis_questions(_render_data(name), kind)
     return sorted((tuple(q["correct_orders"]), q["equivalent_count"]) for q in questions)
 
 
@@ -37,6 +38,26 @@ class AxisOrderPuzzleTest(unittest.TestCase):
     def test_methane_c3_and_c2_classes(self):
         # Td: four equivalent C3 axes, three C2 axes (coincident with S4).
         self.assertEqual(_summary("methane"), [((2,), 3), ((3,), 4)])
+
+    def test_improper_sn_axes(self):
+        # C2v / C3v have no S_n axes.
+        self.assertEqual(_summary("water", "improper"), [])
+        self.assertEqual(_summary("ammonia", "improper"), [])
+        # Td: three S4 axes (coincident with the C2 axes).
+        self.assertEqual(_summary("methane", "improper"), [((4,), 3)])
+        # D6h main axis carries both S6 (60 deg) and S3 (120 deg); their matrix
+        # order is 6 for both, so this only comes out right by reading the
+        # rotoreflection angle rather than the matrix period.
+        self.assertEqual(_summary("benzene", "improper"), [((3, 6), 1)])
+
+    def test_public_and_check_support_improper(self):
+        render_data = _render_data("methane")
+        questions = public_questions(render_data, "improper")
+        self.assertTrue(questions)
+        self.assertNotIn("correct_orders", questions[0])
+        hit = check_answer(render_data, 0, [4], "improper")
+        self.assertTrue(hit["correct"])
+        self.assertEqual(hit["correct_orders"], [4])
 
     def test_public_questions_hide_the_correct_answer(self):
         questions = public_questions(_render_data("benzene"))

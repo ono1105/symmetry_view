@@ -1,12 +1,16 @@
-"""Judging for the "how many-fold is this rotation axis?" puzzle.
+"""Judging for the axis-order puzzles.
 
-Renderer-independent: consumes ``render_data`` only. See ``docs/PUZZLE_SPEC.md``.
+Two problem types share this logic (docs/PUZZLE_SPEC.md):
+  * ``rotation``  — "how many-fold is this rotation axis?" (Cn)
+  * ``improper``  — "how many-fold is this rotoreflection axis?" (Sn)
 
-For a rotation axis the correct answer is the set of rotation orders that hold
-about it (the divisors >= 2 of its principal order); an infinite axis (C-inf on
-a linear molecule) accepts every option. Collinear axis elements are merged, and
-symmetry-equivalent axes (e.g. the x/y/z C4 axes of an octahedron) are collapsed
-into one representative via their orbit under the group operations (option A).
+Renderer-independent: consumes ``render_data`` only. For a given axis the
+correct answer is the set of orders present on it (read straight from the
+operations that live on that axis), restricted to the offered options; an
+infinite rotation axis (C-inf on a linear molecule) accepts every option.
+Collinear axis elements are merged, and symmetry-equivalent axes (e.g. the
+x/y/z C4 axes of an octahedron) collapse into one representative via their
+orbit under the group operations.
 """
 
 from __future__ import annotations
@@ -16,6 +20,38 @@ import numpy as np
 ROTATION_ORDER_OPTIONS: tuple[int, ...] = (2, 3, 4, 6)
 
 _DIRECTION_TOL = 1e-4
+
+def _rotation_order(operation: dict) -> int | None:
+    order = operation.get("order")
+    return int(order) if order is not None else None
+
+
+def _improper_order(operation: dict) -> int | None:
+    """Schoenflies n of an S_n operation, from its rotation angle.
+
+    The stored matrix order (and symbol) uses the matrix period, which for odd
+    n is 2n (an S3 matrix has period 6). The Schoenflies index is 360/theta,
+    where trace(S) = 2*cos(theta) - 1 for a rotoreflection.
+    """
+    matrix = operation.get("matrix_cart")
+    if matrix is None:
+        return _rotation_order(operation)
+    m = np.asarray(matrix, dtype=float)
+    if np.linalg.det(m) > 0:  # a proper rotation slipped in
+        return None
+    cos_theta = np.clip((np.trace(m) + 1.0) / 2.0, -1.0, 1.0)
+    theta = float(np.degrees(np.arccos(cos_theta)))
+    if theta < 1e-6:  # pure reflection (S1 = sigma)
+        return None
+    n = round(360.0 / theta)
+    return int(n) if n >= 2 else None
+
+
+# Which operation kinds count for each problem type, and how to read the order.
+_AXIS_KINDS = {
+    "rotation": {"prefixes": ("rotation_",), "infinite": "rotation_infinite", "order_fn": _rotation_order},
+    "improper": {"prefixes": ("improper_", "rotoinversion"), "infinite": None, "order_fn": _improper_order},
+}
 
 
 def canonical_direction(vector) -> np.ndarray | None:
@@ -33,13 +69,8 @@ def canonical_direction(vector) -> np.ndarray | None:
     return vec
 
 
-def _geometric_rotation_axes(render_data: dict) -> list[dict]:
-    """Merge collinear rotation-axis elements into geometric axes.
-
-    Returns dicts with ``direction`` (canonical), ``point``, the set of pure
-    rotation ``orders`` present, and whether an infinite (C-inf) rotation lives
-    on the axis.
-    """
+def _geometric_axes(render_data: dict, spec: dict) -> list[dict]:
+    """Merge collinear axis elements carrying the requested operation kinds."""
     operations = {int(op["index"]): op for op in render_data.get("operations", [])}
     groups: dict[tuple, dict] = {}
     for axis in render_data.get("axes", []):
@@ -53,17 +84,17 @@ def _geometric_rotation_axes(render_data: dict) -> list[dict]:
             if operation is None:
                 continue
             kind = str(operation.get("kind", ""))
-            if kind == "rotation_infinite":
+            if spec["infinite"] and kind == spec["infinite"]:
                 infinite = True
-            elif kind.startswith("rotation_"):
-                order = operation.get("order")
+            elif any(kind.startswith(prefix) for prefix in spec["prefixes"]):
+                order = spec["order_fn"](operation)
                 if order is not None:
                     orders.add(int(order))
         if not orders and not infinite:
             continue
         # Molecules share the centre, so the canonical direction identifies the
-        # line. (Crystals with parallel axes at different points need the point
-        # in the key too; out of scope for the molecule-first puzzle.)
+        # line. (Crystals with parallel axes at different points would need the
+        # point in the key too; out of scope for the molecule-first puzzle.)
         key = tuple(np.round(direction, 4))
         group = groups.get(key)
         if group is None:
@@ -119,19 +150,15 @@ def _equivalence_classes(axes: list[dict], render_data: dict) -> list[list[int]]
     return list(classes.values())
 
 
-def rotation_axis_questions(
+def axis_questions(
     render_data: dict,
+    kind: str = "rotation",
     *,
     options: tuple[int, ...] = ROTATION_ORDER_OPTIONS,
 ) -> list[dict]:
-    """Return one quiz question per symmetry-inequivalent rotation axis.
-
-    Each question: ``direction_cart``, ``point_cart``, ``correct_orders``
-    (sorted subset of ``options``), ``equivalent_count`` (axes in the class),
-    ``infinite`` (C-inf). Axes carrying an order outside ``options`` (C5, C7…)
-    are excluded from the v1 pool.
-    """
-    axes = _geometric_rotation_axes(render_data)
+    """One question per symmetry-inequivalent axis of the given problem type."""
+    spec = _AXIS_KINDS[kind]
+    axes = _geometric_axes(render_data, spec)
     questions = []
     for members in _equivalence_classes(axes, render_data):
         axis = axes[members[0]]
@@ -156,8 +183,17 @@ def rotation_axis_questions(
     return questions
 
 
+def rotation_axis_questions(
+    render_data: dict,
+    *,
+    options: tuple[int, ...] = ROTATION_ORDER_OPTIONS,
+) -> list[dict]:
+    return axis_questions(render_data, "rotation", options=options)
+
+
 def public_questions(
     render_data: dict,
+    kind: str = "rotation",
     *,
     options: tuple[int, ...] = ROTATION_ORDER_OPTIONS,
 ) -> list[dict]:
@@ -171,7 +207,7 @@ def public_questions(
             "equivalent_count": question["equivalent_count"],
             "infinite": question["infinite"],
         }
-        for index, question in enumerate(rotation_axis_questions(render_data, options=options))
+        for index, question in enumerate(axis_questions(render_data, kind, options=options))
     ]
 
 
@@ -179,11 +215,12 @@ def check_answer(
     render_data: dict,
     question_id: int,
     selected_orders,
+    kind: str = "rotation",
     *,
     options: tuple[int, ...] = ROTATION_ORDER_OPTIONS,
 ) -> dict | None:
     """Judge one answer and reveal the correct set. ``None`` if id is unknown."""
-    questions = rotation_axis_questions(render_data, options=options)
+    questions = axis_questions(render_data, kind, options=options)
     if not 0 <= question_id < len(questions):
         return None
     correct = questions[question_id]["correct_orders"]
