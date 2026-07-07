@@ -167,10 +167,18 @@ export class PuzzleView {
     this.controls.update();
   }
 
+  // Resolve and drop any running animation so its awaiter (playActive) is not
+  // left hanging when the slider or a new question interrupts it.
+  cancelRotation() {
+    const anim = this.rotationAnim;
+    this.rotationAnim = null;
+    if (anim && anim.resolve) anim.resolve();
+  }
+
   // Rotate the molecule to an absolute angle (radians) about the highlighted
   // axis. Cancels any running animation so the slider takes over.
   setRotation(angleRad, { fromAnimation = false } = {}) {
-    if (!fromAnimation) this.rotationAnim = null;
+    if (!fromAnimation) this.cancelRotation();
     this.spin.matrix.makeRotationAxis(this.spinAxis, angleRad);
     this.spin.matrixWorldNeedsUpdate = true;
     this.render();
@@ -178,6 +186,7 @@ export class PuzzleView {
 
   // Animate from 0 to targetAngleRad; onProgress(fraction) drives the slider.
   playRotation(targetAngleRad, durationMs = 1600, onProgress = null) {
+    this.cancelRotation();
     this.rotationAnim = { resolve: null, start: performance.now(), durationMs, onProgress, target: targetAngleRad };
     return new Promise((resolve) => {
       this.rotationAnim.resolve = resolve;

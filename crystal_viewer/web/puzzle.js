@@ -161,7 +161,9 @@ function beginRound() {
   el("puzzle-playback").hidden = true; // reveal controls appear after answering
   el("puzzle-order-tabs").innerHTML = "";
   el("puzzle-slider").value = "0";
+  el("puzzle-replay").disabled = false;
   activeOrder = null;
+  revealing = false;
   view.setRotation(0);
 }
 
