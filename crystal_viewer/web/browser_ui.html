@@ -33,9 +33,17 @@
       <div id="puzzle-quiz-select" class="puzzle-quiz-select">
         <h2 class="puzzle-quiz-title">クイズを選んでください</h2>
         <div class="puzzle-quiz-list">
-          <button type="button" class="puzzle-quiz-card" data-quiz="axis">
-            <span class="puzzle-quiz-name">回転軸クイズ</span>
-            <span class="puzzle-quiz-desc">ハイライトされた軸が何回回転軸かを当てます。</span>
+          <button type="button" class="puzzle-quiz-card" data-quiz="axis" data-difficulty="easy">
+            <span class="puzzle-quiz-name">回転軸クイズ（やさしい）</span>
+            <span class="puzzle-quiz-desc">水・アンモニアなど、軸が少ない分子で最高次数を当てます。</span>
+          </button>
+          <button type="button" class="puzzle-quiz-card" data-quiz="axis" data-difficulty="normal">
+            <span class="puzzle-quiz-name">回転軸クイズ（ふつう）</span>
+            <span class="puzzle-quiz-desc">C4・C6や複数軸を持つ分子で最高次数を当てます。</span>
+          </button>
+          <button type="button" class="puzzle-quiz-card" data-quiz="axis" data-difficulty="hard">
+            <span class="puzzle-quiz-name">回転軸クイズ（むずかしい）</span>
+            <span class="puzzle-quiz-desc">高対称分子と結晶で、見え方から回転軸を判別します。</span>
           </button>
           <button type="button" class="puzzle-quiz-card" data-quiz="operation" data-difficulty="normal">
             <span class="puzzle-quiz-name">操作あてクイズ（普通）</span>

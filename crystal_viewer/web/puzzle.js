@@ -10,7 +10,7 @@ let view = null;
 let started = false;
 let catalog = null;
 let currentQuiz = "axis"; // "axis" | "operation"
-let currentDifficulty = "normal"; // operation quiz: "normal" | "hard" (translation ops)
+let currentDifficulty = "normal"; // axis: easy|normal|hard, operation: normal|hard
 let currentKind = "molecule"; // structure picker toggle
 let currentSourceKind = "molecule"; // kind of the loaded structure (for answer options)
 let questions = [];
@@ -140,14 +140,64 @@ const STRUCTURE_KINDS = [
   { kind: "crystal", label: "結晶" },
 ];
 
+const AXIS_STRUCTURE_DIFFICULTY = {
+  easy: {
+    label: "やさしい",
+    description: "軸が少なく、2回・3回を見分けやすい分子",
+    molecule: new Set(["water", "ammonia"]),
+    crystal: new Set(),
+  },
+  normal: {
+    label: "ふつう",
+    description: "4回・6回や複数の軸を持つ分子",
+    molecule: new Set([
+      "allene",
+      "benzene",
+      "boron_trifluoride",
+      "carbon_dioxide",
+      "ethene",
+      "methane",
+      "xenon_tetrafluoride",
+    ]),
+    crystal: new Set(),
+  },
+  hard: {
+    label: "むずかしい",
+    description: "高対称分子と結晶",
+    molecule: new Set(["sulfur_hexafluoride"]),
+    crystal: null, // all curated crystals
+  },
+};
+
+function currentAxisDifficulty() {
+  return AXIS_STRUCTURE_DIFFICULTY[currentDifficulty] || AXIS_STRUCTURE_DIFFICULTY.normal;
+}
+
+function filteredExamples(kind) {
+  const examples = catalog?.[kind] || [];
+  if (currentQuiz !== "axis") return examples;
+  const allowed = currentAxisDifficulty()[kind];
+  if (allowed === null) return examples;
+  return examples.filter((example) => allowed.has(example.name));
+}
+
+function availableStructureKinds() {
+  return STRUCTURE_KINDS.filter((item) => filteredExamples(item.kind).length > 0);
+}
+
 async function buildPicker() {
   if (!catalog) catalog = await getJson("/api/examples");
   const root = el("puzzle-picker");
   root.innerHTML = "";
 
+  const availableKinds = availableStructureKinds();
+  if (!availableKinds.some((item) => item.kind === currentKind)) {
+    currentKind = availableKinds[0]?.kind || "molecule";
+  }
+
   const kindRow = document.createElement("div");
   kindRow.className = "puzzle-kind-row";
-  for (const item of STRUCTURE_KINDS) {
+  for (const item of availableKinds) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `puzzle-kind${item.kind === currentKind ? " selected" : ""}`;
@@ -163,16 +213,31 @@ async function buildPicker() {
 
   const heading = document.createElement("h2");
   heading.className = "puzzle-picker-title";
-  heading.textContent = currentKind === "crystal" ? "結晶を選んでください" : "分子を選んでください";
+  const difficultyLabel =
+    currentQuiz === "axis" ? `（${currentAxisDifficulty().label}）` : "";
+  heading.textContent =
+    currentKind === "crystal"
+      ? `結晶を選んでください${difficultyLabel}`
+      : `分子を選んでください${difficultyLabel}`;
   root.appendChild(heading);
+  if (currentQuiz === "axis") {
+    const hint = document.createElement("p");
+    hint.className = "puzzle-picker-hint";
+    hint.textContent = currentAxisDifficulty().description;
+    root.appendChild(hint);
+  }
   const list = document.createElement("div");
   list.className = "puzzle-picker-list";
-  for (const example of catalog[currentKind] || []) {
+  for (const example of filteredExamples(currentKind)) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "puzzle-structure";
     // Only the name/formula — the point/space group would give the answer away.
-    button.innerHTML = `<span class="puzzle-structure-name">${displayLabel(example)}</span>`;
+    const meta =
+      currentQuiz === "axis"
+        ? `<span class="puzzle-structure-meta">${currentAxisDifficulty().label}</span>`
+        : "";
+    button.innerHTML = `<span class="puzzle-structure-name">${displayLabel(example)}</span>${meta}`;
     button.addEventListener("click", () => startStructure(example).catch(showError));
     list.appendChild(button);
   }
