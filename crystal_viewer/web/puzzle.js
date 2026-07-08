@@ -1,23 +1,43 @@
 import { StaticStructureView } from "/static/three_view.js";
 
-// Puzzle: "how many-fold is this rotation axis?" (docs/PUZZLE_SPEC.md §3).
-// The 3D view reuses the analysis-mode renderer (StaticStructureView), so atoms,
-// the unit cell and the reveal animation match the analysis mode exactly. Pick a
-// structure, one rotation axis is highlighted, choose its highest fold (the n of
-// an n-fold axis: 2/3/4/6, or ∞ for a linear molecule), then check — the reveal
-// replays that rotation operation's animation (periodic-aware, from the server).
+// Puzzle mode (docs/PUZZLE_SPEC.md). Two quizzes share one flow — pick a quiz,
+// pick a structure, answer — and both reuse the analysis-mode StaticStructureView
+// so atoms, the unit cell and the (periodic-aware) animation match the analysis.
+//   * "axis"      — a highlighted axis is shown; name its highest rotation fold.
+//   * "operation" — one symmetry operation is animated; name its kind (+ fold).
 
 let view = null;
 let started = false;
 let catalog = null;
-let currentKind = "molecule";
+let currentQuiz = "axis"; // "axis" | "operation"
+let currentKind = "molecule"; // structure picker toggle
+let currentSourceKind = "molecule"; // kind of the loaded structure (for answer options)
 let questions = [];
 let currentQuestion = null;
-let revealOperation = null; // operation index to animate, handed out on /check
+let revealOperation = null; // operation index to animate for the reveal
 let revealAnim = null; // active reveal animation token
 
 const REVEAL_DURATION_MS = 1600;
 const INFINITE = "inf";
+
+// Operation-identify answer vocabulary (canonical kinds match game/operation_identify.py).
+// `orders` lists the folds offered for that kind (null = kind only). The improper
+// kind shown depends on the structure: molecules use rotoreflection Sn (回映),
+// crystals use rotoinversion -n (回反).
+const OP_KIND_MOLECULE = { kind: "rotoreflection", label: "回映", orders: [3, 4, 6] };
+const OP_KIND_CRYSTAL = { kind: "rotoinversion", label: "回反", orders: [3, 4, 6] };
+
+function operationKinds() {
+  // Linear molecules have a C∞ axis, so molecules offer ∞ as a rotation fold;
+  // the crystallographic restriction means crystals never do.
+  const rotationOrders = currentSourceKind === "crystal" ? [2, 3, 4, 6] : [2, 3, 4, 6, INFINITE];
+  return [
+    { kind: "rotation", label: "回転", orders: rotationOrders },
+    { kind: "mirror", label: "鏡映", orders: null },
+    { kind: "inversion", label: "反転", orders: null },
+    currentSourceKind === "crystal" ? OP_KIND_CRYSTAL : OP_KIND_MOLECULE,
+  ];
+}
 
 function el(id) {
   return document.getElementById(id);
@@ -30,6 +50,20 @@ function formatFormula(text) {
 
 function formatOrder(order) {
   return order === INFINITE ? "無限回" : `${order}回`;
+}
+
+function formatOperationAnswer(kind, order) {
+  if (kind === "rotation") return `${order}回回転`;
+  if (kind === "mirror") return "鏡映";
+  if (kind === "inversion") return "反転";
+  if (kind === "rotoreflection") return `回映（S${order}）`;
+  if (kind === "rotoinversion") return `回反（-${order}）`;
+  return kind;
+}
+
+function formatOperationAnswers(answers) {
+  // Coincident motions accept more than one name (e.g. CO2: 反転 or 鏡映).
+  return (answers || []).map((a) => formatOperationAnswer(a.kind, a.order)).join(" または ");
 }
 
 // The catalog stores reduced formulae (benzene -> "HC"), which are wrong as
@@ -50,19 +84,31 @@ const MOLECULAR_FORMULA = {
 };
 
 function displayLabel(example) {
-  // Molecules keep a curated molecular formula; crystals use the catalog
-  // (reduced) formula, which is the correct formula unit for them.
   const source = example.kind === "molecule" ? MOLECULAR_FORMULA[example.name] : null;
   return formatFormula(source || example.formula || example.name);
 }
 
-function showHome() {
+// --- Screens: quiz select -> structure picker -> play ---
+
+function showQuizSelect() {
+  el("puzzle-quiz-select").hidden = false;
+  el("puzzle-picker-back").hidden = true;
+  el("puzzle-picker").hidden = true;
+  el("puzzle-play").hidden = true;
+  el("puzzle-back").hidden = false;
+}
+
+function showPicker() {
+  el("puzzle-quiz-select").hidden = true;
+  el("puzzle-picker-back").hidden = false;
   el("puzzle-picker").hidden = false;
   el("puzzle-play").hidden = true;
-  el("puzzle-back").hidden = false; // return-to-selection lives on the home screen only
+  el("puzzle-back").hidden = false;
 }
 
 function showPlay() {
+  el("puzzle-quiz-select").hidden = true;
+  el("puzzle-picker-back").hidden = true;
   el("puzzle-picker").hidden = true;
   el("puzzle-play").hidden = false;
   el("puzzle-back").hidden = true;
@@ -119,7 +165,6 @@ async function buildPicker() {
 }
 
 function buildLegend() {
-  // Reuse the element/colour list the shared view already computed.
   const legend = el("puzzle-legend");
   if (!legend) return;
   legend.innerHTML = "";
@@ -138,9 +183,16 @@ function showError(error) {
   result.textContent = `エラー: ${error.message || error}`;
 }
 
+function showPrompt(message) {
+  const result = el("puzzle-result");
+  result.hidden = false;
+  result.className = "puzzle-result miss";
+  result.textContent = message;
+}
+
 async function startStructure(example) {
   showPlay();
-  // Name/formula only; the point/space group would reveal the axis order.
+  // Name/formula only; the point/space group would reveal the answer.
   el("puzzle-structure-title").innerHTML = displayLabel(example);
   el("puzzle-question").textContent = "読み込み中…";
   await getJson("/api/open_example", {
@@ -148,16 +200,20 @@ async function startStructure(example) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind: example.kind, path: example.path, request_id: Date.now() }),
   });
-  // Render the structure with the shared analysis-mode view (atoms + unit cell
-  // for crystals + fitted camera), then fetch the axis questions for it.
+  // Render with the shared analysis-mode view (atoms + unit cell + fitted camera).
+  // Crystals also show the cell's equivalent boundary atoms (periodic images).
+  view.renderDataQuery = example.kind === "crystal" ? "?boundary_images=1" : "";
   await view.refresh();
   buildLegend();
-  const puzzlePayload = await getJson("/api/puzzle/axis_orders");
-  questions = puzzlePayload.questions || [];
+  const endpoint = currentQuiz === "axis" ? "/api/puzzle/axis_orders" : "/api/puzzle/operations";
+  const payload = await getJson(endpoint);
+  currentSourceKind = payload.source_kind || example.kind;
+  questions = payload.questions || [];
   if (!questions.length) {
     view.clearSymmetryElements();
     const noun = example.kind === "crystal" ? "結晶" : "分子";
-    el("puzzle-question").textContent = `この${noun}には出題できる回転軸がありません。別の${noun}を選んでください。`;
+    const what = currentQuiz === "axis" ? "回転軸" : "基本操作";
+    el("puzzle-question").textContent = `この${noun}には出題できる${what}がありません。別の${noun}を選んでください。`;
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
     el("puzzle-again").hidden = true;
@@ -172,14 +228,26 @@ function beginRound() {
   currentQuestion = questions[Math.floor(Math.random() * questions.length)];
   revealOperation = null;
   view.clearSymmetryElements();
+  view.resetAnimation();
+  const result = el("puzzle-result");
+  result.hidden = true;
+  el("puzzle-options").innerHTML = "";
+  el("puzzle-check").hidden = false;
+  el("puzzle-check").disabled = false;
+  el("puzzle-again").hidden = true;
+  el("puzzle-slider").value = "0";
+  el("puzzle-replay").disabled = false;
+  if (currentQuiz === "axis") beginAxisRound();
+  else beginOperationRound();
+}
+
+function beginAxisRound() {
   view.addAxis(
     { direction_cart: currentQuestion.direction_cart, point_cart: currentQuestion.point_cart },
     view.sceneSpan(),
   );
-  view.resetAnimation();
   el("puzzle-question").textContent = "青い軸は何回回転軸ですか？";
   const options = el("puzzle-options");
-  options.innerHTML = "";
   const choices = [...currentQuestion.options];
   if (currentQuestion.infinite) choices.push(INFINITE);
   for (const order of choices) {
@@ -188,23 +256,55 @@ function beginRound() {
     label.innerHTML = `<input type="radio" name="puzzle-order" value="${order}"><span>${formatOrder(order)}</span>`;
     options.appendChild(label);
   }
-  const result = el("puzzle-result");
-  result.hidden = true;
-  el("puzzle-check").hidden = false;
-  el("puzzle-check").disabled = false;
-  el("puzzle-again").hidden = true;
   el("puzzle-playback").hidden = true; // reveal controls appear after answering
-  el("puzzle-slider").value = "0";
-  el("puzzle-replay").disabled = false;
 }
+
+function beginOperationRound() {
+  el("puzzle-question").textContent = "このアニメーションはどの操作ですか？";
+  renderOperationOptions();
+  // The animation IS the question, so show the playback controls and play it now.
+  revealOperation = currentQuestion.operation_index;
+  el("puzzle-playback").hidden = false;
+  playReveal().catch(showError);
+}
+
+function renderOperationOptions() {
+  const root = el("puzzle-options");
+  const kinds = operationKinds();
+  const kindRow = document.createElement("div");
+  kindRow.className = "puzzle-op-group";
+  for (const { kind, label } of kinds) {
+    const item = document.createElement("label");
+    item.className = "puzzle-option";
+    item.innerHTML = `<input type="radio" name="op-kind" value="${kind}"><span>${label}</span>`;
+    kindRow.appendChild(item);
+  }
+  root.appendChild(kindRow);
+
+  // The order row is always present (with reserved height) so selecting a kind
+  // that needs a fold does not resize/shift the layout; only its contents change.
+  const orderRow = document.createElement("div");
+  orderRow.className = "puzzle-op-group puzzle-op-order";
+  root.appendChild(orderRow);
+
+  kindRow.addEventListener("change", () => {
+    const config = kinds.find((k) => k.kind === kindRow.querySelector("input:checked")?.value);
+    orderRow.innerHTML = "";
+    for (const order of config?.orders || []) {
+      const item = document.createElement("label");
+      item.className = "puzzle-option";
+      item.innerHTML = `<input type="radio" name="op-order" value="${order}"><span>${formatOrder(order)}</span>`;
+      orderRow.appendChild(item);
+    }
+  });
+}
+
+// --- Reveal animation (shared) ---
 
 function setSlider(fraction) {
   el("puzzle-slider").value = String(Math.round(fraction * 1000));
 }
 
-// Drive the shared view's animation progress from 0 to 1 over the duration; this
-// reuses StaticStructureView.applyAnimationProgress (periodic-aware). Returns a
-// promise that resolves at the end or when cancelled (slider / next question).
 function animateReveal() {
   cancelReveal();
   return new Promise((resolve) => {
@@ -232,13 +332,12 @@ function cancelReveal() {
   if (anim) anim.resolve();
 }
 
-// Load the answered fold's rotation operation and play its animation once.
 async function playReveal() {
   if (revealOperation == null) return; // e.g. an infinite axis: nothing to play
   el("puzzle-replay").disabled = true;
   try {
-    // Force "displayed" scope so the reveal animates every atom, even if the
-    // analysis mode left a single-atom selection in the shared session.
+    // Force "displayed" scope so every atom animates, even if the analysis mode
+    // left a single-atom selection in the shared session.
     await view.loadAnimationPaths(Number(revealOperation), ++view.pathGeneration, "displayed");
     view.resetAnimation();
     await animateReveal();
@@ -247,19 +346,23 @@ async function playReveal() {
   }
 }
 
-function selectedOrder() {
-  const checked = el("puzzle-options").querySelector("input:checked");
-  return checked ? checked.value : null;
-}
+// --- Checking answers ---
 
 async function onCheck() {
   if (!currentQuestion) return;
+  if (currentQuiz === "axis") return onCheckAxis();
+  return onCheckOperation();
+}
+
+function selectedOrder() {
+  const checked = el("puzzle-options").querySelector('input[name="puzzle-order"]:checked');
+  return checked ? checked.value : null;
+}
+
+async function onCheckAxis() {
   const selected = selectedOrder();
   if (selected == null) {
-    const result = el("puzzle-result");
-    result.hidden = false;
-    result.className = "puzzle-result miss";
-    result.textContent = "回数を1つ選んでください。";
+    showPrompt("回数を1つ選んでください。");
     return;
   }
   el("puzzle-check").disabled = true;
@@ -275,25 +378,53 @@ async function onCheck() {
   revealOperation = result.reveal_operation;
   el("puzzle-again").hidden = false;
   if (revealOperation == null) {
-    // Infinite axis (or no discrete rotation): no animation to show.
-    el("puzzle-playback").hidden = true;
+    el("puzzle-playback").hidden = true; // infinite axis: nothing to animate
   } else {
     el("puzzle-playback").hidden = false;
     playReveal().catch(showError);
   }
 }
 
-function toggleProjection() {
-  // The button shows the current projection; clicking switches to the other.
-  const button = el("puzzle-projection");
-  const next = button.dataset.projection === "perspective" ? "orthographic" : "perspective";
-  view.setProjection(next);
-  button.dataset.projection = next;
-  button.textContent = next === "perspective" ? "透視投影" : "平行投影";
+function selectedOperationAnswer() {
+  const root = el("puzzle-options");
+  const kind = root.querySelector('input[name="op-kind"]:checked')?.value || null;
+  const orderInput = root.querySelector('input[name="op-order"]:checked');
+  // Raw value ("2" or "inf"); the server normalises it.
+  return { kind, order: orderInput ? orderInput.value : null };
 }
 
-// Camera controls reuse StaticStructureView's own methods, the same ones the
-// analysis-mode Simple camera tab drives.
+async function onCheckOperation() {
+  const { kind, order } = selectedOperationAnswer();
+  if (!kind) {
+    showPrompt("操作の種類を選んでください。");
+    return;
+  }
+  const config = operationKinds().find((k) => k.kind === kind);
+  if (config?.orders && order == null) {
+    showPrompt("回数も選んでください。");
+    return;
+  }
+  el("puzzle-check").disabled = true;
+  const result = await getJson("/api/puzzle/operations/check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question_id: currentQuestion.id, kind, order }),
+  });
+  const box = el("puzzle-result");
+  box.hidden = false;
+  box.className = `puzzle-result ${result.correct ? "hit" : "miss"}`;
+  const answerText = formatOperationAnswers(result.answers);
+  if (result.correct) {
+    // When a motion carries more than one valid name, say so.
+    box.textContent = result.answers.length > 1 ? `正解（${answerText} のいずれも正解）` : "正解";
+  } else {
+    box.textContent = `不正解（正解は ${answerText}）`;
+  }
+  el("puzzle-again").hidden = false;
+}
+
+// --- Camera controls (reuse StaticStructureView's own methods) ---
+
 const CAMERA_DIRECTIONS = {
   "puzzle-cam-left": "left",
   "puzzle-cam-right": "right",
@@ -303,6 +434,14 @@ const CAMERA_DIRECTIONS = {
   "puzzle-cam-roll-right": "roll-right",
 };
 
+function toggleProjection() {
+  const button = el("puzzle-projection");
+  const next = button.dataset.projection === "perspective" ? "orthographic" : "perspective";
+  view.setProjection(next);
+  button.dataset.projection = next;
+  button.textContent = next === "perspective" ? "透視投影" : "平行投影";
+}
+
 function setupCameraControls() {
   for (const [id, direction] of Object.entries(CAMERA_DIRECTIONS)) {
     el(id).addEventListener("click", () => {
@@ -310,13 +449,13 @@ function setupCameraControls() {
     });
   }
   el("puzzle-view-along").addEventListener("click", () => {
-    if (!currentQuestion) return;
-    // Look straight down the highlighted axis, centred on its point.
+    // Only the axis quiz has a highlighted axis to look down.
+    if (currentQuiz !== "axis" || !currentQuestion) return;
     view.viewAlongCartesianDirection(currentQuestion.direction_cart, currentQuestion.point_cart);
   });
 }
 
-function setupPlayControls() {
+function setupControls() {
   el("puzzle-projection").addEventListener("click", toggleProjection);
   setupCameraControls();
   el("puzzle-check").addEventListener("click", () => onCheck().catch(showError));
@@ -328,21 +467,24 @@ function setupPlayControls() {
   el("puzzle-again").addEventListener("click", () => {
     if (questions.length) beginRound();
   });
-  el("puzzle-other").addEventListener("click", showHome);
+  el("puzzle-other").addEventListener("click", showPicker);
+  el("puzzle-picker-back").addEventListener("click", showQuizSelect);
+  for (const card of document.querySelectorAll(".puzzle-quiz-card")) {
+    card.addEventListener("click", () => {
+      currentQuiz = card.dataset.quiz;
+      buildPicker().then(showPicker).catch(showError);
+    });
+  }
 }
 
-window.addEventListener("symmetry-enter-puzzle", async () => {
+window.addEventListener("symmetry-enter-puzzle", () => {
   if (!started) {
     started = true;
     view = new StaticStructureView(el("puzzle-view"));
     view.setBackgroundMode("light");
-    setupPlayControls();
-    try {
-      await buildPicker();
-    } catch (error) {
-      showError(error);
-    }
+    setupControls();
   } else if (view) {
     view.resize();
   }
+  showQuizSelect();
 });

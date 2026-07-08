@@ -1366,8 +1366,67 @@
       color: #0f2f4c;
     }
     .puzzle-body {
-      padding: 24px;
+      padding: 14px 24px 20px;
       color: #1f2a37;
+    }
+    .puzzle-quiz-select {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .puzzle-quiz-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #0f2f4c;
+      margin: 0 0 16px;
+    }
+    .puzzle-quiz-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .puzzle-quiz-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      text-align: left;
+      padding: 20px;
+      background: #fff;
+      border: 1px solid #cfe0f0;
+      border-radius: 12px;
+      cursor: pointer;
+    }
+    .puzzle-quiz-card:hover {
+      border-color: #2f80ed;
+      box-shadow: 0 4px 14px rgb(47 128 237 / 15%);
+    }
+    .puzzle-quiz-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f2f4c;
+    }
+    .puzzle-quiz-desc {
+      font-size: 14px;
+      color: #4a6785;
+      line-height: 1.5;
+    }
+    .puzzle-subback {
+      margin-bottom: 14px;
+    }
+    .puzzle-op-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      flex-basis: 100%;
+    }
+    .puzzle-op-order {
+      margin-top: 4px;
+      /* Reserve one row so revealing the folds does not shift the layout. */
+      min-height: 40px;
+    }
+    @media (max-width: 620px) {
+      .puzzle-quiz-list {
+        grid-template-columns: 1fr;
+      }
     }
     .puzzle-body .hint {
       color: #52708a;
@@ -1473,21 +1532,24 @@
     }
     .puzzle-play {
       display: grid;
-      grid-template-columns: minmax(0, 560px) minmax(280px, 380px);
-      justify-content: center;
-      gap: 24px;
-      align-items: start;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+      width: 100%;
+      max-width: 1120px;
+      margin: 0 auto;
     }
     /* The display rules above beat the [hidden] user-agent rule, so restore it. */
     .puzzle-play[hidden],
     .puzzle-playback[hidden] {
       display: none;
     }
+    .puzzle-top {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      gap: 18px;
+      align-items: start;
+    }
     .puzzle-stage-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
       margin-bottom: 10px;
     }
     .puzzle-structure-title {
@@ -1495,40 +1557,37 @@
       font-weight: 700;
       color: #0f2f4c;
     }
+    .puzzle-side {
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
     .puzzle-projection {
-      flex: none;
       padding: 6px 12px;
       font-size: 13px;
+      justify-self: start;
     }
-    .puzzle-camera {
+    .puzzle-side-box {
       border: 1px solid #cfe0f0;
       border-radius: 10px;
       background: #fff;
-      padding: 6px 12px;
+      padding: 10px 12px;
     }
-    .puzzle-camera > summary {
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 14px;
-      color: #0f2f4c;
-      padding: 4px 0;
-      list-style: none;
-    }
-    .puzzle-camera > summary::-webkit-details-marker {
-      display: none;
-    }
-    .puzzle-camera[open] > summary {
+    .puzzle-side-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #4a6785;
       margin-bottom: 8px;
     }
-    .puzzle-camera .camera-grid button {
+    .puzzle-side-box .camera-grid button {
       box-sizing: border-box;
       width: 44px;
       height: 34px;
       padding: 0;
     }
-    .puzzle-camera #puzzle-view-along {
-      justify-self: start;
+    .puzzle-side-box #puzzle-view-along {
       width: 100%;
+      margin-top: 4px;
     }
     .puzzle-view {
       background: #f4fbff;
@@ -1540,7 +1599,7 @@
     .puzzle-view canvas {
       display: block;
       width: 100%;
-      height: clamp(320px, 56vh, 560px);
+      height: clamp(240px, 40vh, 420px);
       cursor: grab;
       touch-action: none;
     }
@@ -1614,7 +1673,7 @@
       border: 1px solid #f0b3a3;
     }
     @media (max-width: 820px) {
-      .puzzle-play {
+      .puzzle-top {
         grid-template-columns: 1fr;
       }
     }

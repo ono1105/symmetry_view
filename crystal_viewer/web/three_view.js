@@ -89,6 +89,7 @@ export class StaticStructureView {
     this.serverPlaying = false;
     this.recording = false;
     this.backgroundMode = null;
+    this.renderDataQuery = ""; // owner may set e.g. "?boundary_images=1" (puzzle)
     this.legendItems = [];
     this.tempMatrix = new THREE.Matrix4();
     this.tempPosition = new THREE.Vector3();
@@ -111,7 +112,8 @@ export class StaticStructureView {
 
   async renderPayload() {
     this.setStatus("Loading 3D view…");
-    const response = await fetch("/api/render_data");
+    // Optional query (e.g. the puzzle's "?boundary_images=1") set by the owner.
+    const response = await fetch(`/api/render_data${this.renderDataQuery || ""}`);
     if (!response.ok) {
       throw new Error(await response.text() || `${response.status} ${response.statusText}`);
     }

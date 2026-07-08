@@ -30,38 +30,59 @@
       <h1>パズルモード</h1>
     </div>
     <div id="puzzle-body" class="puzzle-body">
+      <div id="puzzle-quiz-select" class="puzzle-quiz-select">
+        <h2 class="puzzle-quiz-title">クイズを選んでください</h2>
+        <div class="puzzle-quiz-list">
+          <button type="button" class="puzzle-quiz-card" data-quiz="axis">
+            <span class="puzzle-quiz-name">回転軸クイズ</span>
+            <span class="puzzle-quiz-desc">ハイライトされた軸が何回回転軸かを当てます。</span>
+          </button>
+          <button type="button" class="puzzle-quiz-card" data-quiz="operation">
+            <span class="puzzle-quiz-name">操作あてクイズ</span>
+            <span class="puzzle-quiz-desc">アニメーションで示された対称操作の種類と次数を当てます。</span>
+          </button>
+        </div>
+      </div>
+      <button type="button" id="puzzle-picker-back" class="secondary puzzle-subback" hidden>← クイズを選ぶ</button>
       <div id="puzzle-picker" class="puzzle-picker"></div>
       <div id="puzzle-play" class="puzzle-play" hidden>
-        <div class="puzzle-stage">
-          <div class="puzzle-stage-head">
-            <span id="puzzle-structure-title" class="puzzle-structure-title"></span>
-            <button type="button" id="puzzle-projection" class="secondary puzzle-projection" data-projection="perspective">透視投影</button>
-          </div>
-          <div id="puzzle-view" class="puzzle-view"><canvas></canvas></div>
-          <div id="puzzle-playback" class="puzzle-playback" hidden>
-            <div class="puzzle-playback-row">
-              <button type="button" id="puzzle-replay" class="secondary">再生</button>
-              <input id="puzzle-slider" type="range" min="0" max="1000" value="0" step="1" aria-label="回転">
+        <div class="puzzle-top">
+          <div class="puzzle-stage">
+            <div class="puzzle-stage-head">
+              <span id="puzzle-structure-title" class="puzzle-structure-title"></span>
             </div>
-          </div>
-          <div id="puzzle-legend" class="puzzle-legend"></div>
-          <details class="puzzle-camera" id="puzzle-camera">
-            <summary>カメラ操作</summary>
-            <div class="camera-block">
-              <div class="camera-rotate-row">
-                <div class="camera-grid">
-                  <button type="button" id="puzzle-cam-roll-left" class="secondary" title="左に傾ける" aria-label="左に傾ける">↶</button>
-                  <button type="button" id="puzzle-cam-up" class="secondary" title="上に回す" aria-label="上に回す">↑</button>
-                  <button type="button" id="puzzle-cam-roll-right" class="secondary" title="右に傾ける" aria-label="右に傾ける">↷</button>
-                  <button type="button" id="puzzle-cam-left" class="secondary" title="左に回す" aria-label="左に回す">←</button>
-                  <button type="button" id="puzzle-cam-down" class="secondary" title="下に回す" aria-label="下に回す">↓</button>
-                  <button type="button" id="puzzle-cam-right" class="secondary" title="右に回す" aria-label="右に回す">→</button>
-                </div>
-                <input id="puzzle-cam-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1" aria-label="回転角度">
+            <div id="puzzle-view" class="puzzle-view"><canvas></canvas></div>
+            <div id="puzzle-playback" class="puzzle-playback" hidden>
+              <div class="puzzle-playback-row">
+                <button type="button" id="puzzle-replay" class="secondary">再生</button>
+                <input id="puzzle-slider" type="range" min="0" max="1000" value="0" step="1" aria-label="回転">
               </div>
-              <button type="button" id="puzzle-view-along" class="secondary">軸方向から見る</button>
             </div>
-          </details>
+          </div>
+          <div class="puzzle-side">
+            <button type="button" id="puzzle-projection" class="secondary puzzle-projection" data-projection="perspective">透視投影</button>
+            <div class="puzzle-side-box">
+              <div class="puzzle-side-title">元素</div>
+              <div id="puzzle-legend" class="puzzle-legend"></div>
+            </div>
+            <div class="puzzle-side-box">
+              <div class="puzzle-side-title">カメラ操作</div>
+              <div class="camera-block">
+                <div class="camera-rotate-row">
+                  <div class="camera-grid">
+                    <button type="button" id="puzzle-cam-roll-left" class="secondary" title="左に傾ける" aria-label="左に傾ける">↶</button>
+                    <button type="button" id="puzzle-cam-up" class="secondary" title="上に回す" aria-label="上に回す">↑</button>
+                    <button type="button" id="puzzle-cam-roll-right" class="secondary" title="右に傾ける" aria-label="右に傾ける">↷</button>
+                    <button type="button" id="puzzle-cam-left" class="secondary" title="左に回す" aria-label="左に回す">←</button>
+                    <button type="button" id="puzzle-cam-down" class="secondary" title="下に回す" aria-label="下に回す">↓</button>
+                    <button type="button" id="puzzle-cam-right" class="secondary" title="右に回す" aria-label="右に回す">→</button>
+                  </div>
+                  <input id="puzzle-cam-angle" class="angle-control" type="number" value="90" min="0" max="180" step="1" aria-label="回転角度">
+                </div>
+                <button type="button" id="puzzle-view-along" class="secondary">軸方向から見る</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="puzzle-panel">
           <p id="puzzle-question" class="puzzle-question"></p>

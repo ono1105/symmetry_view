@@ -55,6 +55,8 @@ from crystal_viewer.viewer.animation_api import (
 from crystal_viewer.game.axis_orders import ROTATION_ORDER_OPTIONS
 from crystal_viewer.game.axis_orders import axis_questions as axis_order_questions
 from crystal_viewer.game.axis_orders import check_answer as check_axis_order_answer
+from crystal_viewer.game.operation_identify import check_answer as check_operation_answer
+from crystal_viewer.game.operation_identify import public_questions as public_operation_questions
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
     check_custom_operation,
@@ -780,6 +782,12 @@ def make_handler(
                     atom_colors = dict(shared_state.get("atom_colors", {}))
                     element_hidden = dict(shared_state.get("element_hidden", {}))
                     atom_hidden = dict(shared_state.get("atom_hidden", {}))
+                # An explicit ?boundary_images= overrides the shared analysis state
+                # (the puzzle shows the cell's equivalent boundary atoms without
+                # toggling the analysis mode's own setting).
+                boundary_override = parse_qs(parsed_url.query).get("boundary_images")
+                if boundary_override:
+                    include_boundary_images = boundary_override[0] in ("1", "true", "True")
                 body = {
                     "schema_version": schema_version,
                     "source_kind": source_kind,
@@ -966,6 +974,19 @@ def make_handler(
                     }
                 )
                 return
+            if path == "/api/puzzle/operations":
+                with state_lock:
+                    render_data = session.render_data
+                    source_kind = session.source_kind
+                # Each question carries only the operation index to animate; the
+                # operation's name/fold is revealed on /api/puzzle/operations/check.
+                self.send_json(
+                    {
+                        "source_kind": source_kind,
+                        "questions": public_operation_questions(render_data),
+                    }
+                )
+                return
             if path == "/api/state":
                 with state_lock:
                     body = dict(shared_state)
@@ -1046,6 +1067,23 @@ def make_handler(
                     if puzzle_type not in ("rotation", "improper"):
                         raise ValueError("unknown puzzle type")
                     result = check_axis_order_answer(render_data, question_id, selected, puzzle_type)
+                except (TypeError, ValueError) as exc:
+                    self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
+                    return
+                if result is None:
+                    self.send_json_error("puzzle question not found", status=404)
+                    return
+                self.send_json(result)
+                return
+
+            if path == "/api/puzzle/operations/check":
+                with state_lock:
+                    render_data = session.render_data
+                try:
+                    question_id = int(payload.get("question_id"))
+                    kind = str(payload.get("kind", ""))
+                    order = payload.get("order")
+                    result = check_operation_answer(render_data, question_id, kind, order)
                 except (TypeError, ValueError) as exc:
                     self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
                     return
