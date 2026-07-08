@@ -26,6 +26,14 @@ MIRROR = "mirror"              # 鏡映
 INVERSION = "inversion"        # 反転
 ROTOREFLECTION = "rotoreflection"  # 回映 (Sn, molecules)
 ROTOINVERSION = "rotoinversion"    # 回反 (-n, crystals)
+SCREW = "screw"                # らせん (screw axis, crystals)
+GLIDE = "glide"                # 映進 (glide plane, crystals)
+
+# Difficulty tiers: "normal" asks the point operations above; "hard" asks only
+# the operations that carry an intrinsic translation (screw axes, glide planes),
+# which exist for crystals only.
+NORMAL = "normal"
+HARD = "hard"
 
 ROTATION_ORDER_OPTIONS: tuple[int, ...] = (2, 3, 4, 6)
 IMPROPER_ORDER_OPTIONS: tuple[int, ...] = (3, 4, 6)
@@ -90,6 +98,23 @@ def _operation_answer(operation: dict) -> dict | None:
     return None
 
 
+def _translation_answer(operation: dict) -> dict | None:
+    """The hard-mode answer (a screw axis or glide plane), or None."""
+    kind = str(operation.get("kind", ""))
+    if kind.startswith("screw"):
+        order = operation.get("order")
+        if order is None or int(order) not in ROTATION_ORDER_OPTIONS:
+            return None
+        return {"kind": SCREW, "order": int(order)}
+    if kind == "glide":
+        return {"kind": GLIDE, "order": None}
+    return None
+
+
+def _answer_for(operation: dict, difficulty: str) -> dict | None:
+    return _translation_answer(operation) if difficulty == HARD else _operation_answer(operation)
+
+
 def _transform(operation: dict, atoms: list[dict]) -> np.ndarray | None:
     """Cartesian image of every atom under the operation (rows aligned to atoms)."""
     matrix = operation.get("matrix_cart")
@@ -125,8 +150,8 @@ def _visual_signature(operation: dict, atoms: list[dict]) -> tuple | None:
     return (motion, tuple(map(tuple, np.round(image, 2))))
 
 
-def identify_questions(render_data: dict) -> list[dict]:
-    """One question per distinct animation among the basic, moving operations.
+def identify_questions(render_data: dict, difficulty: str = NORMAL) -> list[dict]:
+    """One question per distinct animation among the in-scope, moving operations.
 
     Operations that look the same are merged into a single question whose
     ``answers`` lists every name that motion can validly carry (usually one; more
@@ -139,7 +164,7 @@ def identify_questions(render_data: dict) -> list[dict]:
     # Group by visual signature, preserving first-seen order for stable ids.
     groups: dict[tuple, dict] = {}
     for operation in render_data.get("operations", []):
-        answer = _operation_answer(operation)
+        answer = _answer_for(operation, difficulty)
         if answer is None:
             continue
         if not _moves_any_atom(operation, atoms, starts):
@@ -160,12 +185,25 @@ def identify_questions(render_data: dict) -> list[dict]:
     ]
 
 
-def public_questions(render_data: dict) -> list[dict]:
-    """Questions for the client (operation to animate; the name is withheld)."""
-    return [
-        {"id": index, "operation_index": question["operation_index"]}
-        for index, question in enumerate(identify_questions(render_data))
-    ]
+def public_questions(render_data: dict, difficulty: str = NORMAL) -> list[dict]:
+    """Questions for the client (operation to animate; the name is withheld).
+
+    Each question carries an opaque ``group`` id shared by questions with the same
+    answer, so the client can sample answer types evenly (a highly symmetric
+    crystal has many equivalent operations of the common kinds) without learning
+    what the answer is.
+    """
+    group_ids: dict[tuple, int] = {}
+    public = []
+    for index, question in enumerate(identify_questions(render_data, difficulty)):
+        signature = tuple(
+            sorted((a["kind"], -1 if a["order"] is None else a["order"]) for a in question["answers"])
+        )
+        group = group_ids.setdefault(signature, len(group_ids))
+        public.append(
+            {"id": index, "operation_index": question["operation_index"], "group": group}
+        )
+    return public
 
 
 def _answer_matches(answer: dict, selected_kind, selected_order) -> bool:
@@ -184,12 +222,13 @@ def check_answer(
     question_id: int,
     selected_kind,
     selected_order=None,
+    difficulty: str = NORMAL,
 ) -> dict | None:
     """Judge one answer and reveal the operation. ``None`` if id is unknown.
 
     ``answers`` holds every acceptable name; a match with any of them is correct.
     """
-    questions = identify_questions(render_data)
+    questions = identify_questions(render_data, difficulty)
     if not 0 <= question_id < len(questions):
         return None
     question = questions[question_id]

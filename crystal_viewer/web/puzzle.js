@@ -10,12 +10,15 @@ let view = null;
 let started = false;
 let catalog = null;
 let currentQuiz = "axis"; // "axis" | "operation"
+let currentDifficulty = "normal"; // operation quiz: "normal" | "hard" (translation ops)
 let currentKind = "molecule"; // structure picker toggle
 let currentSourceKind = "molecule"; // kind of the loaded structure (for answer options)
 let questions = [];
 let currentQuestion = null;
 let revealOperation = null; // operation index to animate for the reveal
 let revealAnim = null; // active reveal animation token
+let roundGeneration = 0; // invalidates async work from prior rounds/screens
+let operationAnswered = false;
 
 const REVEAL_DURATION_MS = 1600;
 const INFINITE = "inf";
@@ -28,6 +31,13 @@ const OP_KIND_MOLECULE = { kind: "rotoreflection", label: "回映", orders: [3, 
 const OP_KIND_CRYSTAL = { kind: "rotoinversion", label: "回反", orders: [3, 4, 6] };
 
 function operationKinds() {
+  if (currentDifficulty === "hard") {
+    // Translation-carrying operations (crystals only).
+    return [
+      { kind: "screw", label: "らせん", orders: [2, 3, 4, 6] },
+      { kind: "glide", label: "映進", orders: null },
+    ];
+  }
   // Linear molecules have a C∞ axis, so molecules offer ∞ as a rotation fold;
   // the crystallographic restriction means crystals never do.
   const rotationOrders = currentSourceKind === "crystal" ? [2, 3, 4, 6] : [2, 3, 4, 6, INFINITE];
@@ -58,6 +68,8 @@ function formatOperationAnswer(kind, order) {
   if (kind === "inversion") return "反転";
   if (kind === "rotoreflection") return `回映（S${order}）`;
   if (kind === "rotoinversion") return `回反（-${order}）`;
+  if (kind === "screw") return `${order}回らせん`;
+  if (kind === "glide") return "映進";
   return kind;
 }
 
@@ -99,6 +111,9 @@ function showQuizSelect() {
 }
 
 function showPicker() {
+  roundGeneration += 1;
+  cancelReveal();
+  operationAnswered = false;
   el("puzzle-quiz-select").hidden = true;
   el("puzzle-picker-back").hidden = false;
   el("puzzle-picker").hidden = false;
@@ -191,6 +206,9 @@ function showPrompt(message) {
 }
 
 async function startStructure(example) {
+  const generation = ++roundGeneration;
+  cancelReveal();
+  operationAnswered = false;
   showPlay();
   // Name/formula only; the point/space group would reveal the answer.
   el("puzzle-structure-title").innerHTML = displayLabel(example);
@@ -200,19 +218,30 @@ async function startStructure(example) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind: example.kind, path: example.path, request_id: Date.now() }),
   });
+  if (generation !== roundGeneration) return;
   // Render with the shared analysis-mode view (atoms + unit cell + fitted camera).
   // Crystals also show the cell's equivalent boundary atoms (periodic images).
   view.renderDataQuery = example.kind === "crystal" ? "?boundary_images=1" : "";
   await view.refresh();
+  if (generation !== roundGeneration) return;
   buildLegend();
-  const endpoint = currentQuiz === "axis" ? "/api/puzzle/axis_orders" : "/api/puzzle/operations";
+  const endpoint =
+    currentQuiz === "axis"
+      ? "/api/puzzle/axis_orders"
+      : `/api/puzzle/operations?difficulty=${currentDifficulty}`;
   const payload = await getJson(endpoint);
+  if (generation !== roundGeneration) return;
   currentSourceKind = payload.source_kind || example.kind;
   questions = payload.questions || [];
   if (!questions.length) {
     view.clearSymmetryElements();
     const noun = example.kind === "crystal" ? "結晶" : "分子";
-    const what = currentQuiz === "axis" ? "回転軸" : "基本操作";
+    const what =
+      currentQuiz === "axis"
+        ? "回転軸"
+        : currentDifficulty === "hard"
+          ? "並進を含む操作（らせん・映進）"
+          : "基本操作";
     el("puzzle-question").textContent = `この${noun}には出題できる${what}がありません。別の${noun}を選んでください。`;
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
@@ -223,10 +252,31 @@ async function startStructure(example) {
   beginRound();
 }
 
+function pickQuestion() {
+  // The operation quiz balances by answer type: a highly symmetric crystal has
+  // many equivalent operations of the common kinds, so pick a random group
+  // (opaque answer-type bucket) first, then a random question within it. The axis
+  // quiz is already one-per-inequivalent-axis, so a plain random pick is fine.
+  if (currentQuiz === "operation") {
+    const groups = new Map();
+    for (const question of questions) {
+      const key = question.group ?? question.id;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(question);
+    }
+    const keys = [...groups.keys()];
+    const bucket = groups.get(keys[Math.floor(Math.random() * keys.length)]);
+    return bucket[Math.floor(Math.random() * bucket.length)];
+  }
+  return questions[Math.floor(Math.random() * questions.length)];
+}
+
 function beginRound() {
+  roundGeneration += 1;
   cancelReveal();
-  currentQuestion = questions[Math.floor(Math.random() * questions.length)];
+  currentQuestion = pickQuestion();
   revealOperation = null;
+  operationAnswered = false;
   view.clearSymmetryElements();
   view.resetAnimation();
   const result = el("puzzle-result");
@@ -334,16 +384,26 @@ function cancelReveal() {
 
 async function playReveal() {
   if (revealOperation == null) return; // e.g. an infinite axis: nothing to play
+  const generation = roundGeneration;
   el("puzzle-replay").disabled = true;
   try {
     // Force "displayed" scope so every atom animates, even if the analysis mode
     // left a single-atom selection in the shared session.
     await view.loadAnimationPaths(Number(revealOperation), ++view.pathGeneration, "displayed");
+    if (generation !== roundGeneration) return;
     view.resetAnimation();
     await animateReveal();
+    revealOperationElements(generation);
   } finally {
-    el("puzzle-replay").disabled = false;
+    if (generation === roundGeneration) el("puzzle-replay").disabled = false;
   }
+}
+
+function revealOperationElements(generation = roundGeneration) {
+  if (!operationAnswered || generation !== roundGeneration || revealOperation == null) return;
+  // Use the current path generation. If a replay supersedes this request, the
+  // StaticStructureView guard discards it, and replay completion calls us again.
+  view.loadSymmetryElements(Number(revealOperation), view.pathGeneration).catch(() => {});
 }
 
 // --- Checking answers ---
@@ -360,6 +420,7 @@ function selectedOrder() {
 }
 
 async function onCheckAxis() {
+  const generation = roundGeneration;
   const selected = selectedOrder();
   if (selected == null) {
     showPrompt("回数を1つ選んでください。");
@@ -371,6 +432,7 @@ async function onCheckAxis() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question_id: currentQuestion.id, selected_order: selected }),
   });
+  if (generation !== roundGeneration) return;
   const box = el("puzzle-result");
   box.hidden = false;
   box.className = `puzzle-result ${result.correct ? "hit" : "miss"}`;
@@ -394,6 +456,7 @@ function selectedOperationAnswer() {
 }
 
 async function onCheckOperation() {
+  const generation = roundGeneration;
   const { kind, order } = selectedOperationAnswer();
   if (!kind) {
     showPrompt("操作の種類を選んでください。");
@@ -408,8 +471,9 @@ async function onCheckOperation() {
   const result = await getJson("/api/puzzle/operations/check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question_id: currentQuestion.id, kind, order }),
+    body: JSON.stringify({ question_id: currentQuestion.id, kind, order, difficulty: currentDifficulty }),
   });
+  if (generation !== roundGeneration) return;
   const box = el("puzzle-result");
   box.hidden = false;
   box.className = `puzzle-result ${result.correct ? "hit" : "miss"}`;
@@ -421,6 +485,10 @@ async function onCheckOperation() {
     box.textContent = `不正解（正解は ${answerText}）`;
   }
   el("puzzle-again").hidden = false;
+  operationAnswered = true;
+  // Reveal where the operation's symmetry element sits (axis / plane / centre /
+  // glide arrow) now that the answer is in — the same elements the analysis shows.
+  revealOperationElements(generation);
 }
 
 // --- Camera controls (reuse StaticStructureView's own methods) ---
@@ -472,6 +540,9 @@ function setupControls() {
   for (const card of document.querySelectorAll(".puzzle-quiz-card")) {
     card.addEventListener("click", () => {
       currentQuiz = card.dataset.quiz;
+      currentDifficulty = card.dataset.difficulty || "normal";
+      // Screw/glide exist only in crystals, so open the hard quiz on crystals.
+      if (currentQuiz === "operation" && currentDifficulty === "hard") currentKind = "crystal";
       buildPicker().then(showPicker).catch(showError);
     });
   }

@@ -18,15 +18,15 @@ def _render_data(name: str) -> dict:
     return payload.get("render_data", payload)
 
 
-def _answer_sets(name: str):
+def _answer_sets(name: str, difficulty: str = "normal"):
     return [
         frozenset((a["kind"], a["order"]) for a in q["answers"])
-        for q in identify_questions(_render_data(name))
+        for q in identify_questions(_render_data(name), difficulty)
     ]
 
 
-def _all_answers(name: str):
-    return {answer for question in _answer_sets(name) for answer in question}
+def _all_answers(name: str, difficulty: str = "normal"):
+    return {answer for question in _answer_sets(name, difficulty) for answer in question}
 
 
 def _first_unambiguous(name: str, kind: str, order):
@@ -83,6 +83,21 @@ class OperationIdentifyTest(unittest.TestCase):
         rotoinversions = {order for kind, order in _all_answers("halite") if kind == "rotoinversion"}
         self.assertTrue(rotoinversions)
         self.assertTrue(rotoinversions.issubset({3, 4, 6}))
+
+    def test_hard_mode_asks_only_translation_operations(self):
+        answers = _all_answers("halite", "hard")
+        self.assertTrue(answers)
+        self.assertEqual({kind for kind, _ in answers}, {"screw", "glide"})
+        render_data = _render_data("halite")
+        questions = identify_questions(render_data, "hard")
+        screw = next(i for i, q in enumerate(questions) if q["answers"][0]["kind"] == "screw")
+        order = questions[screw]["answers"][0]["order"]
+        self.assertTrue(check_answer(render_data, screw, "screw", order, "hard")["correct"])
+        self.assertFalse(check_answer(render_data, screw, "glide", None, "hard")["correct"])
+
+    def test_hard_mode_empty_for_molecule(self):
+        # Molecules have no screw/glide, so the hard operation quiz is crystal-only.
+        self.assertEqual(identify_questions(_render_data("water"), "hard"), [])
 
     def test_check_rotation_requires_kind_and_order(self):
         render_data, qid = _first_unambiguous("methane", "rotation", 3)

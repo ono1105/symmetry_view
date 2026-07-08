@@ -1227,6 +1227,9 @@ async function initialize() {
   let pollInProgress = false;
   setInterval(async () => {
     if (pollInProgress) return;
+    // Puzzle mode drives its own view; pause the analysis poll while it is open
+    // (the next tick after returning re-syncs via the signature check).
+    if (document.body.classList.contains("in-puzzle")) return;
     pollInProgress = true;
     try {
       const response = await fetch("/api/state");

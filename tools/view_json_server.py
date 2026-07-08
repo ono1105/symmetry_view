@@ -975,6 +975,7 @@ def make_handler(
                 )
                 return
             if path == "/api/puzzle/operations":
+                difficulty = parse_qs(parsed_url.query).get("difficulty", ["normal"])[0]
                 with state_lock:
                     render_data = session.render_data
                     source_kind = session.source_kind
@@ -983,7 +984,8 @@ def make_handler(
                 self.send_json(
                     {
                         "source_kind": source_kind,
-                        "questions": public_operation_questions(render_data),
+                        "difficulty": difficulty,
+                        "questions": public_operation_questions(render_data, difficulty),
                     }
                 )
                 return
@@ -1083,7 +1085,8 @@ def make_handler(
                     question_id = int(payload.get("question_id"))
                     kind = str(payload.get("kind", ""))
                     order = payload.get("order")
-                    result = check_operation_answer(render_data, question_id, kind, order)
+                    difficulty = str(payload.get("difficulty", "normal"))
+                    result = check_operation_answer(render_data, question_id, kind, order, difficulty)
                 except (TypeError, ValueError) as exc:
                     self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
                     return
