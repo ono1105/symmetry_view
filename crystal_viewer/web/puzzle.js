@@ -1,20 +1,23 @@
-import { PuzzleView } from "/static/puzzle_view.js";
+import { StaticStructureView } from "/static/three_view.js";
 
 // Puzzle: "how many-fold is this rotation axis?" (docs/PUZZLE_SPEC.md §3).
-// Pick a molecule, one rotation axis is highlighted, choose every order that
-// maps it onto itself (2/3/4/6), then check — the reveal spins the molecule.
+// The 3D view reuses the analysis-mode renderer (StaticStructureView), so atoms,
+// the unit cell and the reveal animation match the analysis mode exactly. Pick a
+// structure, one rotation axis is highlighted, choose its highest fold (the n of
+// an n-fold axis: 2/3/4/6, or ∞ for a linear molecule), then check — the reveal
+// replays that rotation operation's animation (periodic-aware, from the server).
 
 let view = null;
 let started = false;
 let catalog = null;
 let currentKind = "molecule";
-let renderData = null;
-let sceneSpan = 4;
 let questions = [];
 let currentQuestion = null;
-let lastCorrectOrders = [];
-let revealing = false;
-let activeOrder = null;
+let revealOperation = null; // operation index to animate, handed out on /check
+let revealAnim = null; // active reveal animation token
+
+const REVEAL_DURATION_MS = 1600;
+const INFINITE = "inf";
 
 function el(id) {
   return document.getElementById(id);
@@ -23,6 +26,10 @@ function el(id) {
 function formatFormula(text) {
   // Render a chemical formula with subscripted digit runs (C6H6 -> C₆H₆).
   return String(text).replace(/(\d+)/g, "<sub>$1</sub>");
+}
+
+function formatOrder(order) {
+  return order === INFINITE ? "無限回" : `${order}回`;
 }
 
 // The catalog stores reduced formulae (benzene -> "HC"), which are wrong as
@@ -47,11 +54,6 @@ function displayLabel(example) {
   // (reduced) formula, which is the correct formula unit for them.
   const source = example.kind === "molecule" ? MOLECULAR_FORMULA[example.name] : null;
   return formatFormula(source || example.formula || example.name);
-}
-
-function structureMeta(example) {
-  // Space group for crystals, point group for molecules.
-  return example.kind === "crystal" ? example.symmetry || example.point_group || "" : example.point_group || "";
 }
 
 function showHome() {
@@ -108,27 +110,20 @@ async function buildPicker() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "puzzle-structure";
-    button.innerHTML =
-      `<span class="puzzle-structure-name">${displayLabel(example)}</span>` +
-      `<span class="puzzle-structure-meta">${structureMeta(example)}</span>`;
+    // Only the name/formula — the point/space group would give the answer away.
+    button.innerHTML = `<span class="puzzle-structure-name">${displayLabel(example)}</span>`;
     button.addEventListener("click", () => startStructure(example).catch(showError));
     list.appendChild(button);
   }
   root.appendChild(list);
 }
 
-function buildLegend(payload) {
+function buildLegend() {
+  // Reuse the element/colour list the shared view already computed.
   const legend = el("puzzle-legend");
   if (!legend) return;
-  const atoms = (payload.render_data && payload.render_data.atoms) || payload.display_atoms || [];
-  const styles = new Map((payload.atom_styles || []).map((s) => [Number(s.index), s]));
-  const colors = new Map();
-  for (const atom of atoms) {
-    const style = styles.get(Number(atom.source_atom ?? atom.index));
-    if (style && !colors.has(atom.element)) colors.set(atom.element, style.color);
-  }
   legend.innerHTML = "";
-  for (const [element, color] of colors) {
+  for (const [element, color] of view.legendItems || []) {
     const item = document.createElement("span");
     item.className = "puzzle-legend-item";
     item.innerHTML = `<span class="puzzle-legend-swatch" style="background:${color}"></span>${element}`;
@@ -145,23 +140,24 @@ function showError(error) {
 
 async function startStructure(example) {
   showPlay();
+  // Name/formula only; the point/space group would reveal the axis order.
+  el("puzzle-structure-title").innerHTML = displayLabel(example);
   el("puzzle-question").textContent = "読み込み中…";
   await getJson("/api/open_example", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind: example.kind, path: example.path, request_id: Date.now() }),
   });
-  const [puzzlePayload, dataPayload] = await Promise.all([
-    getJson("/api/puzzle/axis_orders"),
-    getJson("/api/render_data"),
-  ]);
+  // Render the structure with the shared analysis-mode view (atoms + unit cell
+  // for crystals + fitted camera), then fetch the axis questions for it.
+  await view.refresh();
+  buildLegend();
+  const puzzlePayload = await getJson("/api/puzzle/axis_orders");
   questions = puzzlePayload.questions || [];
-  renderData = dataPayload.render_data || {};
-  sceneSpan = view.sceneSpan(renderData);
-  view.setMolecule(dataPayload);
-  buildLegend(dataPayload);
   if (!questions.length) {
-    el("puzzle-question").textContent = "この分子には出題できる回転軸がありません。別の分子を選んでください。";
+    view.clearSymmetryElements();
+    const noun = example.kind === "crystal" ? "結晶" : "分子";
+    el("puzzle-question").textContent = `この${noun}には出題できる回転軸がありません。別の${noun}を選んでください。`;
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
     el("puzzle-again").hidden = true;
@@ -172,15 +168,24 @@ async function startStructure(example) {
 }
 
 function beginRound() {
+  cancelReveal();
   currentQuestion = questions[Math.floor(Math.random() * questions.length)];
-  view.showAxis(currentQuestion.direction_cart, currentQuestion.point_cart, sceneSpan);
-  el("puzzle-question").textContent = "青い軸のまわりで、何回回すと重なりますか？（当てはまるものをすべて選ぶ）";
+  revealOperation = null;
+  view.clearSymmetryElements();
+  view.addAxis(
+    { direction_cart: currentQuestion.direction_cart, point_cart: currentQuestion.point_cart },
+    view.sceneSpan(),
+  );
+  view.resetAnimation();
+  el("puzzle-question").textContent = "青い軸は何回回転軸ですか？";
   const options = el("puzzle-options");
   options.innerHTML = "";
-  for (const order of currentQuestion.options) {
+  const choices = [...currentQuestion.options];
+  if (currentQuestion.infinite) choices.push(INFINITE);
+  for (const order of choices) {
     const label = document.createElement("label");
     label.className = "puzzle-option";
-    label.innerHTML = `<input type="checkbox" value="${order}"><span>${order}回</span>`;
+    label.innerHTML = `<input type="radio" name="puzzle-order" value="${order}"><span>${formatOrder(order)}</span>`;
     options.appendChild(label);
   }
   const result = el("puzzle-result");
@@ -189,91 +194,136 @@ function beginRound() {
   el("puzzle-check").disabled = false;
   el("puzzle-again").hidden = true;
   el("puzzle-playback").hidden = true; // reveal controls appear after answering
-  el("puzzle-order-tabs").innerHTML = "";
   el("puzzle-slider").value = "0";
   el("puzzle-replay").disabled = false;
-  activeOrder = null;
-  revealing = false;
-  view.setRotation(0);
-}
-
-function foldAngle(order) {
-  return (2 * Math.PI) / order;
 }
 
 function setSlider(fraction) {
   el("puzzle-slider").value = String(Math.round(fraction * 1000));
 }
 
-function buildOrderTabs(orders) {
-  const tabs = el("puzzle-order-tabs");
-  tabs.innerHTML = "";
-  for (const order of orders) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "puzzle-order-tab";
-    button.dataset.order = String(order);
-    button.textContent = `${order}回`;
-    button.addEventListener("click", () => selectOrder(order));
-    tabs.appendChild(button);
-  }
+// Drive the shared view's animation progress from 0 to 1 over the duration; this
+// reuses StaticStructureView.applyAnimationProgress (periodic-aware). Returns a
+// promise that resolves at the end or when cancelled (slider / next question).
+function animateReveal() {
+  cancelReveal();
+  return new Promise((resolve) => {
+    const token = { resolve, start: performance.now() };
+    revealAnim = token;
+    const step = (now) => {
+      if (revealAnim !== token) return; // superseded/cancelled
+      const t = Math.min((now - token.start) / REVEAL_DURATION_MS, 1);
+      view.setAnimationProgress(t);
+      setSlider(t);
+      if (t >= 1) {
+        revealAnim = null;
+        resolve();
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
 }
 
-function selectOrder(order) {
-  activeOrder = order;
-  for (const tab of el("puzzle-order-tabs").querySelectorAll(".puzzle-order-tab")) {
-    tab.classList.toggle("selected", Number(tab.dataset.order) === order);
-  }
-  playActive().catch(showError);
+function cancelReveal() {
+  const anim = revealAnim;
+  revealAnim = null;
+  if (anim) anim.resolve();
 }
 
-// Rotate one fold-step (360/n) for the selected order; the molecule lands back
-// on the start markers. The slider covers exactly that one step.
-async function playActive() {
-  if (revealing || !activeOrder) return;
-  revealing = true;
+// Load the answered fold's rotation operation and play its animation once.
+async function playReveal() {
+  if (revealOperation == null) return; // e.g. an infinite axis: nothing to play
   el("puzzle-replay").disabled = true;
   try {
-    setSlider(0);
-    view.setRotation(0);
-    await view.playRotation(foldAngle(activeOrder), 1600, setSlider);
+    // Force "displayed" scope so the reveal animates every atom, even if the
+    // analysis mode left a single-atom selection in the shared session.
+    await view.loadAnimationPaths(Number(revealOperation), ++view.pathGeneration, "displayed");
+    view.resetAnimation();
+    await animateReveal();
   } finally {
-    revealing = false;
     el("puzzle-replay").disabled = false;
   }
 }
 
-function selectedOrders() {
-  return [...el("puzzle-options").querySelectorAll("input:checked")].map((input) => Number(input.value));
+function selectedOrder() {
+  const checked = el("puzzle-options").querySelector("input:checked");
+  return checked ? checked.value : null;
 }
 
 async function onCheck() {
   if (!currentQuestion) return;
+  const selected = selectedOrder();
+  if (selected == null) {
+    const result = el("puzzle-result");
+    result.hidden = false;
+    result.className = "puzzle-result miss";
+    result.textContent = "回数を1つ選んでください。";
+    return;
+  }
   el("puzzle-check").disabled = true;
   const result = await getJson("/api/puzzle/axis_orders/check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question_id: currentQuestion.id, selected_orders: selectedOrders() }),
+    body: JSON.stringify({ question_id: currentQuestion.id, selected_order: selected }),
   });
   const box = el("puzzle-result");
   box.hidden = false;
   box.className = `puzzle-result ${result.correct ? "hit" : "miss"}`;
-  box.textContent = result.correct
-    ? "正解"
-    : `不正解（正解は ${result.correct_orders.map((o) => `${o}回`).join("・")}）`;
-  lastCorrectOrders = result.correct_orders;
-  buildOrderTabs(lastCorrectOrders);
+  box.textContent = result.correct ? "正解" : `不正解（正解は ${formatOrder(result.answer)}）`;
+  revealOperation = result.reveal_operation;
   el("puzzle-again").hidden = false;
-  el("puzzle-playback").hidden = false;
-  if (lastCorrectOrders.length) selectOrder(lastCorrectOrders[0]);
+  if (revealOperation == null) {
+    // Infinite axis (or no discrete rotation): no animation to show.
+    el("puzzle-playback").hidden = true;
+  } else {
+    el("puzzle-playback").hidden = false;
+    playReveal().catch(showError);
+  }
+}
+
+function toggleProjection() {
+  // The button shows the current projection; clicking switches to the other.
+  const button = el("puzzle-projection");
+  const next = button.dataset.projection === "perspective" ? "orthographic" : "perspective";
+  view.setProjection(next);
+  button.dataset.projection = next;
+  button.textContent = next === "perspective" ? "透視投影" : "平行投影";
+}
+
+// Camera controls reuse StaticStructureView's own methods, the same ones the
+// analysis-mode Simple camera tab drives.
+const CAMERA_DIRECTIONS = {
+  "puzzle-cam-left": "left",
+  "puzzle-cam-right": "right",
+  "puzzle-cam-up": "up",
+  "puzzle-cam-down": "down",
+  "puzzle-cam-roll-left": "roll-left",
+  "puzzle-cam-roll-right": "roll-right",
+};
+
+function setupCameraControls() {
+  for (const [id, direction] of Object.entries(CAMERA_DIRECTIONS)) {
+    el(id).addEventListener("click", () => {
+      view.rotateCamera(direction, Number(el("puzzle-cam-angle").value) || 0);
+    });
+  }
+  el("puzzle-view-along").addEventListener("click", () => {
+    if (!currentQuestion) return;
+    // Look straight down the highlighted axis, centred on its point.
+    view.viewAlongCartesianDirection(currentQuestion.direction_cart, currentQuestion.point_cart);
+  });
 }
 
 function setupPlayControls() {
+  el("puzzle-projection").addEventListener("click", toggleProjection);
+  setupCameraControls();
   el("puzzle-check").addEventListener("click", () => onCheck().catch(showError));
-  el("puzzle-replay").addEventListener("click", () => playActive().catch(showError));
+  el("puzzle-replay").addEventListener("click", () => playReveal().catch(showError));
   el("puzzle-slider").addEventListener("input", (event) => {
-    if (!activeOrder) return;
-    view.setRotation(foldAngle(activeOrder) * (Number(event.target.value) / 1000));
+    cancelReveal();
+    view.setAnimationProgress(Number(event.target.value) / 1000);
   });
   el("puzzle-again").addEventListener("click", () => {
     if (questions.length) beginRound();
@@ -284,7 +334,8 @@ function setupPlayControls() {
 window.addEventListener("symmetry-enter-puzzle", async () => {
   if (!started) {
     started = true;
-    view = new PuzzleView(el("puzzle-view"));
+    view = new StaticStructureView(el("puzzle-view"));
+    view.setBackgroundMode("light");
     setupPlayControls();
     try {
       await buildPicker();

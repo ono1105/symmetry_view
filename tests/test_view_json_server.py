@@ -105,7 +105,6 @@ class BrowserUiAssetsTest(unittest.TestCase):
             "browser_ui.js",
             "three_loader.js",
             "puzzle.js",
-            "puzzle_view.js",
         ):
             with self.subTest(name=name):
                 self.assertTrue((web_dir / name).is_file())

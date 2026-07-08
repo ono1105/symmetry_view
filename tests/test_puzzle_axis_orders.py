@@ -55,9 +55,9 @@ class AxisOrderPuzzleTest(unittest.TestCase):
         questions = public_questions(render_data, "improper")
         self.assertTrue(questions)
         self.assertNotIn("correct_orders", questions[0])
-        hit = check_answer(render_data, 0, [4], "improper")
+        hit = check_answer(render_data, 0, 4, "improper")
         self.assertTrue(hit["correct"])
-        self.assertEqual(hit["correct_orders"], [4])
+        self.assertEqual(hit["answer"], 4)
 
     def test_public_questions_hide_the_correct_answer(self):
         questions = public_questions(_render_data("benzene"))
@@ -68,14 +68,15 @@ class AxisOrderPuzzleTest(unittest.TestCase):
 
     def test_check_answer_judges_and_reveals(self):
         render_data = _render_data("benzene")
-        # id 0 is benzene's principal axis: correct set {2, 3, 6}.
-        hit = check_answer(render_data, 0, [6, 3, 2])
+        # id 0 is benzene's principal axis: highest fold is 6.
+        hit = check_answer(render_data, 0, 6)
         self.assertTrue(hit["correct"])
-        self.assertEqual(hit["correct_orders"], [2, 3, 6])
-        miss = check_answer(render_data, 0, [6])
+        self.assertEqual(hit["answer"], 6)
+        self.assertIsNotNone(hit["reveal_operation"])  # the 6-fold rotation to play
+        miss = check_answer(render_data, 0, 3)
         self.assertFalse(miss["correct"])
-        self.assertEqual(miss["correct_orders"], [2, 3, 6])  # revealed on a miss too
-        self.assertIsNone(check_answer(render_data, 99, [2]))
+        self.assertEqual(miss["answer"], 6)  # revealed on a miss too
+        self.assertIsNone(check_answer(render_data, 99, 2))
 
 
 if __name__ == "__main__":

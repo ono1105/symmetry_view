@@ -52,8 +52,9 @@ from crystal_viewer.viewer.animation_api import (
     custom_animation_path_response,
     symmetry_elements_response,
 )
+from crystal_viewer.game.axis_orders import ROTATION_ORDER_OPTIONS
+from crystal_viewer.game.axis_orders import axis_questions as axis_order_questions
 from crystal_viewer.game.axis_orders import check_answer as check_axis_order_answer
-from crystal_viewer.game.axis_orders import public_questions as public_axis_order_questions
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
     check_custom_operation,
@@ -540,6 +541,59 @@ def find_operation_sequence_for_target(
     }
 
 
+def puzzle_public_questions(
+    render_data: dict,
+    atom_mappings: dict | None,
+    puzzle_type: str,
+    *,
+    display_mode: str = "source",
+    cell_origin_mode: str = "center",
+    improper_mode: str = "auto",
+) -> list[dict]:
+    """Public puzzle questions (correct answer withheld).
+
+    The highlighted axis geometry is taken from the SAME per-operation
+    computation the analysis view uses (``symmetry_elements_response``), so the
+    displayed axis coincides with the reveal animation. ``render_data["axes"]``
+    can list several symmetry-equivalent parallel axes and the axis grouping may
+    pick a different one than the operation actually acts on, which is what made
+    the drawn axis and the animation disagree for crystals such as MgHPO3.
+    """
+    questions = axis_order_questions(render_data, puzzle_type)
+    public: list[dict] = []
+    for index, question in enumerate(questions):
+        direction = question["direction_cart"]
+        point = question["point_cart"]
+        op_index = question["reveal_operations"].get(max(question["correct_orders"])) if question["correct_orders"] else None
+        if op_index is not None:
+            try:
+                elements = symmetry_elements_response(
+                    render_data,
+                    atom_mappings,
+                    op_index,
+                    improper_mode=improper_mode,
+                    display_mode=display_mode,
+                    cell_origin_mode=cell_origin_mode,
+                )
+            except (ValueError, KeyError, TypeError):
+                elements = None
+            axes = (elements or {}).get("axes") or []
+            if axes:
+                direction = axes[0]["direction_cart"]
+                point = axes[0]["point_cart"]
+        public.append(
+            {
+                "id": index,
+                "direction_cart": direction,
+                "point_cart": point,
+                "options": list(ROTATION_ORDER_OPTIONS),
+                "equivalent_count": question["equivalent_count"],
+                "infinite": question["infinite"],
+            }
+        )
+    return public
+
+
 def example_catalog() -> dict[str, list[dict]]:
     global _EXAMPLE_CATALOG_CACHE
     if _EXAMPLE_CATALOG_CACHE is not None:
@@ -675,10 +729,6 @@ def make_handler(
                 module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "three_view.js"
                 self.send_javascript_file(module_path)
                 return
-            if path == "/static/puzzle_view.js":
-                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "puzzle_view.js"
-                self.send_javascript_file(module_path)
-                return
             if path == "/static/puzzle.js":
                 module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "puzzle.js"
                 self.send_javascript_file(module_path)
@@ -768,7 +818,10 @@ def make_handler(
                         )
                         render_data = session.render_data
                         atom_mappings = session.atom_mappings
-                        scope = str(shared_state.get("scope", "displayed"))
+                        # An explicit ?scope= overrides the shared analysis state
+                        # (the puzzle forces "displayed" so its reveal always moves
+                        # every atom, regardless of any selection left in analysis).
+                        scope = str(query.get("scope", [shared_state.get("scope", "displayed")])[0])
                         selected_atoms = tuple(
                             int(index) for index in shared_state.get("selected_atoms", [])
                         )
@@ -891,13 +944,25 @@ def make_handler(
                 with state_lock:
                     render_data = session.render_data
                     source_kind = session.source_kind
+                    atom_mappings = session.atom_mappings
+                    display_mode = str(shared_state.get("display_mode", "source"))
+                    cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                    improper_mode = str(shared_state.get("improper_mode", "auto"))
                 # The correct answer stays server-side; it is revealed only on
                 # /api/puzzle/axis_orders/check.
+                questions = puzzle_public_questions(
+                    render_data,
+                    atom_mappings,
+                    puzzle_type,
+                    display_mode=display_mode,
+                    cell_origin_mode=cell_origin_mode,
+                    improper_mode=improper_mode,
+                )
                 self.send_json(
                     {
                         "source_kind": source_kind,
                         "puzzle_type": puzzle_type,
-                        "questions": public_axis_order_questions(render_data, puzzle_type),
+                        "questions": questions,
                     }
                 )
                 return
@@ -976,7 +1041,7 @@ def make_handler(
                     render_data = session.render_data
                 try:
                     question_id = int(payload.get("question_id"))
-                    selected = payload.get("selected_orders", [])
+                    selected = payload.get("selected_order")
                     puzzle_type = str(payload.get("type", "rotation"))
                     if puzzle_type not in ("rotation", "improper"):
                         raise ValueError("unknown puzzle type")

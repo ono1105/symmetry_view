@@ -22,7 +22,7 @@ function pathHasCurvedMotion(path) {
 }
 
 
-class StaticStructureView {
+export class StaticStructureView {
   constructor(container) {
     this.container = container;
     this.status = container.querySelector("[data-three-status]");
@@ -542,9 +542,12 @@ class StaticStructureView {
     }
   }
 
-  async loadAnimationPaths(operationIndex, generation) {
+  async loadAnimationPaths(operationIndex, generation, scope = null) {
     if (!Number.isInteger(operationIndex)) return;
-    const response = await fetch(`/api/animation_path?operation_index=${operationIndex}`);
+    // An optional scope override lets a caller (the puzzle) force "displayed" so
+    // every atom animates regardless of the shared analysis-mode selection.
+    const scopeParam = scope ? `&scope=${encodeURIComponent(scope)}` : "";
+    const response = await fetch(`/api/animation_path?operation_index=${operationIndex}${scopeParam}`);
     if (!response.ok) {
       throw new Error(await response.text() || `${response.status} ${response.statusText}`);
     }

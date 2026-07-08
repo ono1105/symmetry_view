@@ -4487,3 +4487,36 @@ def crystallographic_fraction(value, *, tol=1e-3):
 ### 推奨
 
 ITC テーブル照合（特に `itc_operation_notation_summaries`）の並び順バグを直すよりも、この分数スナップ修正を入れた `operation_itc_position()` / `operation_itc_like_summary()` を ITC-like 表記の主経路にする方が確実。`itc_coordinate_summaries()`（W,t 厳密照合の xyz 一般位置）は健全なので、記号表記が必要な場面の補助として併用してよい。
+
+## パズルモードを解析機構の再利用へ作り直し＋精査（Claude）（2026-07-08）
+
+### 背景
+
+「何回回転軸か」パズルを、解析モードと**同じ描画・アニメーション機構**で作り直した。並行実装だった `crystal_viewer/web/puzzle_view.js` を削除し、パズルの3Dビューを解析モードの `StaticStructureView`（`three_view.js`、`export` 追加）に統一。リビールは独自の剛体回転をやめ、`/api/animation_path` の周期対応アニメーション再生に置換。判定は `crystal_viewer/game/axis_orders.py` に一本化（回答は「最高次数を1つ」形式、正解は `/check` まで秘匿）。
+
+### 精査で見つけた不具合と修正
+
+1. **表示軸とアニメーションの回転軸がずれる（結晶）** — `render_data["axes"]` は対称等価な**平行軸**を複数列挙し、`axis_orders` は方向のみでグループ化して最初の要素の点を採用するため、リビール操作が実際に作用する軸線と食い違った（MgHPO3(H2O)6 / R3 で表示 (0,5.127,0) vs アニメ (4.44,-2.563,0)）。
+   → サーバーの `puzzle_public_questions()`（`tools/view_json_server.py`）で、各問の `direction_cart`/`point_cart` をリビール操作について `symmetry_elements_response()`（解析モードの per-operation 軸計算＝以前修正した機構）から算出して上書き。`cell_origin_mode`/`display_mode`/`improper_mode` は共有状態に合わせる。これで表示軸＝アニメ軸が保証される。**解析側の修正が波及しなかったのは、パズルが per-operation の対称要素ではなく `render_data["axes"]` を読んでいたため。**
+
+2. **リビールで1原子しか動かない** — `/api/animation_path` は共有セッションの `shared_state["scope"]`/`selected_atoms` を使うため、解析モードで原子を1つ選択（`scope="selected"`）した状態でパズルに来ると、その1原子だけが動いた。
+   → `/api/animation_path` に `?scope=` の上書きを追加、パズルは常に `scope=displayed`（全原子）を送るよう `loadAnimationPaths(index, gen, scope)` を拡張。scope=selected+1原子 の再現で 1→3 原子に是正を確認。
+
+3. **正解露出のリスク** — 当初 `public_questions` に `reveal_operations`（正解次数→操作index）を含め、回答前に正解が漏れる実装だった。`/check` の応答のみに移し、`test_public_questions_hide_the_correct_answer` で担保。
+
+4. **点群/空間群記号が答えのヒントになる** — 出題中の構造名やピッカーに点群・空間群を表示していたが、これは回転軸次数そのもの。名称/組成式のみ表示に変更。
+
+### 非効率（許容範囲・将来候補）
+
+- 解析モードの `StaticStructureView` インスタンスがパズル中も存在し続け、`/api/state` を 1 秒間隔でポーリング＋ requestAnimationFrame 描画を回す（非表示だが2つ目の WebGL コンテキスト）。動作は問題ないが、パズル在室中は解析側のポーリングを停止するとより軽い。
+- `puzzle_public_questions()` と `check_answer()` が毎リクエストで `axis_questions()` を再計算し、前者は問ごとに `symmetry_elements_response()` を呼ぶ。構造ロード/採点の頻度なので実害なし（毎フレームではない）。
+
+### 設計上の割り切り
+
+- 回転軸の判定は**純回転のみ**を数え、らせん軸は除外（ユーザー確認済み）。「何回回すと重なるか」に忠実で、リビールも嘘にならない。結晶で解析の軸ラベル（例:6）と食い違う場合があるが、注記は不要との判断。
+- 直線分子（C∞、CO2）は選択肢に「∞」を追加し正解 `inf`。離散操作がないためリビール無し。
+
+### 検証
+
+- 全 160 テストパス（`tests/test_puzzle_axis_orders.py` を単一回答形式に更新、`tests/test_view_json_server.py` を資産一覧から `puzzle_view.js` 削除）。
+- 実機 API：MgHPO3 の出題軸点がアニメ軸点と一致、benzene（主軸6・垂直C2×2）、CO2（∞・リビール無し）、scope 上書きで全原子稼働、を確認。JS 構文チェック（`node --check`）OK。

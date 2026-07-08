@@ -78,6 +78,10 @@ def _geometric_axes(render_data: dict, spec: dict) -> list[dict]:
         if direction is None:
             continue
         orders: set[int] = set()
+        # order -> a representative operation index that realises exactly that
+        # fold (a rotation by 360/order about this axis). The puzzle reveal plays
+        # this operation's animation, reusing the analysis-mode animation path.
+        order_operations: dict[int, int] = {}
         infinite = False
         for index in axis.get("operation_indices", []):
             operation = operations.get(int(index))
@@ -90,6 +94,7 @@ def _geometric_axes(render_data: dict, spec: dict) -> list[dict]:
                 order = spec["order_fn"](operation)
                 if order is not None:
                     orders.add(int(order))
+                    order_operations.setdefault(int(order), int(index))
         if not orders and not infinite:
             continue
         # Molecules share the centre, so the canonical direction identifies the
@@ -102,10 +107,13 @@ def _geometric_axes(render_data: dict, spec: dict) -> list[dict]:
                 "direction": direction,
                 "point": np.asarray(axis.get("point_cart", [0.0, 0.0, 0.0]), dtype=float),
                 "orders": set(),
+                "order_operations": {},
                 "infinite": False,
             }
             groups[key] = group
         group["orders"] |= orders
+        for order, index in order_operations.items():
+            group["order_operations"].setdefault(order, index)
         group["infinite"] = group["infinite"] or infinite
     return list(groups.values())
 
@@ -170,11 +178,17 @@ def axis_questions(
             correct = sorted(order for order in options if order in axis["orders"])
             if not correct:
                 continue
+        reveal_operations = {
+            order: axis["order_operations"][order]
+            for order in correct
+            if order in axis["order_operations"]
+        }
         questions.append(
             {
                 "direction_cart": axis["direction"].tolist(),
                 "point_cart": axis["point"].tolist(),
                 "correct_orders": correct,
+                "reveal_operations": reveal_operations,
                 "equivalent_count": len(members),
                 "infinite": bool(axis["infinite"]),
             }
@@ -211,22 +225,47 @@ def public_questions(
     ]
 
 
+_INFINITE_ANSWER = "inf"
+
+
+def _axis_answer(question: dict):
+    """The single expected answer: the highest fold, or ``inf`` for a C-inf axis."""
+    if question["infinite"]:
+        return _INFINITE_ANSWER
+    return max(question["correct_orders"])
+
+
+def _normalize_selection(selected):
+    """Client answer to an int order or the infinite sentinel."""
+    if isinstance(selected, str):
+        text = selected.strip().lower()
+        if text in {"inf", "infinite", "∞"}:
+            return _INFINITE_ANSWER
+        return int(text)
+    return int(selected)
+
+
 def check_answer(
     render_data: dict,
     question_id: int,
-    selected_orders,
+    selected_order,
     kind: str = "rotation",
     *,
     options: tuple[int, ...] = ROTATION_ORDER_OPTIONS,
 ) -> dict | None:
-    """Judge one answer and reveal the correct set. ``None`` if id is unknown."""
+    """Judge one answer (the axis' highest fold) and reveal it. ``None`` if unknown."""
     questions = axis_questions(render_data, kind, options=options)
     if not 0 <= question_id < len(questions):
         return None
-    correct = questions[question_id]["correct_orders"]
-    selected = sorted({int(order) for order in selected_orders})
+    question = questions[question_id]
+    answer = _axis_answer(question)
+    selected = _normalize_selection(selected_order)
+    # Operation whose animation demonstrates the answered fold (none for C-inf);
+    # handed out only once the answer has been submitted.
+    reveal_operation = None if answer == _INFINITE_ANSWER else question["reveal_operations"].get(answer)
     return {
-        "correct": selected == correct,
-        "correct_orders": correct,
-        "selected_orders": selected,
+        "correct": selected == answer,
+        "answer": answer,
+        "selected": selected,
+        "reveal_operation": reveal_operation,
     }

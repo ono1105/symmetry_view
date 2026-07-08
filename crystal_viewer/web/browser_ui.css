@@ -1418,25 +1418,6 @@
       flex-direction: column;
       gap: 10px;
     }
-    .puzzle-order-tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .puzzle-order-tab {
-      padding: 6px 14px;
-      border-radius: 999px;
-      border: 1px solid #cfe0f0;
-      background: #fff;
-      color: #0f2f4c;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .puzzle-order-tab.selected {
-      border-color: #2f80ed;
-      background: #2f80ed;
-      color: #fff;
-    }
     .puzzle-playback-row {
       display: flex;
       align-items: center;
@@ -1490,10 +1471,6 @@
       font-weight: 700;
       color: #0f2f4c;
     }
-    .puzzle-structure-meta {
-      font-size: 13px;
-      color: #52708a;
-    }
     .puzzle-play {
       display: grid;
       grid-template-columns: minmax(0, 560px) minmax(280px, 380px);
@@ -1505,6 +1482,53 @@
     .puzzle-play[hidden],
     .puzzle-playback[hidden] {
       display: none;
+    }
+    .puzzle-stage-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .puzzle-structure-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f2f4c;
+    }
+    .puzzle-projection {
+      flex: none;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+    .puzzle-camera {
+      border: 1px solid #cfe0f0;
+      border-radius: 10px;
+      background: #fff;
+      padding: 6px 12px;
+    }
+    .puzzle-camera > summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+      color: #0f2f4c;
+      padding: 4px 0;
+      list-style: none;
+    }
+    .puzzle-camera > summary::-webkit-details-marker {
+      display: none;
+    }
+    .puzzle-camera[open] > summary {
+      margin-bottom: 8px;
+    }
+    .puzzle-camera .camera-grid button {
+      box-sizing: border-box;
+      width: 44px;
+      height: 34px;
+      padding: 0;
+    }
+    .puzzle-camera #puzzle-view-along {
+      justify-self: start;
+      width: 100%;
     }
     .puzzle-view {
       background: #f4fbff;
