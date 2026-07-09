@@ -8,12 +8,12 @@
 - **回転軸クイズ**を「軸の最高次数を1つ答える」形式に変更（∞は直線分子のみ）。結晶で表示軸とアニメの回転位置がズレる不具合を修正。
 - **操作あてクイズ**を新設。1つの対称操作をアニメで見せ、種類（＋次数）を答える。回転・鏡映・反転・回映(Sn)・回反(-n)に対応。
 - 恒等と区別できない「動かない操作」を除外し、見分けられない操作は「複数正解可」で統合（CO2の反転≡垂直鏡映など）。
-- 操作あてクイズは、点群操作と並進を含む操作（らせん・映進）を同じモードで扱う方針へ整理。
+- 操作あてクイズは、操作あてを選んだ後に**普通**（点群操作）／**難しい**（らせん・映進）を選ぶフローへ整理。
 - 回答後にその操作の対称要素（軸・面・中心・映進矢印）を表示。
 - 高対称結晶の出題を「答えの種類が均等に出る」ようにサンプリング（不透明なgroup ID）。
 - パズルで結晶の単位格子上の等価原子（周期像）を表示。
 - パズルUIを再構成（右枠に元素・投影・カメラ操作、下段フル幅に問題）。パズル在室中は解析ポーリングを停止。
-- クイズ選択画面は難易度で分けず、**回転軸クイズ**と**操作あてクイズ**の2カードに整理。
+- クイズ選択画面は**回転軸クイズ**と**操作あてクイズ**の2カードに整理。操作あての難易度は次画面で選ぶ。
 - `docs/PUZZLE_SPEC.md`を実装済み仕様へ更新。
 - テストは172件成功（前回119件、パズル判定テスト2ファイル追加）。
 
@@ -34,7 +34,7 @@ c07a826 feat(puzzle): refine operation identify quiz
 - 共有サーバーセッションを汚さないため**クエリ上書き**を導入：
   - `/api/animation_path?scope=`（パズルは常に`displayed`を送り、解析側で単一原子選択が残っていても全原子を動かす）。
   - `/api/render_data?boundary_images=`（結晶で境界の周期像を表示）。
-  - `/api/puzzle/operations?difficulty=`（UIは`all` scopeを使い、互換用に`normal`/`hard`も残す）。
+  - `/api/puzzle/operations?difficulty=`（UIは操作あて難易度に応じて`normal`/`hard`を使う）。
 - いずれも`three_view.js`側で`loadAnimationPaths(idx, gen, scope)`／`this.renderDataQuery`として渡す。
 
 **修正した不具合**
@@ -59,16 +59,16 @@ c07a826 feat(puzzle): refine operation identify quiz
 ## 4. 要素表示・出題整理・軽量化（A/B/C/D、コミット済み）
 
 - **A：回答後に対称要素を表示**。`puzzle.js: onCheckOperation()`で`view.loadSymmetryElements(op, gen)`を呼び、軸・面・中心・映進矢印を解析同様に表示。出題中は非表示。
-- **B：操作scope**。`identify_questions(render_data, difficulty)`で`normal`（点群操作）・`hard`（らせん/映進）・`all`（両方）を扱う。UIは難易度カードを出さず、操作あてクイズから`all`を使う。
+- **B：操作scope**。`identify_questions(render_data, difficulty)`で`normal`（点群操作）・`hard`（らせん/映進）・`all`（両方、API互換用）を扱う。UIは操作あて内の普通/難しい選択で`normal`/`hard`を使う。
 - **C：種類均等の出題**（ユーザー選択）。`public_questions`が各問に**答えを明かさないgroup ID**（同一`answers`なら同group）を付与。`puzzle.js: pickQuestion()`がgroup均等抽選→中からランダム。halite normalは137問→7 group、32件の種別も4件の種別も1/7で出る。
 - **D：解析ポーリング停止**。`three_view.js`の`setInterval`冒頭で`document.body.classList.contains("in-puzzle")`なら早期return。復帰時は署名（json_path|reload_request_id）差分で再同期。
 - 非同期の取り違え対策として`roundGeneration`／`operationAnswered`ガードを導入し、前ラウンド・前画面の遅延処理（リビール、要素表示）が新ラウンドへ混入しないようにした。
 
 ## 4b. クイズ選択UIの整理
 
-- 難易度カードを並べるとパズルモードの入口が分かりにくくなるため、クイズ選択は「回転軸クイズ」「操作あてクイズ」の2カードに戻した。
+- 難易度カードをパズル入口に並べると分かりにくくなるため、クイズ選択は「回転軸クイズ」「操作あてクイズ」の2カードに戻した。
 - 回転軸クイズは全構造から選べる。構造の難しさは構造選択そのものに委ねる。
-- 操作あてクイズは、結晶では回転・鏡映・反転・回反に加えて、らせん・映進も同じモード内で出題する。
+- 操作あてクイズを選んだ後に、普通（回転・鏡映・反転・回映/回反）と難しい（らせん・映進）を選ぶ。
 
 ## 5. UI・その他
 

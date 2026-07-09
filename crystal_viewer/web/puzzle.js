@@ -10,6 +10,7 @@ let view = null;
 let started = false;
 let catalog = null;
 let currentQuiz = "axis"; // "axis" | "operation"
+let currentOperationDifficulty = "normal"; // "normal" | "hard"
 let currentKind = "molecule"; // structure picker toggle
 let currentSourceKind = "molecule"; // kind of the loaded structure (for answer options)
 let questions = [];
@@ -21,7 +22,6 @@ let operationAnswered = false;
 
 const REVEAL_DURATION_MS = 1600;
 const INFINITE = "inf";
-const OPERATION_SCOPE = "all";
 
 // Operation-identify answer vocabulary (canonical kinds match game/operation_identify.py).
 // `orders` lists the folds offered for that kind (null = kind only). The improper
@@ -31,22 +31,21 @@ const OP_KIND_MOLECULE = { kind: "rotoreflection", label: "回映", orders: [3, 
 const OP_KIND_CRYSTAL = { kind: "rotoinversion", label: "回反", orders: [3, 4, 6] };
 
 function operationKinds() {
+  if (currentOperationDifficulty === "hard") {
+    return [
+      { kind: "screw", label: "らせん", orders: [2, 3, 4, 6] },
+      { kind: "glide", label: "映進", orders: null },
+    ];
+  }
   // Linear molecules have a C∞ axis, so molecules offer ∞ as a rotation fold;
   // the crystallographic restriction means crystals never do.
   const rotationOrders = currentSourceKind === "crystal" ? [2, 3, 4, 6] : [2, 3, 4, 6, INFINITE];
-  const kinds = [
+  return [
     { kind: "rotation", label: "回転", orders: rotationOrders },
     { kind: "mirror", label: "鏡映", orders: null },
     { kind: "inversion", label: "反転", orders: null },
     currentSourceKind === "crystal" ? OP_KIND_CRYSTAL : OP_KIND_MOLECULE,
   ];
-  if (currentSourceKind === "crystal") {
-    kinds.push(
-      { kind: "screw", label: "らせん", orders: [2, 3, 4, 6] },
-      { kind: "glide", label: "映進", orders: null },
-    );
-  }
-  return kinds;
 }
 
 function el(id) {
@@ -104,7 +103,20 @@ function displayLabel(example) {
 
 function showQuizSelect() {
   el("puzzle-quiz-select").hidden = false;
+  el("puzzle-operation-difficulty").hidden = true;
   el("puzzle-picker-back").hidden = true;
+  el("puzzle-picker").hidden = true;
+  el("puzzle-play").hidden = true;
+  el("puzzle-back").hidden = false;
+}
+
+function showOperationDifficulty() {
+  roundGeneration += 1;
+  cancelReveal();
+  operationAnswered = false;
+  el("puzzle-quiz-select").hidden = true;
+  el("puzzle-operation-difficulty").hidden = false;
+  el("puzzle-picker-back").hidden = false;
   el("puzzle-picker").hidden = true;
   el("puzzle-play").hidden = true;
   el("puzzle-back").hidden = false;
@@ -115,6 +127,7 @@ function showPicker() {
   cancelReveal();
   operationAnswered = false;
   el("puzzle-quiz-select").hidden = true;
+  el("puzzle-operation-difficulty").hidden = true;
   el("puzzle-picker-back").hidden = false;
   el("puzzle-picker").hidden = false;
   el("puzzle-play").hidden = true;
@@ -123,6 +136,7 @@ function showPicker() {
 
 function showPlay() {
   el("puzzle-quiz-select").hidden = true;
+  el("puzzle-operation-difficulty").hidden = true;
   el("puzzle-picker-back").hidden = true;
   el("puzzle-picker").hidden = true;
   el("puzzle-play").hidden = false;
@@ -144,10 +158,17 @@ async function buildPicker() {
   if (!catalog) catalog = await getJson("/api/examples");
   const root = el("puzzle-picker");
   root.innerHTML = "";
+  const structureKinds =
+    currentQuiz === "operation" && currentOperationDifficulty === "hard"
+      ? STRUCTURE_KINDS.filter((item) => item.kind === "crystal")
+      : STRUCTURE_KINDS;
+  if (!structureKinds.some((item) => item.kind === currentKind)) {
+    currentKind = structureKinds[0]?.kind || "molecule";
+  }
 
   const kindRow = document.createElement("div");
   kindRow.className = "puzzle-kind-row";
-  for (const item of STRUCTURE_KINDS) {
+  for (const item of structureKinds) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `puzzle-kind${item.kind === currentKind ? " selected" : ""}`;
@@ -228,7 +249,7 @@ async function startStructure(example) {
   const endpoint =
     currentQuiz === "axis"
       ? "/api/puzzle/axis_orders"
-      : `/api/puzzle/operations?difficulty=${OPERATION_SCOPE}`;
+      : `/api/puzzle/operations?difficulty=${currentOperationDifficulty}`;
   const payload = await getJson(endpoint);
   if (generation !== roundGeneration) return;
   currentSourceKind = payload.source_kind || example.kind;
@@ -239,7 +260,9 @@ async function startStructure(example) {
     const what =
       currentQuiz === "axis"
         ? "回転軸"
-        : "対称操作";
+        : currentOperationDifficulty === "hard"
+          ? "並進を含む操作（らせん・映進）"
+          : "基本操作";
     el("puzzle-question").textContent = `この${noun}には出題できる${what}がありません。別の${noun}を選んでください。`;
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
@@ -469,7 +492,7 @@ async function onCheckOperation() {
   const result = await getJson("/api/puzzle/operations/check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question_id: currentQuestion.id, kind, order, difficulty: OPERATION_SCOPE }),
+    body: JSON.stringify({ question_id: currentQuestion.id, kind, order, difficulty: currentOperationDifficulty }),
   });
   if (generation !== roundGeneration) return;
   const box = el("puzzle-result");
@@ -534,10 +557,28 @@ function setupControls() {
     if (questions.length) beginRound();
   });
   el("puzzle-other").addEventListener("click", showPicker);
-  el("puzzle-picker-back").addEventListener("click", showQuizSelect);
-  for (const card of document.querySelectorAll(".puzzle-quiz-card")) {
+  el("puzzle-picker-back").addEventListener("click", () => {
+    if (currentQuiz === "operation" && el("puzzle-picker").hidden === false) {
+      showOperationDifficulty();
+    } else {
+      showQuizSelect();
+    }
+  });
+  for (const card of document.querySelectorAll("[data-quiz]")) {
     card.addEventListener("click", () => {
       currentQuiz = card.dataset.quiz;
+      if (currentQuiz === "operation") {
+        showOperationDifficulty();
+      } else {
+        buildPicker().then(showPicker).catch(showError);
+      }
+    });
+  }
+  for (const card of document.querySelectorAll("[data-operation-difficulty]")) {
+    card.addEventListener("click", () => {
+      currentOperationDifficulty = card.dataset.operationDifficulty || "normal";
+      // Screw/glide exist only in crystals, so open the hard quiz on crystals.
+      if (currentOperationDifficulty === "hard") currentKind = "crystal";
       buildPicker().then(showPicker).catch(showError);
     });
   }
