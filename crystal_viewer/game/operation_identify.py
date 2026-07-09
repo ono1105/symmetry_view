@@ -29,11 +29,12 @@ ROTOINVERSION = "rotoinversion"    # 回反 (-n, crystals)
 SCREW = "screw"                # らせん (screw axis, crystals)
 GLIDE = "glide"                # 映進 (glide plane, crystals)
 
-# Difficulty tiers: "normal" asks the point operations above; "hard" asks only
-# the operations that carry an intrinsic translation (screw axes, glide planes),
-# which exist for crystals only.
+# Operation scopes. "normal" and "hard" are kept for API/test compatibility;
+# the puzzle UI uses "all" so operation-identify is one quiz, not split by
+# difficulty.
 NORMAL = "normal"
 HARD = "hard"
+ALL = "all"
 
 ROTATION_ORDER_OPTIONS: tuple[int, ...] = (2, 3, 4, 6)
 IMPROPER_ORDER_OPTIONS: tuple[int, ...] = (3, 4, 6)
@@ -112,7 +113,11 @@ def _translation_answer(operation: dict) -> dict | None:
 
 
 def _answer_for(operation: dict, difficulty: str) -> dict | None:
-    return _translation_answer(operation) if difficulty == HARD else _operation_answer(operation)
+    if difficulty == HARD:
+        return _translation_answer(operation)
+    if difficulty == ALL:
+        return _translation_answer(operation) or _operation_answer(operation)
+    return _operation_answer(operation)
 
 
 def _transform(operation: dict, atoms: list[dict]) -> np.ndarray | None:

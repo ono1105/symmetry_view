@@ -1465,12 +1465,7 @@
     .puzzle-picker-title {
       font-size: 20px;
       color: #0f2f4c;
-      margin: 0 0 6px;
-    }
-    .puzzle-picker-hint {
       margin: 0 0 14px;
-      color: #52708a;
-      font-size: 14px;
     }
     .puzzle-stage {
       display: flex;
@@ -1534,10 +1529,6 @@
       font-size: 17px;
       font-weight: 700;
       color: #0f2f4c;
-    }
-    .puzzle-structure-meta {
-      font-size: 13px;
-      color: #52708a;
     }
     .puzzle-play {
       display: grid;

@@ -10,7 +10,6 @@ let view = null;
 let started = false;
 let catalog = null;
 let currentQuiz = "axis"; // "axis" | "operation"
-let currentDifficulty = "normal"; // axis: easy|normal|hard, operation: normal|hard
 let currentKind = "molecule"; // structure picker toggle
 let currentSourceKind = "molecule"; // kind of the loaded structure (for answer options)
 let questions = [];
@@ -22,6 +21,7 @@ let operationAnswered = false;
 
 const REVEAL_DURATION_MS = 1600;
 const INFINITE = "inf";
+const OPERATION_SCOPE = "all";
 
 // Operation-identify answer vocabulary (canonical kinds match game/operation_identify.py).
 // `orders` lists the folds offered for that kind (null = kind only). The improper
@@ -31,22 +31,22 @@ const OP_KIND_MOLECULE = { kind: "rotoreflection", label: "回映", orders: [3, 
 const OP_KIND_CRYSTAL = { kind: "rotoinversion", label: "回反", orders: [3, 4, 6] };
 
 function operationKinds() {
-  if (currentDifficulty === "hard") {
-    // Translation-carrying operations (crystals only).
-    return [
-      { kind: "screw", label: "らせん", orders: [2, 3, 4, 6] },
-      { kind: "glide", label: "映進", orders: null },
-    ];
-  }
   // Linear molecules have a C∞ axis, so molecules offer ∞ as a rotation fold;
   // the crystallographic restriction means crystals never do.
   const rotationOrders = currentSourceKind === "crystal" ? [2, 3, 4, 6] : [2, 3, 4, 6, INFINITE];
-  return [
+  const kinds = [
     { kind: "rotation", label: "回転", orders: rotationOrders },
     { kind: "mirror", label: "鏡映", orders: null },
     { kind: "inversion", label: "反転", orders: null },
     currentSourceKind === "crystal" ? OP_KIND_CRYSTAL : OP_KIND_MOLECULE,
   ];
+  if (currentSourceKind === "crystal") {
+    kinds.push(
+      { kind: "screw", label: "らせん", orders: [2, 3, 4, 6] },
+      { kind: "glide", label: "映進", orders: null },
+    );
+  }
+  return kinds;
 }
 
 function el(id) {
@@ -140,64 +140,14 @@ const STRUCTURE_KINDS = [
   { kind: "crystal", label: "結晶" },
 ];
 
-const AXIS_STRUCTURE_DIFFICULTY = {
-  easy: {
-    label: "やさしい",
-    description: "軸が少なく、2回・3回を見分けやすい分子",
-    molecule: new Set(["water", "ammonia"]),
-    crystal: new Set(),
-  },
-  normal: {
-    label: "ふつう",
-    description: "4回・6回や複数の軸を持つ分子",
-    molecule: new Set([
-      "allene",
-      "benzene",
-      "boron_trifluoride",
-      "carbon_dioxide",
-      "ethene",
-      "methane",
-      "xenon_tetrafluoride",
-    ]),
-    crystal: new Set(),
-  },
-  hard: {
-    label: "むずかしい",
-    description: "高対称分子と結晶",
-    molecule: new Set(["sulfur_hexafluoride"]),
-    crystal: null, // all curated crystals
-  },
-};
-
-function currentAxisDifficulty() {
-  return AXIS_STRUCTURE_DIFFICULTY[currentDifficulty] || AXIS_STRUCTURE_DIFFICULTY.normal;
-}
-
-function filteredExamples(kind) {
-  const examples = catalog?.[kind] || [];
-  if (currentQuiz !== "axis") return examples;
-  const allowed = currentAxisDifficulty()[kind];
-  if (allowed === null) return examples;
-  return examples.filter((example) => allowed.has(example.name));
-}
-
-function availableStructureKinds() {
-  return STRUCTURE_KINDS.filter((item) => filteredExamples(item.kind).length > 0);
-}
-
 async function buildPicker() {
   if (!catalog) catalog = await getJson("/api/examples");
   const root = el("puzzle-picker");
   root.innerHTML = "";
 
-  const availableKinds = availableStructureKinds();
-  if (!availableKinds.some((item) => item.kind === currentKind)) {
-    currentKind = availableKinds[0]?.kind || "molecule";
-  }
-
   const kindRow = document.createElement("div");
   kindRow.className = "puzzle-kind-row";
-  for (const item of availableKinds) {
+  for (const item of STRUCTURE_KINDS) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `puzzle-kind${item.kind === currentKind ? " selected" : ""}`;
@@ -213,31 +163,16 @@ async function buildPicker() {
 
   const heading = document.createElement("h2");
   heading.className = "puzzle-picker-title";
-  const difficultyLabel =
-    currentQuiz === "axis" ? `（${currentAxisDifficulty().label}）` : "";
-  heading.textContent =
-    currentKind === "crystal"
-      ? `結晶を選んでください${difficultyLabel}`
-      : `分子を選んでください${difficultyLabel}`;
+  heading.textContent = currentKind === "crystal" ? "結晶を選んでください" : "分子を選んでください";
   root.appendChild(heading);
-  if (currentQuiz === "axis") {
-    const hint = document.createElement("p");
-    hint.className = "puzzle-picker-hint";
-    hint.textContent = currentAxisDifficulty().description;
-    root.appendChild(hint);
-  }
   const list = document.createElement("div");
   list.className = "puzzle-picker-list";
-  for (const example of filteredExamples(currentKind)) {
+  for (const example of catalog[currentKind] || []) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "puzzle-structure";
     // Only the name/formula — the point/space group would give the answer away.
-    const meta =
-      currentQuiz === "axis"
-        ? `<span class="puzzle-structure-meta">${currentAxisDifficulty().label}</span>`
-        : "";
-    button.innerHTML = `<span class="puzzle-structure-name">${displayLabel(example)}</span>${meta}`;
+    button.innerHTML = `<span class="puzzle-structure-name">${displayLabel(example)}</span>`;
     button.addEventListener("click", () => startStructure(example).catch(showError));
     list.appendChild(button);
   }
@@ -293,7 +228,7 @@ async function startStructure(example) {
   const endpoint =
     currentQuiz === "axis"
       ? "/api/puzzle/axis_orders"
-      : `/api/puzzle/operations?difficulty=${currentDifficulty}`;
+      : `/api/puzzle/operations?difficulty=${OPERATION_SCOPE}`;
   const payload = await getJson(endpoint);
   if (generation !== roundGeneration) return;
   currentSourceKind = payload.source_kind || example.kind;
@@ -304,9 +239,7 @@ async function startStructure(example) {
     const what =
       currentQuiz === "axis"
         ? "回転軸"
-        : currentDifficulty === "hard"
-          ? "並進を含む操作（らせん・映進）"
-          : "基本操作";
+        : "対称操作";
     el("puzzle-question").textContent = `この${noun}には出題できる${what}がありません。別の${noun}を選んでください。`;
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
@@ -536,7 +469,7 @@ async function onCheckOperation() {
   const result = await getJson("/api/puzzle/operations/check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question_id: currentQuestion.id, kind, order, difficulty: currentDifficulty }),
+    body: JSON.stringify({ question_id: currentQuestion.id, kind, order, difficulty: OPERATION_SCOPE }),
   });
   if (generation !== roundGeneration) return;
   const box = el("puzzle-result");
@@ -605,9 +538,6 @@ function setupControls() {
   for (const card of document.querySelectorAll(".puzzle-quiz-card")) {
     card.addEventListener("click", () => {
       currentQuiz = card.dataset.quiz;
-      currentDifficulty = card.dataset.difficulty || "normal";
-      // Screw/glide exist only in crystals, so open the hard quiz on crystals.
-      if (currentQuiz === "operation" && currentDifficulty === "hard") currentKind = "crystal";
       buildPicker().then(showPicker).catch(showError);
     });
   }

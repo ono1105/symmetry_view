@@ -99,6 +99,13 @@ class OperationIdentifyTest(unittest.TestCase):
         # Molecules have no screw/glide, so the hard operation quiz is crystal-only.
         self.assertEqual(identify_questions(_render_data("water"), "hard"), [])
 
+    def test_all_mode_combines_point_and_translation_operations_for_crystal(self):
+        answers = _all_answers("halite", "all")
+        self.assertIn(("rotation", 4), answers)
+        self.assertIn(("rotoinversion", 3), answers)
+        self.assertIn(("screw", 4), answers)
+        self.assertIn(("glide", None), answers)
+
     def test_check_rotation_requires_kind_and_order(self):
         render_data, qid = _first_unambiguous("methane", "rotation", 3)
         self.assertTrue(check_answer(render_data, qid, "rotation", 3)["correct"])
