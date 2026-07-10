@@ -904,6 +904,22 @@ export class StaticStructureView {
       this.render();
       return;
     }
+    const lattice = this.renderData?.unit_cell?.lattice;
+    const targetShifts = Array.isArray(lattice)
+      ? [
+          [0, 0, 0],
+          [1, 0, 0], [-1, 0, 0],
+          [0, 1, 0], [0, -1, 0],
+          [0, 0, 1], [0, 0, -1],
+          [1, 1, 0], [1, -1, 0], [-1, 1, 0], [-1, -1, 0],
+          [1, 0, 1], [1, 0, -1], [-1, 0, 1], [-1, 0, -1],
+          [0, 1, 1], [0, 1, -1], [0, -1, 1], [0, -1, -1],
+        ].map(shift => new THREE.Vector3(...[
+          shift[0] * lattice[0][0] + shift[1] * lattice[1][0] + shift[2] * lattice[2][0],
+          shift[0] * lattice[0][1] + shift[1] * lattice[1][1] + shift[2] * lattice[2][1],
+          shift[0] * lattice[0][2] + shift[1] * lattice[1][2] + shift[2] * lattice[2][2],
+        ]))
+      : [new THREE.Vector3(0, 0, 0)];
     const geometry = new THREE.SphereGeometry(1, 20, 14);
     for (const instance of this.atomInstances.values()) {
       const path = this.animationPaths.get(instance.sourceAtom);
@@ -911,18 +927,23 @@ export class StaticStructureView {
       const target = evaluatePath(path, 1, instance.start);
       const moved = target.reduce((sum, value, index) => sum + (value - instance.start[index]) ** 2, 0);
       if (moved <= 1e-8) continue;
-      const material = new THREE.MeshBasicMaterial({
+      const materialOptions = {
         color: 0xfbbf24,
         transparent: true,
-        opacity: 0.34,
         depthTest: false,
-      });
-      const marker = new THREE.Mesh(geometry.clone(), material);
-      marker.position.fromArray(target);
-      marker.scale.setScalar(instance.radius * 1.45);
-      marker.renderOrder = 6;
-      this.targetMarkerObjects.push(marker);
-      this.content.add(marker);
+      };
+      const targetVector = new THREE.Vector3(...target);
+      for (const shift of targetShifts) {
+        const marker = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({
+          ...materialOptions,
+          opacity: shift.lengthSq() <= 1e-12 ? 0.34 : 0.16,
+        }));
+        marker.position.copy(targetVector).add(shift);
+        marker.scale.setScalar(instance.radius * (shift.lengthSq() <= 1e-12 ? 1.45 : 1.08));
+        marker.renderOrder = 6;
+        this.targetMarkerObjects.push(marker);
+        this.content.add(marker);
+      }
     }
     geometry.dispose();
     this.render();

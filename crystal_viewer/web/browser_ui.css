@@ -1580,7 +1580,8 @@
     .puzzle-projection {
       padding: 6px 12px;
       font-size: 13px;
-      justify-self: start;
+      width: 100%;
+      margin-top: 4px;
     }
     .puzzle-side-box {
       border: 1px solid #cfe0f0;
