@@ -283,6 +283,9 @@ async function startStructure(example) {
   view.animationPathQuery = example.kind === "crystal" ? "&display_mode=source&boundary_images=0" : "";
   view.symmetryElementQuery = example.kind === "crystal" ? "&display_mode=source" : "";
   view.showAnimationTargets = example.kind === "crystal";
+  view.showAnimationTargetCopies = true;
+  el("puzzle-target-copies").hidden = example.kind !== "crystal";
+  syncTargetCopiesButton();
   await view.refresh();
   if (generation !== roundGeneration) return;
   buildLegend();
@@ -601,6 +604,19 @@ function toggleProjection() {
   button.textContent = next === "perspective" ? "透視投影" : "平行投影";
 }
 
+function syncTargetCopiesButton() {
+  const button = el("puzzle-target-copies");
+  const enabled = view.showAnimationTargetCopies !== false;
+  button.dataset.enabled = enabled ? "true" : "false";
+  button.textContent = enabled ? "周辺ハイライト: ON" : "周辺ハイライト: OFF";
+}
+
+function toggleTargetCopies() {
+  view.showAnimationTargetCopies = view.showAnimationTargetCopies === false;
+  view.updateAnimationTargetMarkers();
+  syncTargetCopiesButton();
+}
+
 function setupCameraControls() {
   for (const [id, direction] of Object.entries(CAMERA_DIRECTIONS)) {
     el(id).addEventListener("click", () => {
@@ -616,6 +632,7 @@ function setupCameraControls() {
 
 function setupControls() {
   el("puzzle-projection").addEventListener("click", toggleProjection);
+  el("puzzle-target-copies").addEventListener("click", toggleTargetCopies);
   setupCameraControls();
   el("puzzle-check").addEventListener("click", () => onCheck().catch(showError));
   el("puzzle-replay").addEventListener("click", () => playReveal().catch(showError));

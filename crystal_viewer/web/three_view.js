@@ -94,6 +94,7 @@ export class StaticStructureView {
     this.animationPathQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
     this.symmetryElementQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
     this.showAnimationTargets = false; // owner may enable static target markers (puzzle)
+    this.showAnimationTargetCopies = true;
     this.legendItems = [];
     this.tempMatrix = new THREE.Matrix4();
     this.tempPosition = new THREE.Vector3();
@@ -905,16 +906,18 @@ export class StaticStructureView {
       return;
     }
     const lattice = this.renderData?.unit_cell?.lattice;
+    const shiftIndices = [[0, 0, 0]];
+    if (this.showAnimationTargetCopies) {
+      for (const i of [-1, 0, 1]) {
+        for (const j of [-1, 0, 1]) {
+          for (const k of [-1, 0, 1]) {
+            if (i !== 0 || j !== 0 || k !== 0) shiftIndices.push([i, j, k]);
+          }
+        }
+      }
+    }
     const targetShifts = Array.isArray(lattice)
-      ? [
-          [0, 0, 0],
-          [1, 0, 0], [-1, 0, 0],
-          [0, 1, 0], [0, -1, 0],
-          [0, 0, 1], [0, 0, -1],
-          [1, 1, 0], [1, -1, 0], [-1, 1, 0], [-1, -1, 0],
-          [1, 0, 1], [1, 0, -1], [-1, 0, 1], [-1, 0, -1],
-          [0, 1, 1], [0, 1, -1], [0, -1, 1], [0, -1, -1],
-        ].map(shift => new THREE.Vector3(...[
+      ? shiftIndices.map(shift => new THREE.Vector3(...[
           shift[0] * lattice[0][0] + shift[1] * lattice[1][0] + shift[2] * lattice[2][0],
           shift[0] * lattice[0][1] + shift[1] * lattice[1][1] + shift[2] * lattice[2][1],
           shift[0] * lattice[0][2] + shift[1] * lattice[1][2] + shift[2] * lattice[2][2],
