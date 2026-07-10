@@ -72,6 +72,7 @@ export class StaticStructureView {
     this.operationViewDirection = null;
     this.operationFocusPoint = null;
     this.symmetryObjects = [];
+    this.targetMarkerObjects = [];
     this.startMarkerObjects = [];
     this.trajectoryObjects = [];
     this.selectionMarkers = new Map();
@@ -90,6 +91,9 @@ export class StaticStructureView {
     this.recording = false;
     this.backgroundMode = null;
     this.renderDataQuery = ""; // owner may set e.g. "?boundary_images=1" (puzzle)
+    this.animationPathQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
+    this.symmetryElementQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
+    this.showAnimationTargets = false; // owner may enable static target markers (puzzle)
     this.legendItems = [];
     this.tempMatrix = new THREE.Matrix4();
     this.tempPosition = new THREE.Vector3();
@@ -255,6 +259,7 @@ export class StaticStructureView {
 
   clearContent() {
     this.symmetryObjects = [];
+    this.clearTargetMarkers();
     this.startMarkerObjects = [];
     this.trajectoryObjects = [];
     this.selectionMarkers.clear();
@@ -549,7 +554,7 @@ export class StaticStructureView {
     // An optional scope override lets a caller (the puzzle) force "displayed" so
     // every atom animates regardless of the shared analysis-mode selection.
     const scopeParam = scope ? `&scope=${encodeURIComponent(scope)}` : "";
-    const response = await fetch(`/api/animation_path?operation_index=${operationIndex}${scopeParam}`);
+    const response = await fetch(`/api/animation_path?operation_index=${operationIndex}${scopeParam}${this.animationPathQuery || ""}`);
     if (!response.ok) {
       throw new Error(await response.text() || `${response.status} ${response.statusText}`);
     }
@@ -576,6 +581,7 @@ export class StaticStructureView {
     this.customSegmentElements = [];
     this.customSegmentBoundaries = [];
     this.customSegmentIndex = null;
+    this.updateAnimationTargetMarkers();
   }
 
   async loadCustomAnimationPaths(generation) {
@@ -639,7 +645,7 @@ export class StaticStructureView {
 
   async loadSymmetryElements(operationIndex, generation) {
     if (!Number.isInteger(operationIndex)) return;
-    const response = await fetch(`/api/symmetry_elements?operation_index=${operationIndex}`);
+    const response = await fetch(`/api/symmetry_elements?operation_index=${operationIndex}${this.symmetryElementQuery || ""}`);
     if (!response.ok) {
       throw new Error(await response.text() || `${response.status} ${response.statusText}`);
     }
@@ -880,6 +886,45 @@ export class StaticStructureView {
       });
     }
     this.symmetryObjects = [];
+    this.render();
+  }
+
+  clearTargetMarkers() {
+    for (const object of this.targetMarkerObjects) {
+      this.content.remove(object);
+      object.geometry?.dispose();
+      object.material?.dispose();
+    }
+    this.targetMarkerObjects = [];
+  }
+
+  updateAnimationTargetMarkers() {
+    this.clearTargetMarkers();
+    if (!this.showAnimationTargets || !this.animationPaths.size) {
+      this.render();
+      return;
+    }
+    const geometry = new THREE.SphereGeometry(1, 20, 14);
+    for (const instance of this.atomInstances.values()) {
+      const path = this.animationPaths.get(instance.sourceAtom);
+      if (!pathAppliesToDisplayInstance(path, instance)) continue;
+      const target = evaluatePath(path, 1, instance.start);
+      const moved = target.reduce((sum, value, index) => sum + (value - instance.start[index]) ** 2, 0);
+      if (moved <= 1e-8) continue;
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xfbbf24,
+        transparent: true,
+        opacity: 0.34,
+        depthTest: false,
+      });
+      const marker = new THREE.Mesh(geometry.clone(), material);
+      marker.position.fromArray(target);
+      marker.scale.setScalar(instance.radius * 1.45);
+      marker.renderOrder = 6;
+      this.targetMarkerObjects.push(marker);
+      this.content.add(marker);
+    }
+    geometry.dispose();
     this.render();
   }
 

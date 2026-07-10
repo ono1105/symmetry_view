@@ -788,6 +788,12 @@ def make_handler(
                 boundary_override = parse_qs(parsed_url.query).get("boundary_images")
                 if boundary_override:
                     include_boundary_images = boundary_override[0] in ("1", "true", "True")
+                display_override = parse_qs(parsed_url.query).get("display_mode")
+                if display_override:
+                    display_mode = str(display_override[0])
+                origin_override = parse_qs(parsed_url.query).get("cell_origin_mode")
+                if origin_override:
+                    cell_origin_mode = str(origin_override[0])
                 body = {
                     "schema_version": schema_version,
                     "source_kind": source_kind,
@@ -840,6 +846,15 @@ def make_handler(
                         animation_boundary_mode = str(
                             shared_state.get("animation_boundary_mode", "continuous")
                         )
+                    display_override = query.get("display_mode")
+                    if display_override:
+                        display_mode = str(display_override[0])
+                    origin_override = query.get("cell_origin_mode")
+                    if origin_override:
+                        cell_origin_mode = str(origin_override[0])
+                    boundary_override = query.get("boundary_images")
+                    if boundary_override:
+                        include_boundary_images = boundary_override[0] in ("1", "true", "True")
                     body = animation_path_response(
                         render_data,
                         atom_mappings,
@@ -891,6 +906,12 @@ def make_handler(
                         improper_mode = str(shared_state.get("improper_mode", "auto"))
                         display_mode = str(shared_state.get("display_mode", "source"))
                         cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
+                    display_override = query.get("display_mode")
+                    if display_override:
+                        display_mode = str(display_override[0])
+                    origin_override = query.get("cell_origin_mode")
+                    if origin_override:
+                        cell_origin_mode = str(origin_override[0])
                     body = symmetry_elements_response(
                         render_data,
                         atom_mappings,
@@ -945,7 +966,8 @@ def make_handler(
                 self.send_json(body)
                 return
             if path == "/api/puzzle/axis_orders":
-                puzzle_type = parse_qs(parsed_url.query).get("type", ["rotation"])[0]
+                query = parse_qs(parsed_url.query)
+                puzzle_type = query.get("type", ["rotation"])[0]
                 if puzzle_type not in ("rotation", "improper"):
                     self.send_json_error("unknown puzzle type", status=400)
                     return
@@ -956,6 +978,12 @@ def make_handler(
                     display_mode = str(shared_state.get("display_mode", "source"))
                     cell_origin_mode = str(shared_state.get("cell_origin_mode", "center"))
                     improper_mode = str(shared_state.get("improper_mode", "auto"))
+                display_override = query.get("display_mode")
+                if display_override:
+                    display_mode = str(display_override[0])
+                origin_override = query.get("cell_origin_mode")
+                if origin_override:
+                    cell_origin_mode = str(origin_override[0])
                 # The correct answer stays server-side; it is revealed only on
                 # /api/puzzle/axis_orders/check.
                 questions = puzzle_public_questions(

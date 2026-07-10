@@ -100,7 +100,7 @@ function formatOperationAnswer(kind, order, shift = null, notation = null) {
   if (kind === "glide") text = "映進";
   if (shift) text += `、並進成分 ${shift}`;
   const escaped = escapeHtml(text);
-  return notation ? `${escaped}（操作表記 ${formatOperationNotation(notation)}）` : escaped;
+  return notation ? `${escaped}（${formatOperationNotation(notation)}）` : escaped;
 }
 
 function formatOperationAnswers(answers) {
@@ -277,14 +277,18 @@ async function startStructure(example) {
   });
   if (generation !== roundGeneration) return;
   // Render with the shared analysis-mode view (atoms + unit cell + fitted camera).
-  // Crystals also show the cell's equivalent boundary atoms (periodic images).
-  view.renderDataQuery = example.kind === "crystal" ? "?boundary_images=1" : "";
+  // Keep puzzle crystals to the unit-cell atoms; target markers show where the
+  // operation sends them without moving extra periodic images.
+  view.renderDataQuery = example.kind === "crystal" ? "?display_mode=source&boundary_images=0" : "";
+  view.animationPathQuery = example.kind === "crystal" ? "&display_mode=source&boundary_images=0" : "";
+  view.symmetryElementQuery = example.kind === "crystal" ? "&display_mode=source" : "";
+  view.showAnimationTargets = example.kind === "crystal";
   await view.refresh();
   if (generation !== roundGeneration) return;
   buildLegend();
   const endpoint =
     currentQuiz === "axis"
-      ? "/api/puzzle/axis_orders"
+      ? `/api/puzzle/axis_orders${example.kind === "crystal" ? "?display_mode=source" : ""}`
       : `/api/puzzle/operations?difficulty=${currentOperationDifficulty}`;
   const payload = await getJson(endpoint);
   if (generation !== roundGeneration) return;
@@ -465,9 +469,9 @@ async function playReveal() {
   const generation = roundGeneration;
   el("puzzle-replay").disabled = true;
   try {
-    // Force "displayed" scope so every atom animates, even if the analysis mode
-    // left a single-atom selection in the shared session.
-    await view.loadAnimationPaths(Number(revealOperation), ++view.pathGeneration, "displayed");
+    // Override the shared analysis selection so puzzle rounds animate their own
+    // displayed/unit-cell atoms consistently.
+    await view.loadAnimationPaths(Number(revealOperation), ++view.pathGeneration, view.showAnimationTargets ? "unit_cell" : "displayed");
     if (generation !== roundGeneration) return;
     view.resetAnimation();
     await animateReveal();
