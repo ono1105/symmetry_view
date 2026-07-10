@@ -27,8 +27,8 @@ from crystal_viewer.geometry import integer_index_vector
 from crystal_viewer.viewer.glide_geometry import centered_fractional_vector, glide_translation_frac
 from crystal_viewer.viewer.operation_labels import (
     display_operation_symbol,
+    fractional_vector_label,
     glide_intrinsic_translation_frac,
-    operation_itc_like_summary,
     operation_summary_elements,
 )
 
@@ -101,20 +101,14 @@ def _operation_notation(
     *,
     display_symbol: str | None = None,
 ) -> str | None:
-    try:
-        axes, planes, centers = operation_summary_elements(render_data, operation)
-        symbol = display_symbol or display_operation_symbol(render_data, operation, axes, planes)
-        notation = operation_itc_like_summary(
-            render_data,
-            operation,
-            axes,
-            planes,
-            centers,
-            display_symbol=symbol,
-        )
-        return str(notation) if notation else symbol
-    except (KeyError, TypeError, ValueError, np.linalg.LinAlgError):
-        return display_symbol or operation.get("display_symbol") or operation.get("symbol")
+    symbol = display_symbol or _display_symbol(render_data, operation)
+    if not symbol:
+        return None
+    if str(operation.get("kind", "")).find("glide") >= 0:
+        glide_frac = glide_intrinsic_translation_frac(operation)
+        if glide_frac is not None:
+            return f"{symbol}{fractional_vector_label(glide_frac)}"
+    return symbol
 
 
 def _with_operation_label(

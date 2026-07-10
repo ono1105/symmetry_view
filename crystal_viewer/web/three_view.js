@@ -867,6 +867,7 @@ export class StaticStructureView {
   addSymmetryObject(object) {
     this.symmetryObjects.push(object);
     this.content.add(object);
+    this.render();
   }
 
   clearSymmetryElements() {
@@ -879,6 +880,7 @@ export class StaticStructureView {
       });
     }
     this.symmetryObjects = [];
+    this.render();
   }
 
   sceneSpan() {

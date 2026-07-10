@@ -76,6 +76,19 @@ function formatOrder(order) {
   return order === INFINITE ? "無限回" : `${order}回`;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatOperationNotation(notation) {
+  return escapeHtml(notation).replace(/_([0-9]+)/g, "<sub>$1</sub>");
+}
+
 function formatOperationAnswer(kind, order, shift = null, notation = null) {
   let text = kind;
   if (kind === "rotation") text = `${order}回回転`;
@@ -86,8 +99,8 @@ function formatOperationAnswer(kind, order, shift = null, notation = null) {
   if (kind === "screw") text = `${order}回らせん`;
   if (kind === "glide") text = "映進";
   if (shift) text += `、並進成分 ${shift}`;
-  if (notation) text += `（空間群表記 ${notation}）`;
-  return text;
+  const escaped = escapeHtml(text);
+  return notation ? `${escaped}（操作表記 ${formatOperationNotation(notation)}）` : escaped;
 }
 
 function formatOperationAnswers(answers) {
@@ -554,9 +567,9 @@ async function onCheckOperation() {
   const answerText = formatOperationAnswers(result.answers);
   if (result.correct) {
     // When a motion carries more than one valid name, say so.
-    box.textContent = result.answers.length > 1 ? `正解（${answerText} のいずれも正解）` : `正解（${answerText}）`;
+    box.innerHTML = result.answers.length > 1 ? `正解（${answerText} のいずれも正解）` : `正解（${answerText}）`;
   } else {
-    box.textContent = `不正解（正解は ${answerText}）`;
+    box.innerHTML = `不正解（正解は ${answerText}）`;
   }
   el("puzzle-again").hidden = false;
   operationAnswered = true;
