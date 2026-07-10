@@ -97,6 +97,7 @@ class OperationIdentifyTest(unittest.TestCase):
         wrong_shift = next(shift for shift in TRANSLATION_SHIFT_OPTIONS if shift != answer["shift"])
         self.assertIn(answer["shift"], TRANSLATION_SHIFT_OPTIONS)
         self.assertIn("symbol", answer)
+        self.assertIn("notation", answer)
         self.assertTrue(
             check_answer(
                 render_data,
@@ -126,6 +127,7 @@ class OperationIdentifyTest(unittest.TestCase):
         answer = questions[glide]["answers"][0]
         self.assertIn(answer["shift"], TRANSLATION_SHIFT_OPTIONS)
         self.assertIn("symbol", answer)
+        self.assertIn("notation", answer)
         self.assertTrue(
             check_answer(
                 render_data,
@@ -174,6 +176,7 @@ class OperationIdentifyTest(unittest.TestCase):
             self.assertIn("operation_index", question)
             self.assertNotIn("answers", question)
             self.assertNotIn("symbol", question)
+            self.assertNotIn("notation", question)
             self.assertNotIn("shift", question)
 
     def test_unknown_question_id(self):

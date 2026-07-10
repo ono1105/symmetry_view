@@ -1410,7 +1410,10 @@
       line-height: 1.5;
     }
     .puzzle-subback {
-      margin-bottom: 14px;
+      display: block;
+      width: fit-content;
+      max-width: 720px;
+      margin: 0 auto 14px;
     }
     .puzzle-op-group {
       display: flex;
@@ -1429,6 +1432,9 @@
       margin-top: 4px;
       /* Reserve one row so revealing the folds does not shift the layout. */
       min-height: 40px;
+    }
+    .puzzle-op-group[hidden] {
+      display: none;
     }
     @media (max-width: 620px) {
       .puzzle-quiz-list {

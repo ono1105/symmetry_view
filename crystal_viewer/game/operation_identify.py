@@ -28,6 +28,7 @@ from crystal_viewer.viewer.glide_geometry import centered_fractional_vector, gli
 from crystal_viewer.viewer.operation_labels import (
     display_operation_symbol,
     glide_intrinsic_translation_frac,
+    operation_itc_like_summary,
     operation_summary_elements,
 )
 
@@ -94,9 +95,43 @@ def _display_symbol(render_data: dict, operation: dict) -> str | None:
         return str(symbol) if symbol is not None else None
 
 
-def _with_symbol(answer: dict, render_data: dict, operation: dict) -> dict:
-    symbol = _display_symbol(render_data, operation)
-    return {**answer, "symbol": symbol} if symbol else answer
+def _operation_notation(
+    render_data: dict,
+    operation: dict,
+    *,
+    display_symbol: str | None = None,
+) -> str | None:
+    try:
+        axes, planes, centers = operation_summary_elements(render_data, operation)
+        symbol = display_symbol or display_operation_symbol(render_data, operation, axes, planes)
+        notation = operation_itc_like_summary(
+            render_data,
+            operation,
+            axes,
+            planes,
+            centers,
+            display_symbol=symbol,
+        )
+        return str(notation) if notation else symbol
+    except (KeyError, TypeError, ValueError, np.linalg.LinAlgError):
+        return display_symbol or operation.get("display_symbol") or operation.get("symbol")
+
+
+def _with_operation_label(
+    answer: dict,
+    render_data: dict,
+    operation: dict,
+    *,
+    display_symbol: str | None = None,
+) -> dict:
+    symbol = display_symbol or _display_symbol(render_data, operation)
+    notation = _operation_notation(render_data, operation, display_symbol=symbol)
+    result = dict(answer)
+    if symbol:
+        result["symbol"] = symbol
+    if notation:
+        result["notation"] = str(notation)
+    return result
 
 
 def _operation_answer(render_data: dict, operation: dict) -> dict | None:
@@ -106,21 +141,21 @@ def _operation_answer(render_data: dict, operation: dict) -> dict | None:
         order = operation.get("order")
         if order is None or int(order) not in ROTATION_ORDER_OPTIONS:
             return None
-        return _with_symbol({"kind": ROTATION, "order": int(order)}, render_data, operation)
+        return _with_operation_label({"kind": ROTATION, "order": int(order)}, render_data, operation)
     if kind == "mirror":
-        return _with_symbol({"kind": MIRROR, "order": None}, render_data, operation)
+        return _with_operation_label({"kind": MIRROR, "order": None}, render_data, operation)
     if kind == "inversion":
-        return _with_symbol({"kind": INVERSION, "order": None}, render_data, operation)
+        return _with_operation_label({"kind": INVERSION, "order": None}, render_data, operation)
     if kind.startswith("improper_"):
         index = _improper_index(operation, invert=False)
         if index is None or index not in IMPROPER_ORDER_OPTIONS:
             return None
-        return _with_symbol({"kind": ROTOREFLECTION, "order": index}, render_data, operation)
+        return _with_operation_label({"kind": ROTOREFLECTION, "order": index}, render_data, operation)
     if kind.startswith("rotoinversion"):
         index = _improper_index(operation, invert=True)
         if index is None or index not in IMPROPER_ORDER_OPTIONS:
             return None
-        return _with_symbol({"kind": ROTOINVERSION, "order": index}, render_data, operation)
+        return _with_operation_label({"kind": ROTOINVERSION, "order": index}, render_data, operation)
     return None
 
 
@@ -187,12 +222,17 @@ def _translation_answer(render_data: dict, operation: dict) -> dict | None:
         shift = _screw_shift(symbol)
         if shift not in TRANSLATION_SHIFT_OPTIONS:
             return None
-        return _with_symbol({"kind": SCREW, "order": int(order), "shift": shift}, render_data, operation)
+        return _with_operation_label(
+            {"kind": SCREW, "order": int(order), "shift": shift},
+            render_data,
+            operation,
+            display_symbol=symbol,
+        )
     if kind == "glide":
         shift = _glide_shift(render_data, operation)
         if shift not in TRANSLATION_SHIFT_OPTIONS:
             return None
-        return _with_symbol({"kind": GLIDE, "order": None, "shift": shift}, render_data, operation)
+        return _with_operation_label({"kind": GLIDE, "order": None, "shift": shift}, render_data, operation)
     return None
 
 

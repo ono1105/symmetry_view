@@ -23,6 +23,20 @@ let operationAnswered = false;
 const REVEAL_DURATION_MS = 1600;
 const INFINITE = "inf";
 const SHIFT_OPTIONS = ["1/6", "1/4", "1/3", "1/2", "2/3", "3/4", "5/6"];
+const PUZZLE_CRYSTAL_EXAMPLES = new Set([
+  "Antimony",
+  "BaTiO3",
+  "Bromine",
+  "Cadmoselite",
+  "Edgarite",
+  "Ge Hf O4",
+  "Halite",
+  "Helium",
+  "Manganese-beta",
+  "NbP",
+  "Qusongite",
+  "Tellurium",
+]);
 
 // Operation-identify answer vocabulary (canonical kinds match game/operation_identify.py).
 // `orders` lists the folds offered for that kind (null = kind only). The improper
@@ -62,7 +76,7 @@ function formatOrder(order) {
   return order === INFINITE ? "無限回" : `${order}回`;
 }
 
-function formatOperationAnswer(kind, order, shift = null, symbol = null) {
+function formatOperationAnswer(kind, order, shift = null, notation = null) {
   let text = kind;
   if (kind === "rotation") text = `${order}回回転`;
   if (kind === "mirror") text = "鏡映";
@@ -72,14 +86,14 @@ function formatOperationAnswer(kind, order, shift = null, symbol = null) {
   if (kind === "screw") text = `${order}回らせん`;
   if (kind === "glide") text = "映進";
   if (shift) text += `、並進成分 ${shift}`;
-  if (symbol) text += `（空間群表記 ${symbol}）`;
+  if (notation) text += `（空間群表記 ${notation}）`;
   return text;
 }
 
 function formatOperationAnswers(answers) {
   // Coincident motions accept more than one name (e.g. CO2: 反転 or 鏡映).
   return (answers || [])
-    .map((a) => formatOperationAnswer(a.kind, a.order, a.shift, a.symbol))
+    .map((a) => formatOperationAnswer(a.kind, a.order, a.shift, a.notation || a.symbol))
     .join(" または ");
 }
 
@@ -194,7 +208,10 @@ async function buildPicker() {
   root.appendChild(heading);
   const list = document.createElement("div");
   list.className = "puzzle-picker-list";
-  for (const example of catalog[currentKind] || []) {
+  const examples = (catalog[currentKind] || []).filter(
+    (example) => currentKind !== "crystal" || PUZZLE_CRYSTAL_EXAMPLES.has(example.name),
+  );
+  for (const example of examples) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "puzzle-structure";
@@ -371,6 +388,7 @@ function renderOperationOptions() {
   const shiftRow = document.createElement("div");
   shiftRow.className = "puzzle-op-group puzzle-op-order";
   if (currentOperationDifficulty === "hard") {
+    shiftRow.hidden = true;
     shiftRow.innerHTML = `<span class="puzzle-op-label">並進成分</span>`;
     for (const shift of SHIFT_OPTIONS) {
       const item = document.createElement("label");
@@ -389,6 +407,9 @@ function renderOperationOptions() {
       item.className = "puzzle-option";
       item.innerHTML = `<input type="radio" name="op-order" value="${order}"><span>${formatOrder(order)}</span>`;
       orderRow.appendChild(item);
+    }
+    if (currentOperationDifficulty === "hard") {
+      shiftRow.hidden = !(config?.kind === "screw" || config?.kind === "glide");
     }
   });
 }
