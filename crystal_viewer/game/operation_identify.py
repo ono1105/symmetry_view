@@ -18,7 +18,18 @@ operation index; the name/fold is revealed only by ``check_answer``.
 
 from __future__ import annotations
 
+from fractions import Fraction
+import re
+
 import numpy as np
+
+from crystal_viewer.geometry import integer_index_vector
+from crystal_viewer.viewer.glide_geometry import centered_fractional_vector, glide_translation_frac
+from crystal_viewer.viewer.operation_labels import (
+    display_operation_symbol,
+    glide_intrinsic_translation_frac,
+    operation_summary_elements,
+)
 
 # Canonical answer kinds (the client maps these to Japanese labels).
 ROTATION = "rotation"          # 回転
@@ -29,15 +40,15 @@ ROTOINVERSION = "rotoinversion"    # 回反 (-n, crystals)
 SCREW = "screw"                # らせん (screw axis, crystals)
 GLIDE = "glide"                # 映進 (glide plane, crystals)
 
-# Operation scopes. "normal" and "hard" are kept for API/test compatibility;
-# the puzzle UI uses "all" so operation-identify is one quiz, not split by
-# difficulty.
+# Operation scopes. The puzzle UI picks normal/hard after entering the
+# operation-identify quiz; "all" is kept for API/test compatibility.
 NORMAL = "normal"
 HARD = "hard"
 ALL = "all"
 
 ROTATION_ORDER_OPTIONS: tuple[int, ...] = (2, 3, 4, 6)
 IMPROPER_ORDER_OPTIONS: tuple[int, ...] = (3, 4, 6)
+TRANSLATION_SHIFT_OPTIONS: tuple[str, ...] = ("1/6", "1/4", "1/3", "1/2", "2/3", "3/4", "5/6")
 
 # An operation that maps every atom onto its own position shows no motion, so it
 # is dropped (indistinguishable from the identity). Matches the molecule
@@ -74,50 +85,123 @@ def _improper_index(operation: dict, *, invert: bool) -> int | None:
     return int(index) if index >= 2 else None
 
 
-def _operation_answer(operation: dict) -> dict | None:
+def _display_symbol(render_data: dict, operation: dict) -> str | None:
+    try:
+        axes, planes, _ = operation_summary_elements(render_data, operation)
+        return display_operation_symbol(render_data, operation, axes, planes)
+    except (KeyError, TypeError, ValueError, np.linalg.LinAlgError):
+        symbol = operation.get("display_symbol") or operation.get("symbol")
+        return str(symbol) if symbol is not None else None
+
+
+def _with_symbol(answer: dict, render_data: dict, operation: dict) -> dict:
+    symbol = _display_symbol(render_data, operation)
+    return {**answer, "symbol": symbol} if symbol else answer
+
+
+def _operation_answer(render_data: dict, operation: dict) -> dict | None:
     """The basic-operation answer for one render_data operation, or None."""
     kind = str(operation.get("kind", ""))
     if kind.startswith("rotation_") and kind != "rotation_infinite":
         order = operation.get("order")
         if order is None or int(order) not in ROTATION_ORDER_OPTIONS:
             return None
-        return {"kind": ROTATION, "order": int(order)}
+        return _with_symbol({"kind": ROTATION, "order": int(order)}, render_data, operation)
     if kind == "mirror":
-        return {"kind": MIRROR, "order": None}
+        return _with_symbol({"kind": MIRROR, "order": None}, render_data, operation)
     if kind == "inversion":
-        return {"kind": INVERSION, "order": None}
+        return _with_symbol({"kind": INVERSION, "order": None}, render_data, operation)
     if kind.startswith("improper_"):
         index = _improper_index(operation, invert=False)
         if index is None or index not in IMPROPER_ORDER_OPTIONS:
             return None
-        return {"kind": ROTOREFLECTION, "order": index}
+        return _with_symbol({"kind": ROTOREFLECTION, "order": index}, render_data, operation)
     if kind.startswith("rotoinversion"):
         index = _improper_index(operation, invert=True)
         if index is None or index not in IMPROPER_ORDER_OPTIONS:
             return None
-        return {"kind": ROTOINVERSION, "order": index}
+        return _with_symbol({"kind": ROTOINVERSION, "order": index}, render_data, operation)
     return None
 
 
-def _translation_answer(operation: dict) -> dict | None:
+def _format_fraction(value: float) -> str | None:
+    fraction = Fraction(float(value)).limit_denominator(12)
+    if abs(float(fraction) - float(value)) > 1e-5:
+        return None
+    numerator = int(fraction.numerator)
+    denominator = int(fraction.denominator)
+    if numerator <= 0 or denominator <= 1:
+        return None
+    return f"{numerator}/{denominator}"
+
+
+def _screw_shift(symbol: str | None) -> str | None:
+    match = re.fullmatch(r"(\d+)_([1-9]\d*)", str(symbol or ""))
+    if match is None:
+        return None
+    order = int(match.group(1))
+    screw = int(match.group(2))
+    if order <= 1 or not 0 < screw < order:
+        return None
+    return _format_fraction(screw / order)
+
+
+def _glide_shift(render_data: dict, operation: dict) -> str | None:
+    try:
+        _, planes, _ = operation_summary_elements(render_data, operation)
+    except (KeyError, TypeError, ValueError, np.linalg.LinAlgError):
+        planes = []
+    vector = None
+    for plane in planes:
+        vector = glide_translation_frac(render_data, operation, plane)
+        if vector is not None:
+            break
+    if vector is None:
+        vector = glide_intrinsic_translation_frac(operation)
+    if vector is None:
+        return None
+    vector = centered_fractional_vector(np.asarray(vector, dtype=float))
+    direction = integer_index_vector(vector, orient_positive=False)
+    if direction is None:
+        return None
+    ratios = [
+        abs(float(value) / float(index))
+        for value, index in zip(vector, direction)
+        if index != 0
+    ]
+    if not ratios:
+        return None
+    if max(ratios) - min(ratios) > 1e-5:
+        return None
+    return _format_fraction(float(sum(ratios) / len(ratios)))
+
+
+def _translation_answer(render_data: dict, operation: dict) -> dict | None:
     """The hard-mode answer (a screw axis or glide plane), or None."""
     kind = str(operation.get("kind", ""))
     if kind.startswith("screw"):
         order = operation.get("order")
         if order is None or int(order) not in ROTATION_ORDER_OPTIONS:
             return None
-        return {"kind": SCREW, "order": int(order)}
+        symbol = _display_symbol(render_data, operation)
+        shift = _screw_shift(symbol)
+        if shift not in TRANSLATION_SHIFT_OPTIONS:
+            return None
+        return _with_symbol({"kind": SCREW, "order": int(order), "shift": shift}, render_data, operation)
     if kind == "glide":
-        return {"kind": GLIDE, "order": None}
+        shift = _glide_shift(render_data, operation)
+        if shift not in TRANSLATION_SHIFT_OPTIONS:
+            return None
+        return _with_symbol({"kind": GLIDE, "order": None, "shift": shift}, render_data, operation)
     return None
 
 
-def _answer_for(operation: dict, difficulty: str) -> dict | None:
+def _answer_for(render_data: dict, operation: dict, difficulty: str) -> dict | None:
     if difficulty == HARD:
-        return _translation_answer(operation)
+        return _translation_answer(render_data, operation)
     if difficulty == ALL:
-        return _translation_answer(operation) or _operation_answer(operation)
-    return _operation_answer(operation)
+        return _translation_answer(render_data, operation) or _operation_answer(render_data, operation)
+    return _operation_answer(render_data, operation)
 
 
 def _transform(operation: dict, atoms: list[dict]) -> np.ndarray | None:
@@ -169,7 +253,7 @@ def identify_questions(render_data: dict, difficulty: str = NORMAL) -> list[dict
     # Group by visual signature, preserving first-seen order for stable ids.
     groups: dict[tuple, dict] = {}
     for operation in render_data.get("operations", []):
-        answer = _answer_for(operation, difficulty)
+        answer = _answer_for(render_data, operation, difficulty)
         if answer is None:
             continue
         if not _moves_any_atom(operation, atoms, starts):
@@ -179,7 +263,7 @@ def identify_questions(render_data: dict, difficulty: str = NORMAL) -> list[dict
         if group is None:
             group = {"operation_index": int(operation["index"]), "answers": [], "seen": set()}
             groups[signature] = group
-        key = (answer["kind"], answer["order"])
+        key = (answer["kind"], answer["order"], answer.get("shift"))
         if key not in group["seen"]:
             group["seen"].add(key)
             group["answers"].append(answer)
@@ -202,7 +286,10 @@ def public_questions(render_data: dict, difficulty: str = NORMAL) -> list[dict]:
     public = []
     for index, question in enumerate(identify_questions(render_data, difficulty)):
         signature = tuple(
-            sorted((a["kind"], -1 if a["order"] is None else a["order"]) for a in question["answers"])
+            sorted(
+                (a["kind"], -1 if a["order"] is None else a["order"], a.get("shift") or "")
+                for a in question["answers"]
+            )
         )
         group = group_ids.setdefault(signature, len(group_ids))
         public.append(
@@ -211,15 +298,21 @@ def public_questions(render_data: dict, difficulty: str = NORMAL) -> list[dict]:
     return public
 
 
-def _answer_matches(answer: dict, selected_kind, selected_order) -> bool:
+def _answer_matches(answer: dict, selected_kind, selected_order, selected_shift=None) -> bool:
     if str(selected_kind) != answer["kind"]:
         return False
     if answer["order"] is None:
-        return True
-    try:
-        return int(selected_order) == answer["order"]
-    except (TypeError, ValueError):
-        return False  # e.g. the ∞ molecule distractor never matches a finite fold
+        order_matches = True
+    else:
+        try:
+            order_matches = int(selected_order) == answer["order"]
+        except (TypeError, ValueError):
+            return False  # e.g. the ∞ molecule distractor never matches a finite fold
+    if not order_matches:
+        return False
+    if "shift" in answer:
+        return str(selected_shift) == answer["shift"]
+    return True
 
 
 def check_answer(
@@ -228,6 +321,7 @@ def check_answer(
     selected_kind,
     selected_order=None,
     difficulty: str = NORMAL,
+    selected_shift=None,
 ) -> dict | None:
     """Judge one answer and reveal the operation. ``None`` if id is unknown.
 
@@ -237,7 +331,10 @@ def check_answer(
     if not 0 <= question_id < len(questions):
         return None
     question = questions[question_id]
-    correct = any(_answer_matches(answer, selected_kind, selected_order) for answer in question["answers"])
+    correct = any(
+        _answer_matches(answer, selected_kind, selected_order, selected_shift)
+        for answer in question["answers"]
+    )
     return {
         "correct": correct,
         "answers": question["answers"],

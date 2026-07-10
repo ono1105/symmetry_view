@@ -1086,7 +1086,15 @@ def make_handler(
                     kind = str(payload.get("kind", ""))
                     order = payload.get("order")
                     difficulty = str(payload.get("difficulty", "normal"))
-                    result = check_operation_answer(render_data, question_id, kind, order, difficulty)
+                    shift = payload.get("shift")
+                    result = check_operation_answer(
+                        render_data,
+                        question_id,
+                        kind,
+                        order,
+                        difficulty,
+                        selected_shift=shift,
+                    )
                 except (TypeError, ValueError) as exc:
                     self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
                     return

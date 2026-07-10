@@ -22,6 +22,7 @@ let operationAnswered = false;
 
 const REVEAL_DURATION_MS = 1600;
 const INFINITE = "inf";
+const SHIFT_OPTIONS = ["1/6", "1/4", "1/3", "1/2", "2/3", "3/4", "5/6"];
 
 // Operation-identify answer vocabulary (canonical kinds match game/operation_identify.py).
 // `orders` lists the folds offered for that kind (null = kind only). The improper
@@ -61,20 +62,25 @@ function formatOrder(order) {
   return order === INFINITE ? "無限回" : `${order}回`;
 }
 
-function formatOperationAnswer(kind, order) {
-  if (kind === "rotation") return `${order}回回転`;
-  if (kind === "mirror") return "鏡映";
-  if (kind === "inversion") return "反転";
-  if (kind === "rotoreflection") return `回映（S${order}）`;
-  if (kind === "rotoinversion") return `回反（-${order}）`;
-  if (kind === "screw") return `${order}回らせん`;
-  if (kind === "glide") return "映進";
-  return kind;
+function formatOperationAnswer(kind, order, shift = null, symbol = null) {
+  let text = kind;
+  if (kind === "rotation") text = `${order}回回転`;
+  if (kind === "mirror") text = "鏡映";
+  if (kind === "inversion") text = "反転";
+  if (kind === "rotoreflection") text = `回映（S${order}）`;
+  if (kind === "rotoinversion") text = `回反（-${order}）`;
+  if (kind === "screw") text = `${order}回らせん`;
+  if (kind === "glide") text = "映進";
+  if (shift) text += `、並進成分 ${shift}`;
+  if (symbol) text += `（空間群表記 ${symbol}）`;
+  return text;
 }
 
 function formatOperationAnswers(answers) {
   // Coincident motions accept more than one name (e.g. CO2: 反転 or 鏡映).
-  return (answers || []).map((a) => formatOperationAnswer(a.kind, a.order)).join(" または ");
+  return (answers || [])
+    .map((a) => formatOperationAnswer(a.kind, a.order, a.shift, a.symbol))
+    .join(" または ");
 }
 
 // The catalog stores reduced formulae (benzene -> "HC"), which are wrong as
@@ -331,7 +337,10 @@ function beginAxisRound() {
 }
 
 function beginOperationRound() {
-  el("puzzle-question").textContent = "このアニメーションはどの操作ですか？";
+  el("puzzle-question").textContent =
+    currentOperationDifficulty === "hard"
+      ? "このアニメーションで示された対称操作の種類と並進成分を選んでください。"
+      : "このアニメーションはどの操作ですか？";
   renderOperationOptions();
   // The animation IS the question, so show the playback controls and play it now.
   revealOperation = currentQuestion.operation_index;
@@ -344,6 +353,7 @@ function renderOperationOptions() {
   const kinds = operationKinds();
   const kindRow = document.createElement("div");
   kindRow.className = "puzzle-op-group";
+  kindRow.innerHTML = `<span class="puzzle-op-label">操作の種類</span>`;
   for (const { kind, label } of kinds) {
     const item = document.createElement("label");
     item.className = "puzzle-option";
@@ -358,9 +368,22 @@ function renderOperationOptions() {
   orderRow.className = "puzzle-op-group puzzle-op-order";
   root.appendChild(orderRow);
 
+  const shiftRow = document.createElement("div");
+  shiftRow.className = "puzzle-op-group puzzle-op-order";
+  if (currentOperationDifficulty === "hard") {
+    shiftRow.innerHTML = `<span class="puzzle-op-label">並進成分</span>`;
+    for (const shift of SHIFT_OPTIONS) {
+      const item = document.createElement("label");
+      item.className = "puzzle-option";
+      item.innerHTML = `<input type="radio" name="op-shift" value="${shift}"><span>${shift}</span>`;
+      shiftRow.appendChild(item);
+    }
+    root.appendChild(shiftRow);
+  }
+
   kindRow.addEventListener("change", () => {
     const config = kinds.find((k) => k.kind === kindRow.querySelector("input:checked")?.value);
-    orderRow.innerHTML = "";
+    orderRow.innerHTML = config?.orders ? `<span class="puzzle-op-label">回転次数</span>` : "";
     for (const order of config?.orders || []) {
       const item = document.createElement("label");
       item.className = "puzzle-option";
@@ -472,13 +495,18 @@ function selectedOperationAnswer() {
   const root = el("puzzle-options");
   const kind = root.querySelector('input[name="op-kind"]:checked')?.value || null;
   const orderInput = root.querySelector('input[name="op-order"]:checked');
+  const shiftInput = root.querySelector('input[name="op-shift"]:checked');
   // Raw value ("2" or "inf"); the server normalises it.
-  return { kind, order: orderInput ? orderInput.value : null };
+  return {
+    kind,
+    order: orderInput ? orderInput.value : null,
+    shift: shiftInput ? shiftInput.value : null,
+  };
 }
 
 async function onCheckOperation() {
   const generation = roundGeneration;
-  const { kind, order } = selectedOperationAnswer();
+  const { kind, order, shift } = selectedOperationAnswer();
   if (!kind) {
     showPrompt("操作の種類を選んでください。");
     return;
@@ -488,11 +516,15 @@ async function onCheckOperation() {
     showPrompt("回数も選んでください。");
     return;
   }
+  if (currentOperationDifficulty === "hard" && shift == null) {
+    showPrompt("並進成分も選んでください。");
+    return;
+  }
   el("puzzle-check").disabled = true;
   const result = await getJson("/api/puzzle/operations/check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question_id: currentQuestion.id, kind, order, difficulty: currentOperationDifficulty }),
+    body: JSON.stringify({ question_id: currentQuestion.id, kind, order, shift, difficulty: currentOperationDifficulty }),
   });
   if (generation !== roundGeneration) return;
   const box = el("puzzle-result");
@@ -501,7 +533,7 @@ async function onCheckOperation() {
   const answerText = formatOperationAnswers(result.answers);
   if (result.correct) {
     // When a motion carries more than one valid name, say so.
-    box.textContent = result.answers.length > 1 ? `正解（${answerText} のいずれも正解）` : "正解";
+    box.textContent = result.answers.length > 1 ? `正解（${answerText} のいずれも正解）` : `正解（${answerText}）`;
   } else {
     box.textContent = `不正解（正解は ${answerText}）`;
   }

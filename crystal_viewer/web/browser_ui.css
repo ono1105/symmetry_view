@@ -1415,8 +1415,15 @@
     .puzzle-op-group {
       display: flex;
       flex-wrap: wrap;
+      align-items: center;
       gap: 10px;
       flex-basis: 100%;
+    }
+    .puzzle-op-label {
+      flex-basis: 100%;
+      color: #4a6785;
+      font-size: 13px;
+      font-weight: 700;
     }
     .puzzle-op-order {
       margin-top: 4px;

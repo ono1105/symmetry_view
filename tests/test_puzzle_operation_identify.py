@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from crystal_viewer.game.operation_identify import (
+    TRANSLATION_SHIFT_OPTIONS,
     check_answer,
     identify_questions,
     public_questions,
@@ -33,7 +34,8 @@ def _first_unambiguous(name: str, kind: str, order):
     render_data = _render_data(name)
     questions = identify_questions(render_data)
     for index, question in enumerate(questions):
-        if question["answers"] == [{"kind": kind, "order": order}]:
+        answers = question["answers"]
+        if len(answers) == 1 and answers[0]["kind"] == kind and answers[0]["order"] == order:
             return render_data, index
     raise AssertionError(f"no unambiguous {kind}/{order} question in {name}")
 
@@ -91,9 +93,50 @@ class OperationIdentifyTest(unittest.TestCase):
         render_data = _render_data("halite")
         questions = identify_questions(render_data, "hard")
         screw = next(i for i, q in enumerate(questions) if q["answers"][0]["kind"] == "screw")
-        order = questions[screw]["answers"][0]["order"]
-        self.assertTrue(check_answer(render_data, screw, "screw", order, "hard")["correct"])
+        answer = questions[screw]["answers"][0]
+        wrong_shift = next(shift for shift in TRANSLATION_SHIFT_OPTIONS if shift != answer["shift"])
+        self.assertIn(answer["shift"], TRANSLATION_SHIFT_OPTIONS)
+        self.assertIn("symbol", answer)
+        self.assertTrue(
+            check_answer(
+                render_data,
+                screw,
+                "screw",
+                answer["order"],
+                "hard",
+                selected_shift=answer["shift"],
+            )["correct"]
+        )
+        self.assertFalse(
+            check_answer(
+                render_data,
+                screw,
+                "screw",
+                answer["order"],
+                "hard",
+                selected_shift=wrong_shift,
+            )["correct"]
+        )
         self.assertFalse(check_answer(render_data, screw, "glide", None, "hard")["correct"])
+
+    def test_hard_mode_glide_requires_translation_component(self):
+        render_data = _render_data("halite")
+        questions = identify_questions(render_data, "hard")
+        glide = next(i for i, q in enumerate(questions) if q["answers"][0]["kind"] == "glide")
+        answer = questions[glide]["answers"][0]
+        self.assertIn(answer["shift"], TRANSLATION_SHIFT_OPTIONS)
+        self.assertIn("symbol", answer)
+        self.assertTrue(
+            check_answer(
+                render_data,
+                glide,
+                "glide",
+                None,
+                "hard",
+                selected_shift=answer["shift"],
+            )["correct"]
+        )
+        self.assertFalse(check_answer(render_data, glide, "glide", None, "hard")["correct"])
 
     def test_hard_mode_empty_for_molecule(self):
         # Molecules have no screw/glide, so the hard operation quiz is crystal-only.
@@ -115,7 +158,13 @@ class OperationIdentifyTest(unittest.TestCase):
     def test_check_mirror_ignores_order(self):
         render_data = _render_data("water")
         questions = identify_questions(render_data)
-        qid = next(i for i, q in enumerate(questions) if q["answers"] == [{"kind": "mirror", "order": None}])
+        qid = next(
+            i
+            for i, q in enumerate(questions)
+            if len(q["answers"]) == 1
+            and q["answers"][0]["kind"] == "mirror"
+            and q["answers"][0]["order"] is None
+        )
         self.assertTrue(check_answer(render_data, qid, "mirror")["correct"])
 
     def test_public_questions_hide_the_answer(self):
@@ -124,6 +173,8 @@ class OperationIdentifyTest(unittest.TestCase):
         for question in questions:
             self.assertIn("operation_index", question)
             self.assertNotIn("answers", question)
+            self.assertNotIn("symbol", question)
+            self.assertNotIn("shift", question)
 
     def test_unknown_question_id(self):
         self.assertIsNone(check_answer(_render_data("water"), 99, "mirror"))
