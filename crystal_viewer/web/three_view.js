@@ -13,12 +13,34 @@ const CAMERA_FOV = 42;
 const ORTHOGRAPHIC_HEIGHT = 10;
 const STATIONARY_ANIMATION_SECONDS = 0.4;
 const CURVED_PATH_TYPES = new Set(["rotation", "screw", "rotoinversion", "rotoreflection"]);
+const CRYSTAL_AXIS_COLORS = [0xef4444, 0x22c55e, 0x3b82f6];
 
 
 function pathHasCurvedMotion(path) {
   if (!path) return false;
   if (path.type === "sequential") return (path.segments || []).some(pathHasCurvedMotion);
   return CURVED_PATH_TYPES.has(path.type);
+}
+
+function makeAxisLabel(text, color) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = "700 38px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.strokeText(text, 32, 32);
+  ctx.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+  ctx.fillText(text, 32, 32);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map: texture, depthTest: false}));
+  sprite.scale.set(0.34, 0.34, 0.34);
+  return sprite;
 }
 
 
@@ -32,6 +54,12 @@ export class StaticStructureView {
     this.scene.background = new THREE.Color(0x0b0f14);
     this.content = new THREE.Group();
     this.scene.add(this.content);
+    this.axisWidgetScene = new THREE.Scene();
+    this.axisWidgetCamera = new THREE.OrthographicCamera(-1.25, 1.25, 1.25, -1.25, 0.01, 10);
+    this.axisWidgetCamera.position.set(0, 0, 4);
+    this.axisWidgetGroup = new THREE.Group();
+    this.axisWidgetScene.add(this.axisWidgetGroup);
+    this.buildAxisWidget();
 
     this.perspectiveCamera = new THREE.PerspectiveCamera(CAMERA_FOV, 1, 0.01, 10000);
     this.orthographicCamera = new THREE.OrthographicCamera(-5, 5, 5, -5, 0.01, 10000);
@@ -95,6 +123,7 @@ export class StaticStructureView {
     this.symmetryElementQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
     this.showAnimationTargets = false; // owner may enable static target markers (puzzle)
     this.showAnimationTargetCopies = true;
+    this.showAxisWidget = false;
     this.legendItems = [];
     this.tempMatrix = new THREE.Matrix4();
     this.tempPosition = new THREE.Vector3();
@@ -168,15 +197,16 @@ export class StaticStructureView {
     this.clearContent();
     this.isMolecule = payload.source_kind === "molecule";
     const renderData = payload.render_data || {};
+    this.renderData = renderData;
+    this.showAxisWidget = payload.source_kind === "crystal" && Boolean(renderData.unit_cell);
     const atoms = payload.display_atoms || renderData.atoms || [];
     const styles = new Map((payload.atom_styles || []).map(style => [Number(style.index), style]));
     this.setLegendItems(atoms, payload.atom_styles || []);
     this.addAtoms(atoms, styles);
     if (payload.source_kind === "crystal" && payload.display_unit_cell) {
-      this.addUnitCell(payload.display_unit_cell);
+      this.addUnitCell(payload.display_unit_cell, renderData.unit_cell);
     }
     this.fitCamera(renderData);
-    this.renderData = renderData;
     this.animationOperationIndex = null;
     this.symmetryOperationIndex = null;
     const kind = payload.source_kind === "molecule" ? "molecule" : "crystal";
@@ -242,20 +272,66 @@ export class StaticStructureView {
     this.updateAtomSelectionHighlight();
   }
 
-  addUnitCell(unitCell) {
+  addUnitCell(unitCell, sourceUnitCell = null) {
     const vertices = unitCell.vertices_cart || [];
-    const positions = [];
+    const lattice = sourceUnitCell?.lattice || [];
+    const directions = Array.isArray(lattice)
+      ? lattice.map(vector => new THREE.Vector3(...vector).normalize())
+      : [];
+    const positionsByAxis = [[], [], [], []];
     for (const edge of unitCell.edges || []) {
       const start = vertices[edge[0]];
       const end = vertices[edge[1]];
       if (!start || !end) continue;
-      positions.push(...start, ...end);
+      const edgeDirection = new THREE.Vector3(
+        end[0] - start[0],
+        end[1] - start[1],
+        end[2] - start[2],
+      ).normalize();
+      let axis = 3;
+      let best = -1;
+      for (let index = 0; index < directions.length; index += 1) {
+        const score = Math.abs(edgeDirection.dot(directions[index]));
+        if (score > best) {
+          best = score;
+          axis = index;
+        }
+      }
+      positionsByAxis[Math.min(axis, 3)].push(...start, ...end);
     }
-    if (!positions.length) return;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-    const material = new THREE.LineBasicMaterial({color: 0xa8b5c5, transparent: true, opacity: 0.82});
-    this.content.add(new THREE.LineSegments(geometry, material));
+    for (let axis = 0; axis < positionsByAxis.length; axis += 1) {
+      const positions = positionsByAxis[axis];
+      if (!positions.length) continue;
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+      const color = axis < 3 ? CRYSTAL_AXIS_COLORS[axis] : 0xa8b5c5;
+      const material = new THREE.LineBasicMaterial({color, transparent: true, opacity: 0.86});
+      this.content.add(new THREE.LineSegments(geometry, material));
+    }
+  }
+
+  buildAxisWidget() {
+    const axes = [
+      {name: "a", direction: new THREE.Vector3(1, 0, 0), color: CRYSTAL_AXIS_COLORS[0]},
+      {name: "b", direction: new THREE.Vector3(0, 1, 0), color: CRYSTAL_AXIS_COLORS[1]},
+      {name: "c", direction: new THREE.Vector3(0, 0, 1), color: CRYSTAL_AXIS_COLORS[2]},
+    ];
+    for (const axis of axes) {
+      const arrow = new THREE.ArrowHelper(
+        axis.direction,
+        new THREE.Vector3(0, 0, 0),
+        0.82,
+        axis.color,
+        0.18,
+        0.08,
+      );
+      arrow.renderOrder = 100;
+      this.axisWidgetGroup.add(arrow);
+      const label = makeAxisLabel(axis.name, axis.color);
+      label.position.copy(axis.direction.clone().multiplyScalar(1.04));
+      label.renderOrder = 101;
+      this.axisWidgetGroup.add(label);
+    }
   }
 
   clearContent() {
@@ -1259,7 +1335,22 @@ export class StaticStructureView {
     for (const marker of this.selectionMarkers.values()) {
       marker.quaternion.copy(this.activeCamera.quaternion);
     }
+    const width = this.renderer.domElement.width;
+    const height = this.renderer.domElement.height;
+    this.renderer.setViewport(0, 0, width, height);
+    this.renderer.setScissorTest(false);
     this.renderer.render(this.scene, this.activeCamera);
+    if (this.showAxisWidget) {
+      const size = Math.max(96, Math.min(132, Math.floor(Math.min(width, height) * 0.18)));
+      this.axisWidgetGroup.quaternion.copy(this.activeCamera.quaternion).invert();
+      this.renderer.clearDepth();
+      this.renderer.setScissorTest(true);
+      this.renderer.setScissor(12, 12, size, size);
+      this.renderer.setViewport(12, 12, size, size);
+      this.renderer.render(this.axisWidgetScene, this.axisWidgetCamera);
+      this.renderer.setScissorTest(false);
+      this.renderer.setViewport(0, 0, width, height);
+    }
   }
 
   animate(timestamp) {

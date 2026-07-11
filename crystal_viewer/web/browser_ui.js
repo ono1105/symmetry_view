@@ -21,6 +21,8 @@ let sourceKind = "crystal";
 let selectedStructureKind = "crystal";
 let importInProgress = false;
 let refreshInProgress = false;
+let analysisBootComplete = false;
+let analysisRefreshInProgress = false;
 let importRequestId = 0;
 let exampleCatalog = {crystal: [], molecule: []};
 let selectedExamplePath = "";
@@ -2895,6 +2897,7 @@ async function boot() {
   renderStructureInfo();
   renderStatus();
   renderOperationDetails();
+  analysisBootComplete = true;
   setInterval(() => {
     refreshState().catch(error => {
       document.getElementById("status").textContent = `Refresh error: ${error}`;
@@ -2904,6 +2907,63 @@ async function boot() {
 boot().catch(error => {
   document.getElementById("status").textContent = `Boot error: ${error}`;
 });
+
+async function refreshAnalysisFromServer() {
+  if (!analysisBootComplete || analysisRefreshInProgress) return;
+  analysisRefreshInProgress = true;
+  try {
+    const [info, atomInfo, stateInfo, examplesInfo] = await Promise.all([
+      api("/api/operations"),
+      api("/api/atoms"),
+      api("/api/state"),
+      api("/api/examples"),
+    ]);
+    operations = info.operations || [];
+    summariesReady = Boolean(info.summaries_ready);
+    atoms = atomInfo.atoms || [];
+    state = stateInfo || {};
+    exampleCatalog = examplesInfo || {crystal: [], molecule: []};
+    if (state.source_kind === "crystal" || state.source_kind === "molecule") {
+      selectedStructureKind = state.source_kind;
+    }
+    sourceKind = state.source_kind || "crystal";
+    setDefaultOperationSortForSourceKind();
+    await refreshAtomMotion();
+    syncSourceKindControls();
+    renderExampleOptions();
+    renderDirectionFilter();
+    renderAtomElementFilter();
+    renderElementColorControls();
+    syncOperationSelection();
+    syncSpeedButtons();
+    syncBoundaryButtons();
+    syncDisplayButtons();
+    syncCellOriginButtons();
+    syncCellSettingButtons();
+    syncProjectionButtons();
+    syncBackgroundButtons();
+    syncLegendButtons();
+    syncImproperModeControl();
+    syncAtomModeButtons();
+    syncPlayToggleButton();
+    syncGifSavingControls();
+    renderOperations();
+    renderAtoms();
+    renderSelectedAtomSummary();
+    renderStructureInfo();
+    renderStatus();
+    renderOperationDetails();
+    if (window.symmetryThreeView) {
+      await window.symmetryThreeView.refresh();
+      await window.symmetryThreeView.syncState(state, {structure_reload: true});
+      window.symmetryThreeView.lastStateSignature = `${state.json_path || ""}|${state.reload_request_id || 0}`;
+    }
+  } catch (error) {
+    document.getElementById("status").textContent = `Analysis refresh error: ${error}`;
+  } finally {
+    analysisRefreshInProgress = false;
+  }
+}
 
 // --- Top-level Analysis / Puzzle mode (docs/PUZZLE_SPEC.md §1) ---
 // Selection screen is the entry point; you return here with Back before
@@ -2924,6 +2984,7 @@ function applyAppMode() {
   if (appMode === "analysis") {
     // The 3D canvas may have initialized while covered; nudge a resize.
     window.dispatchEvent(new Event("resize"));
+    refreshAnalysisFromServer();
   }
   if (appMode === "puzzle") {
     // puzzle.js lazily builds its own 3D view the first time this fires.
