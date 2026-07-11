@@ -241,9 +241,18 @@ function buildLegend() {
   if (!legend) return;
   legend.innerHTML = "";
   for (const [element, color] of view.legendItems || []) {
-    const item = document.createElement("span");
+    const item = document.createElement("button");
+    const visible = !view.hiddenElements?.has(element);
+    item.type = "button";
     item.className = "puzzle-legend-item";
+    item.dataset.visible = visible ? "true" : "false";
+    item.title = `${element} の表示を切り替え`;
     item.innerHTML = `<span class="puzzle-legend-swatch" style="background:${color}"></span>${element}`;
+    item.addEventListener("click", () => {
+      const nextVisible = view.hiddenElements?.has(element);
+      view.setElementVisibility(element, nextVisible);
+      buildLegend();
+    });
     legend.appendChild(item);
   }
 }
@@ -283,7 +292,7 @@ async function startStructure(example) {
   view.animationPathQuery = example.kind === "crystal" ? "&display_mode=source&boundary_images=0" : "";
   view.symmetryElementQuery = example.kind === "crystal" ? "&display_mode=source" : "";
   view.showAnimationTargets = example.kind === "crystal";
-  view.showAnimationTargetCopies = true;
+  view.showAnimationTargetCopies = false;
   el("puzzle-target-copies").hidden = example.kind !== "crystal";
   syncTargetCopiesButton();
   await view.refresh();
@@ -341,6 +350,9 @@ function beginRound() {
   currentQuestion = pickQuestion();
   revealOperation = null;
   operationAnswered = false;
+  view.pathGeneration += 1;
+  view.animationPaths.clear();
+  view.clearTargetMarkers();
   view.clearSymmetryElements();
   view.resetAnimation();
   const result = el("puzzle-result");

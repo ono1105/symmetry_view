@@ -14,6 +14,7 @@ const ORTHOGRAPHIC_HEIGHT = 10;
 const STATIONARY_ANIMATION_SECONDS = 0.4;
 const CURVED_PATH_TYPES = new Set(["rotation", "screw", "rotoinversion", "rotoreflection"]);
 const CRYSTAL_AXIS_COLORS = [0xef4444, 0x22c55e, 0x3b82f6];
+const ZERO_SCALE = new THREE.Vector3(0, 0, 0);
 
 
 function pathHasCurvedMotion(path) {
@@ -54,12 +55,6 @@ export class StaticStructureView {
     this.scene.background = new THREE.Color(0x0b0f14);
     this.content = new THREE.Group();
     this.scene.add(this.content);
-    this.axisWidgetScene = new THREE.Scene();
-    this.axisWidgetCamera = new THREE.OrthographicCamera(-1.25, 1.25, 1.25, -1.25, 0.01, 10);
-    this.axisWidgetCamera.position.set(0, 0, 4);
-    this.axisWidgetGroup = new THREE.Group();
-    this.axisWidgetScene.add(this.axisWidgetGroup);
-    this.buildAxisWidget();
 
     this.perspectiveCamera = new THREE.PerspectiveCamera(CAMERA_FOV, 1, 0.01, 10000);
     this.orthographicCamera = new THREE.OrthographicCamera(-5, 5, 5, -5, 0.01, 10000);
@@ -123,7 +118,7 @@ export class StaticStructureView {
     this.symmetryElementQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
     this.showAnimationTargets = false; // owner may enable static target markers (puzzle)
     this.showAnimationTargetCopies = true;
-    this.showAxisWidget = false;
+    this.hiddenElements = new Set();
     this.legendItems = [];
     this.tempMatrix = new THREE.Matrix4();
     this.tempPosition = new THREE.Vector3();
@@ -195,16 +190,17 @@ export class StaticStructureView {
 
   setData(payload) {
     this.clearContent();
+    this.hiddenElements.clear();
     this.isMolecule = payload.source_kind === "molecule";
     const renderData = payload.render_data || {};
     this.renderData = renderData;
-    this.showAxisWidget = payload.source_kind === "crystal" && Boolean(renderData.unit_cell);
     const atoms = payload.display_atoms || renderData.atoms || [];
     const styles = new Map((payload.atom_styles || []).map(style => [Number(style.index), style]));
     this.setLegendItems(atoms, payload.atom_styles || []);
     this.addAtoms(atoms, styles);
     if (payload.source_kind === "crystal" && payload.display_unit_cell) {
       this.addUnitCell(payload.display_unit_cell, renderData.unit_cell);
+      this.addCrystalAxes(payload.display_unit_cell, renderData.unit_cell);
     }
     this.fitCamera(renderData);
     this.animationOperationIndex = null;
@@ -255,6 +251,7 @@ export class StaticStructureView {
           mesh,
           instanceIndex,
           sourceAtom: Number(atom.source_atom ?? atom.index),
+          element: atom.element || "",
           isPrimaryImage: atom.is_primary_image !== false,
           radius: group.radius,
           start: [...atom.cart],
@@ -310,27 +307,44 @@ export class StaticStructureView {
     }
   }
 
-  buildAxisWidget() {
+  addCrystalAxes(displayUnitCell, sourceUnitCell = null) {
+    const vertices = displayUnitCell?.vertices_cart || [];
+    const lattice = sourceUnitCell?.lattice || [];
+    if (!vertices.length || !Array.isArray(lattice) || lattice.length < 3) return;
+    const origin = new THREE.Vector3(...vertices[0]);
+    const lengths = lattice.map(vector => new THREE.Vector3(...vector).length()).filter(Boolean);
+    if (!lengths.length) return;
+    const axisLength = Math.max(Math.min(...lengths) * 0.28, this.sceneSpan() * 0.08);
     const axes = [
-      {name: "a", direction: new THREE.Vector3(1, 0, 0), color: CRYSTAL_AXIS_COLORS[0]},
-      {name: "b", direction: new THREE.Vector3(0, 1, 0), color: CRYSTAL_AXIS_COLORS[1]},
-      {name: "c", direction: new THREE.Vector3(0, 0, 1), color: CRYSTAL_AXIS_COLORS[2]},
+      {name: "a", vector: new THREE.Vector3(...lattice[0]), color: CRYSTAL_AXIS_COLORS[0]},
+      {name: "b", vector: new THREE.Vector3(...lattice[1]), color: CRYSTAL_AXIS_COLORS[1]},
+      {name: "c", vector: new THREE.Vector3(...lattice[2]), color: CRYSTAL_AXIS_COLORS[2]},
     ];
     for (const axis of axes) {
+      if (axis.vector.lengthSq() <= 1e-12) continue;
+      const direction = axis.vector.clone().normalize();
       const arrow = new THREE.ArrowHelper(
-        axis.direction,
-        new THREE.Vector3(0, 0, 0),
-        0.82,
+        direction,
+        origin,
+        axisLength,
         axis.color,
-        0.18,
-        0.08,
+        axisLength * 0.22,
+        axisLength * 0.08,
       );
-      arrow.renderOrder = 100;
-      this.axisWidgetGroup.add(arrow);
+      arrow.line.material.depthTest = false;
+      arrow.line.material.transparent = true;
+      arrow.line.material.opacity = 0.9;
+      arrow.cone.material.depthTest = false;
+      arrow.cone.material.transparent = true;
+      arrow.cone.material.opacity = 0.95;
+      arrow.renderOrder = 7;
+      this.content.add(arrow);
       const label = makeAxisLabel(axis.name, axis.color);
-      label.position.copy(axis.direction.clone().multiplyScalar(1.04));
-      label.renderOrder = 101;
-      this.axisWidgetGroup.add(label);
+      label.position.copy(origin).add(direction.multiplyScalar(axisLength * 1.18));
+      label.scale.setScalar(axisLength * 0.18);
+      label.material.depthTest = false;
+      label.renderOrder = 8;
+      this.content.add(label);
     }
   }
 
@@ -437,6 +451,7 @@ export class StaticStructureView {
       const instanceIndex = intersection.instanceId;
       if (!Number.isInteger(instanceIndex)) continue;
       const instance = intersection.object.userData.atomInstances?.[instanceIndex];
+      if (instance && !this.isAtomVisible(instance)) continue;
       if (instance) return instance;
     }
     return null;
@@ -1001,6 +1016,7 @@ export class StaticStructureView {
       : [new THREE.Vector3(0, 0, 0)];
     const geometry = new THREE.SphereGeometry(1, 20, 14);
     for (const instance of this.atomInstances.values()) {
+      if (!this.isAtomVisible(instance)) continue;
       const path = this.animationPaths.get(instance.sourceAtom);
       if (!pathAppliesToDisplayInstance(path, instance)) continue;
       const target = evaluatePath(path, 1, instance.start);
@@ -1159,6 +1175,7 @@ export class StaticStructureView {
   showStartMarkers() {
     this.clearStartMarkers();
     for (const instance of this.atomInstances.values()) {
+      if (!this.isAtomVisible(instance)) continue;
       const path = this.animationPaths.get(instance.sourceAtom);
       if (!pathAppliesToDisplayInstance(path, instance)) continue;
       const geometry = new THREE.SphereGeometry(instance.radius * 0.98, 20, 12);
@@ -1302,11 +1319,35 @@ export class StaticStructureView {
     const instance = this.atomInstances.get(Number(instanceId));
     if (!instance) return;
     this.tempPosition.fromArray(position);
-    this.tempScale.setScalar(instance.radius);
+    if (this.isAtomVisible(instance)) this.tempScale.setScalar(instance.radius);
+    else this.tempScale.copy(ZERO_SCALE);
     this.tempMatrix.compose(this.tempPosition, this.tempQuaternion, this.tempScale);
     instance.mesh.setMatrixAt(instance.instanceIndex, this.tempMatrix);
     instance.current = [...position];
-    this.selectionMarkers.get(Number(instanceId))?.position.fromArray(position);
+    const marker = this.selectionMarkers.get(Number(instanceId));
+    if (marker) {
+      marker.visible = this.isAtomVisible(instance);
+      marker.position.fromArray(position);
+    }
+  }
+
+  isAtomVisible(instance) {
+    return !this.hiddenElements.has(instance.element);
+  }
+
+  setElementVisibility(element, visible) {
+    if (!element) return;
+    if (visible) this.hiddenElements.delete(element);
+    else this.hiddenElements.add(element);
+    for (const [instanceId, instance] of this.atomInstances) {
+      if (instance.element === element) this.setAtomPosition(instanceId, instance.current);
+    }
+    this.markInstanceMatricesDirty();
+    this.updateAtomSelectionHighlight();
+    this.clearStartMarkers();
+    if (this.animationProgress > 0) this.showStartMarkers();
+    this.updateAnimationTargetMarkers();
+    this.render();
   }
 
   markInstanceMatricesDirty() {
@@ -1335,22 +1376,9 @@ export class StaticStructureView {
     for (const marker of this.selectionMarkers.values()) {
       marker.quaternion.copy(this.activeCamera.quaternion);
     }
-    const width = this.renderer.domElement.width;
-    const height = this.renderer.domElement.height;
-    this.renderer.setViewport(0, 0, width, height);
     this.renderer.setScissorTest(false);
+    this.renderer.setViewport(0, 0, this.renderer.domElement.width, this.renderer.domElement.height);
     this.renderer.render(this.scene, this.activeCamera);
-    if (this.showAxisWidget) {
-      const size = Math.max(96, Math.min(132, Math.floor(Math.min(width, height) * 0.18)));
-      this.axisWidgetGroup.quaternion.copy(this.activeCamera.quaternion).invert();
-      this.renderer.clearDepth();
-      this.renderer.setScissorTest(true);
-      this.renderer.setScissor(12, 12, size, size);
-      this.renderer.setViewport(12, 12, size, size);
-      this.renderer.render(this.axisWidgetScene, this.axisWidgetCamera);
-      this.renderer.setScissorTest(false);
-      this.renderer.setViewport(0, 0, width, height);
-    }
   }
 
   animate(timestamp) {
