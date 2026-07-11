@@ -291,7 +291,6 @@ async function startStructure(example) {
   view.renderDataQuery = example.kind === "crystal" ? "?display_mode=source&boundary_images=0" : "";
   view.animationPathQuery = example.kind === "crystal" ? "&display_mode=source&boundary_images=0" : "";
   view.symmetryElementQuery = example.kind === "crystal" ? "&display_mode=source" : "";
-  view.showCrystalAxes = example.kind === "crystal";
   view.showAnimationTargets = example.kind === "crystal";
   view.showAnimationTargetCopies = false;
   view.showTrajectories = false;

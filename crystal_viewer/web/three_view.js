@@ -73,7 +73,6 @@ export class StaticStructureView {
     this.operationViewDirection = null;
     this.operationFocusPoint = null;
     this.symmetryObjects = [];
-    this.crystalAxisGroup = null;
     this.targetMarkerObjects = [];
     this.startMarkerObjects = [];
     this.trajectoryObjects = [];
@@ -95,7 +94,6 @@ export class StaticStructureView {
     this.renderDataQuery = ""; // owner may set e.g. "?boundary_images=1" (puzzle)
     this.animationPathQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
     this.symmetryElementQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
-    this.showCrystalAxes = false; // owner may enable an in-scene crystal-axis indicator (puzzle)
     this.showAnimationTargets = false; // owner may enable static target markers (puzzle)
     this.showAnimationTargetCopies = true;
     this.showTrajectories = false;
@@ -181,7 +179,6 @@ export class StaticStructureView {
     this.addAtoms(atoms, styles);
     if (payload.source_kind === "crystal" && payload.display_unit_cell) {
       this.addUnitCell(payload.display_unit_cell, renderData.unit_cell);
-      if (this.showCrystalAxes) this.addCrystalAxes(payload.display_unit_cell, renderData.unit_cell);
     }
     this.fitCamera(renderData);
     this.animationOperationIndex = null;
@@ -288,61 +285,8 @@ export class StaticStructureView {
     }
   }
 
-  addCrystalAxes(_displayUnitCell, sourceUnitCell = null) {
-    this.clearCrystalAxes();
-    const lattice = sourceUnitCell?.lattice || [];
-    if (!Array.isArray(lattice) || lattice.length < 3) return;
-    const lengths = lattice.map(vector => new THREE.Vector3(...vector).length()).filter(Boolean);
-    if (!lengths.length) return;
-    const span = this.sceneSpan();
-    const origin = new THREE.Vector3(0, 0, 0);
-    const axisLength = Math.max(Math.min(...lengths) * 0.2, span * 0.075);
-    const group = new THREE.Group();
-    group.userData.axisLength = axisLength;
-    const axes = [
-      {vector: new THREE.Vector3(...lattice[0]), color: CRYSTAL_AXIS_COLORS[0]},
-      {vector: new THREE.Vector3(...lattice[1]), color: CRYSTAL_AXIS_COLORS[1]},
-      {vector: new THREE.Vector3(...lattice[2]), color: CRYSTAL_AXIS_COLORS[2]},
-    ];
-    for (const axis of axes) {
-      if (axis.vector.lengthSq() <= 1e-12) continue;
-      const direction = axis.vector.clone().normalize();
-      const arrow = new THREE.ArrowHelper(
-        direction,
-        origin,
-        axisLength,
-        axis.color,
-        axisLength * 0.22,
-        axisLength * 0.08,
-      );
-      arrow.line.material.depthTest = false;
-      arrow.line.material.transparent = true;
-      arrow.line.material.opacity = 0.9;
-      arrow.cone.material.depthTest = false;
-      arrow.cone.material.transparent = true;
-      arrow.cone.material.opacity = 0.95;
-      arrow.renderOrder = 7;
-      group.add(arrow);
-    }
-    this.crystalAxisGroup = group;
-    this.scene.add(group);
-    this.updateCrystalAxisAnchor();
-  }
-
-  clearCrystalAxes() {
-    if (!this.crystalAxisGroup) return;
-    this.scene.remove(this.crystalAxisGroup);
-    this.crystalAxisGroup.traverse(object => {
-      object.geometry?.dispose();
-      if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
-      else object.material?.dispose();
-    });
-    this.crystalAxisGroup = null;
-  }
-
   clearContent() {
     this.symmetryObjects = [];
-    this.clearCrystalAxes();
     this.clearTargetMarkers();
     this.startMarkerObjects = [];
     this.trajectoryObjects = [];
@@ -1364,37 +1308,12 @@ export class StaticStructureView {
   }
 
   render() {
-    this.updateCrystalAxisAnchor();
     for (const marker of this.selectionMarkers.values()) {
       marker.quaternion.copy(this.activeCamera.quaternion);
     }
     this.renderer.setScissorTest(false);
     this.renderer.setViewport(0, 0, this.renderer.domElement.width, this.renderer.domElement.height);
     this.renderer.render(this.scene, this.activeCamera);
-  }
-
-  updateCrystalAxisAnchor() {
-    if (!this.crystalAxisGroup || !this.controls) return;
-    const target = this.controls.target;
-    const camera = this.activeCamera;
-    const forward = target.clone().sub(camera.position).normalize();
-    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    const up = camera.up.clone().normalize();
-    const distance = Math.max(camera.position.distanceTo(target), 1);
-    let viewHeight;
-    if (camera.isOrthographicCamera) {
-      viewHeight = Math.abs(camera.top - camera.bottom) / Math.max(camera.zoom || 1, 1e-6);
-    } else {
-      viewHeight = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
-    }
-    const aspect = Math.max(this.canvas.clientWidth / Math.max(this.canvas.clientHeight, 1), 0.1);
-    const viewWidth = viewHeight * aspect;
-    const baseAxisLength = Math.max(Number(this.crystalAxisGroup.userData.axisLength) || 1, 1e-6);
-    this.crystalAxisGroup.scale.setScalar((viewHeight * 0.11) / baseAxisLength);
-    this.crystalAxisGroup.position.copy(camera.position)
-      .addScaledVector(forward, distance)
-      .addScaledVector(right, -viewWidth * 0.39)
-      .addScaledVector(up, -viewHeight * 0.34);
   }
 
   animate(timestamp) {
