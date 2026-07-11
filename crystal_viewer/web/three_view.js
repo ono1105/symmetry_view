@@ -23,28 +23,6 @@ function pathHasCurvedMotion(path) {
   return CURVED_PATH_TYPES.has(path.type);
 }
 
-function makeAxisLabel(text, color) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 64;
-  canvas.height = 64;
-  const ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = "700 38px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.lineWidth = 5;
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  ctx.strokeText(text, 32, 32);
-  ctx.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
-  ctx.fillText(text, 32, 32);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map: texture, depthTest: false}));
-  sprite.scale.set(0.34, 0.34, 0.34);
-  return sprite;
-}
-
-
 export class StaticStructureView {
   constructor(container) {
     this.container = container;
@@ -319,10 +297,11 @@ export class StaticStructureView {
     const origin = new THREE.Vector3(0, 0, 0);
     const axisLength = Math.max(Math.min(...lengths) * 0.2, span * 0.075);
     const group = new THREE.Group();
+    group.userData.axisLength = axisLength;
     const axes = [
-      {name: "a", vector: new THREE.Vector3(...lattice[0]), color: CRYSTAL_AXIS_COLORS[0]},
-      {name: "b", vector: new THREE.Vector3(...lattice[1]), color: CRYSTAL_AXIS_COLORS[1]},
-      {name: "c", vector: new THREE.Vector3(...lattice[2]), color: CRYSTAL_AXIS_COLORS[2]},
+      {vector: new THREE.Vector3(...lattice[0]), color: CRYSTAL_AXIS_COLORS[0]},
+      {vector: new THREE.Vector3(...lattice[1]), color: CRYSTAL_AXIS_COLORS[1]},
+      {vector: new THREE.Vector3(...lattice[2]), color: CRYSTAL_AXIS_COLORS[2]},
     ];
     for (const axis of axes) {
       if (axis.vector.lengthSq() <= 1e-12) continue;
@@ -343,12 +322,6 @@ export class StaticStructureView {
       arrow.cone.material.opacity = 0.95;
       arrow.renderOrder = 7;
       group.add(arrow);
-      const label = makeAxisLabel(axis.name, axis.color);
-      label.position.copy(origin).add(direction.multiplyScalar(axisLength * 1.18));
-      label.scale.setScalar(axisLength * 0.18);
-      label.material.depthTest = false;
-      label.renderOrder = 8;
-      group.add(label);
     }
     this.crystalAxisGroup = group;
     this.scene.add(group);
@@ -1413,6 +1386,8 @@ export class StaticStructureView {
     }
     const aspect = Math.max(this.canvas.clientWidth / Math.max(this.canvas.clientHeight, 1), 0.1);
     const viewWidth = viewHeight * aspect;
+    const baseAxisLength = Math.max(Number(this.crystalAxisGroup.userData.axisLength) || 1, 1e-6);
+    this.crystalAxisGroup.scale.setScalar((viewHeight * 0.11) / baseAxisLength);
     this.crystalAxisGroup.position.copy(camera.position)
       .addScaledVector(forward, distance)
       .addScaledVector(right, -viewWidth * 0.39)
