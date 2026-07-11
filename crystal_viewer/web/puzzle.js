@@ -286,15 +286,18 @@ async function startStructure(example) {
   });
   if (generation !== roundGeneration) return;
   // Render with the shared analysis-mode view (atoms + unit cell + fitted camera).
-  // Keep puzzle crystals to the unit-cell atoms; target markers show where the
-  // operation sends them without moving extra periodic images.
+  // Keep puzzle crystals to the unit-cell atoms; optional neighbouring-cell
+  // copies provide crystal context without animating extra periodic images.
   view.renderDataQuery = example.kind === "crystal" ? "?display_mode=source&boundary_images=0" : "";
   view.animationPathQuery = example.kind === "crystal" ? "&display_mode=source&boundary_images=0" : "";
   view.symmetryElementQuery = example.kind === "crystal" ? "&display_mode=source" : "";
   view.showAnimationTargets = example.kind === "crystal";
   view.showAnimationTargetCopies = false;
+  view.showTrajectories = false;
   el("puzzle-target-copies").hidden = example.kind !== "crystal";
+  el("puzzle-trajectories").hidden = true;
   syncTargetCopiesButton();
+  syncTrajectoriesButton();
   await view.refresh();
   if (generation !== roundGeneration) return;
   buildLegend();
@@ -352,9 +355,12 @@ function beginRound() {
   operationAnswered = false;
   view.pathGeneration += 1;
   view.animationPaths.clear();
+  view.showTrajectories = false;
   view.clearTargetMarkers();
+  view.updateTrajectoryLines();
   view.clearSymmetryElements();
   view.resetAnimation();
+  view.updateAnimationTargetMarkers();
   const result = el("puzzle-result");
   result.hidden = true;
   el("puzzle-options").innerHTML = "";
@@ -363,6 +369,8 @@ function beginRound() {
   el("puzzle-again").hidden = true;
   el("puzzle-slider").value = "0";
   el("puzzle-replay").disabled = false;
+  el("puzzle-trajectories").hidden = true;
+  syncTrajectoriesButton();
   if (currentQuiz === "axis") beginAxisRound();
   else beginOperationRound();
 }
@@ -540,6 +548,7 @@ async function onCheckAxis() {
     el("puzzle-playback").hidden = true; // infinite axis: nothing to animate
   } else {
     el("puzzle-playback").hidden = false;
+    el("puzzle-trajectories").hidden = false;
     playReveal().catch(showError);
   }
 }
@@ -591,6 +600,7 @@ async function onCheckOperation() {
     box.innerHTML = `不正解（正解は ${answerText}）`;
   }
   el("puzzle-again").hidden = false;
+  el("puzzle-trajectories").hidden = false;
   operationAnswered = true;
   // Reveal where the operation's symmetry element sits (axis / plane / centre /
   // glide arrow) now that the answer is in — the same elements the analysis shows.
@@ -620,13 +630,26 @@ function syncTargetCopiesButton() {
   const button = el("puzzle-target-copies");
   const enabled = view.showAnimationTargetCopies !== false;
   button.dataset.enabled = enabled ? "true" : "false";
-  button.textContent = enabled ? "周辺ハイライト: ON" : "周辺ハイライト: OFF";
+  button.textContent = enabled ? "隣接セル: 表示" : "隣接セル: 非表示";
 }
 
 function toggleTargetCopies() {
   view.showAnimationTargetCopies = view.showAnimationTargetCopies === false;
   view.updateAnimationTargetMarkers();
   syncTargetCopiesButton();
+}
+
+function syncTrajectoriesButton() {
+  const button = el("puzzle-trajectories");
+  const enabled = view.showTrajectories === true;
+  button.dataset.enabled = enabled ? "true" : "false";
+  button.textContent = enabled ? "軌道: 表示" : "軌道: 非表示";
+}
+
+function toggleTrajectories() {
+  view.showTrajectories = view.showTrajectories !== true;
+  view.updateTrajectoryLines();
+  syncTrajectoriesButton();
 }
 
 function setupCameraControls() {
@@ -645,6 +668,7 @@ function setupCameraControls() {
 function setupControls() {
   el("puzzle-projection").addEventListener("click", toggleProjection);
   el("puzzle-target-copies").addEventListener("click", toggleTargetCopies);
+  el("puzzle-trajectories").addEventListener("click", toggleTrajectories);
   setupCameraControls();
   el("puzzle-check").addEventListener("click", () => onCheck().catch(showError));
   el("puzzle-replay").addEventListener("click", () => playReveal().catch(showError));

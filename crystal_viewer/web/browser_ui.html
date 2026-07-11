@@ -68,6 +68,7 @@
             <div id="puzzle-playback" class="puzzle-playback" hidden>
               <div class="puzzle-playback-row">
                 <button type="button" id="puzzle-replay" class="secondary">再生</button>
+                <button type="button" id="puzzle-trajectories" class="secondary" data-enabled="false" hidden>軌道: 非表示</button>
                 <input id="puzzle-slider" type="range" min="0" max="1000" value="0" step="1" aria-label="回転">
               </div>
             </div>
@@ -93,7 +94,7 @@
                 </div>
                 <button type="button" id="puzzle-view-along" class="secondary">軸方向から見る</button>
                 <button type="button" id="puzzle-projection" class="secondary puzzle-projection" data-projection="perspective">透視投影</button>
-                <button type="button" id="puzzle-target-copies" class="secondary puzzle-projection" data-enabled="false">周辺ハイライト: OFF</button>
+                <button type="button" id="puzzle-target-copies" class="secondary puzzle-projection" data-enabled="false">隣接セル: 非表示</button>
               </div>
             </div>
           </div>

@@ -95,6 +95,7 @@ export class StaticStructureView {
     this.operationViewDirection = null;
     this.operationFocusPoint = null;
     this.symmetryObjects = [];
+    this.crystalAxisGroup = null;
     this.targetMarkerObjects = [];
     this.startMarkerObjects = [];
     this.trajectoryObjects = [];
@@ -118,6 +119,7 @@ export class StaticStructureView {
     this.symmetryElementQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
     this.showAnimationTargets = false; // owner may enable static target markers (puzzle)
     this.showAnimationTargetCopies = true;
+    this.showTrajectories = false;
     this.hiddenElements = new Set();
     this.legendItems = [];
     this.tempMatrix = new THREE.Matrix4();
@@ -307,14 +309,16 @@ export class StaticStructureView {
     }
   }
 
-  addCrystalAxes(displayUnitCell, sourceUnitCell = null) {
-    const vertices = displayUnitCell?.vertices_cart || [];
+  addCrystalAxes(_displayUnitCell, sourceUnitCell = null) {
+    this.clearCrystalAxes();
     const lattice = sourceUnitCell?.lattice || [];
-    if (!vertices.length || !Array.isArray(lattice) || lattice.length < 3) return;
-    const origin = new THREE.Vector3(...vertices[0]);
+    if (!Array.isArray(lattice) || lattice.length < 3) return;
     const lengths = lattice.map(vector => new THREE.Vector3(...vector).length()).filter(Boolean);
     if (!lengths.length) return;
-    const axisLength = Math.max(Math.min(...lengths) * 0.28, this.sceneSpan() * 0.08);
+    const span = this.sceneSpan();
+    const origin = new THREE.Vector3(0, 0, 0);
+    const axisLength = Math.max(Math.min(...lengths) * 0.2, span * 0.075);
+    const group = new THREE.Group();
     const axes = [
       {name: "a", vector: new THREE.Vector3(...lattice[0]), color: CRYSTAL_AXIS_COLORS[0]},
       {name: "b", vector: new THREE.Vector3(...lattice[1]), color: CRYSTAL_AXIS_COLORS[1]},
@@ -338,18 +342,33 @@ export class StaticStructureView {
       arrow.cone.material.transparent = true;
       arrow.cone.material.opacity = 0.95;
       arrow.renderOrder = 7;
-      this.content.add(arrow);
+      group.add(arrow);
       const label = makeAxisLabel(axis.name, axis.color);
       label.position.copy(origin).add(direction.multiplyScalar(axisLength * 1.18));
       label.scale.setScalar(axisLength * 0.18);
       label.material.depthTest = false;
       label.renderOrder = 8;
-      this.content.add(label);
+      group.add(label);
     }
+    this.crystalAxisGroup = group;
+    this.scene.add(group);
+    this.updateCrystalAxisAnchor();
+  }
+
+  clearCrystalAxes() {
+    if (!this.crystalAxisGroup) return;
+    this.scene.remove(this.crystalAxisGroup);
+    this.crystalAxisGroup.traverse(object => {
+      object.geometry?.dispose();
+      if (Array.isArray(object.material)) object.material.forEach(material => material.dispose());
+      else object.material?.dispose();
+    });
+    this.crystalAxisGroup = null;
   }
 
   clearContent() {
     this.symmetryObjects = [];
+    this.clearCrystalAxes();
     this.clearTargetMarkers();
     this.startMarkerObjects = [];
     this.trajectoryObjects = [];
@@ -674,6 +693,7 @@ export class StaticStructureView {
     this.customSegmentBoundaries = [];
     this.customSegmentIndex = null;
     this.updateAnimationTargetMarkers();
+    this.updateTrajectoryLines();
   }
 
   async loadCustomAnimationPaths(generation) {
@@ -992,21 +1012,19 @@ export class StaticStructureView {
 
   updateAnimationTargetMarkers() {
     this.clearTargetMarkers();
-    if (!this.showAnimationTargets || !this.animationPaths.size) {
+    if (!this.showAnimationTargets || !this.showAnimationTargetCopies) {
       this.render();
       return;
     }
     const lattice = this.renderData?.unit_cell?.lattice;
-    const shiftIndices = [[0, 0, 0]];
-    if (this.showAnimationTargetCopies) {
-      for (const i of [-1, 0, 1]) {
-        for (const j of [-1, 0, 1]) {
-          for (const k of [-1, 0, 1]) {
-            if (i !== 0 || j !== 0 || k !== 0) shiftIndices.push([i, j, k]);
-          }
-        }
-      }
-    }
+    const shiftIndices = [
+      [-1, 0, 0],
+      [1, 0, 0],
+      [0, -1, 0],
+      [0, 1, 0],
+      [0, 0, -1],
+      [0, 0, 1],
+    ];
     const targetShifts = Array.isArray(lattice)
       ? shiftIndices.map(shift => new THREE.Vector3(...[
           shift[0] * lattice[0][0] + shift[1] * lattice[1][0] + shift[2] * lattice[2][0],
@@ -1017,25 +1035,20 @@ export class StaticStructureView {
     const geometry = new THREE.SphereGeometry(1, 20, 14);
     for (const instance of this.atomInstances.values()) {
       if (!this.isAtomVisible(instance)) continue;
-      const path = this.animationPaths.get(instance.sourceAtom);
-      if (!pathAppliesToDisplayInstance(path, instance)) continue;
-      const target = evaluatePath(path, 1, instance.start);
-      const moved = target.reduce((sum, value, index) => sum + (value - instance.start[index]) ** 2, 0);
-      if (moved <= 1e-8) continue;
       const materialOptions = {
-        color: 0xfbbf24,
+        color: instance.baseColor,
         transparent: true,
-        depthTest: false,
+        depthWrite: false,
       };
-      const targetVector = new THREE.Vector3(...target);
+      const startVector = new THREE.Vector3(...instance.start);
       for (const shift of targetShifts) {
         const marker = new THREE.Mesh(geometry.clone(), new THREE.MeshBasicMaterial({
           ...materialOptions,
-          opacity: shift.lengthSq() <= 1e-12 ? 0.34 : 0.16,
+          opacity: 0.14,
         }));
-        marker.position.copy(targetVector).add(shift);
-        marker.scale.setScalar(instance.radius * (shift.lengthSq() <= 1e-12 ? 1.45 : 1.08));
-        marker.renderOrder = 6;
+        marker.position.copy(startVector).add(shift);
+        marker.scale.setScalar(instance.radius * 0.92);
+        marker.renderOrder = 1;
         this.targetMarkerObjects.push(marker);
         this.content.add(marker);
       }
@@ -1109,12 +1122,13 @@ export class StaticStructureView {
 
   updateTrajectoryLines() {
     this.clearTrajectoryLines();
-    if (!this.state.show_trajectories || !this.animationPaths.size) {
+    if (!(this.state.show_trajectories || this.showTrajectories) || !this.animationPaths.size) {
       this.render();
       return;
     }
     const positions = [];
     for (const instance of this.atomInstances.values()) {
+      if (!this.isAtomVisible(instance)) continue;
       const path = this.animationPaths.get(instance.sourceAtom);
       if (!pathAppliesToDisplayInstance(path, instance)) continue;
       const samples = new Set([0, 1, ...pathBreakpoints(path, instance.start)]);
@@ -1347,6 +1361,7 @@ export class StaticStructureView {
     this.clearStartMarkers();
     if (this.animationProgress > 0) this.showStartMarkers();
     this.updateAnimationTargetMarkers();
+    this.updateTrajectoryLines();
     this.render();
   }
 
@@ -1373,12 +1388,35 @@ export class StaticStructureView {
   }
 
   render() {
+    this.updateCrystalAxisAnchor();
     for (const marker of this.selectionMarkers.values()) {
       marker.quaternion.copy(this.activeCamera.quaternion);
     }
     this.renderer.setScissorTest(false);
     this.renderer.setViewport(0, 0, this.renderer.domElement.width, this.renderer.domElement.height);
     this.renderer.render(this.scene, this.activeCamera);
+  }
+
+  updateCrystalAxisAnchor() {
+    if (!this.crystalAxisGroup || !this.controls) return;
+    const target = this.controls.target;
+    const camera = this.activeCamera;
+    const forward = target.clone().sub(camera.position).normalize();
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    const up = camera.up.clone().normalize();
+    const distance = Math.max(camera.position.distanceTo(target), 1);
+    let viewHeight;
+    if (camera.isOrthographicCamera) {
+      viewHeight = Math.abs(camera.top - camera.bottom) / Math.max(camera.zoom || 1, 1e-6);
+    } else {
+      viewHeight = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
+    }
+    const aspect = Math.max(this.canvas.clientWidth / Math.max(this.canvas.clientHeight, 1), 0.1);
+    const viewWidth = viewHeight * aspect;
+    this.crystalAxisGroup.position.copy(camera.position)
+      .addScaledVector(forward, distance)
+      .addScaledVector(right, -viewWidth * 0.39)
+      .addScaledVector(up, -viewHeight * 0.34);
   }
 
   animate(timestamp) {
