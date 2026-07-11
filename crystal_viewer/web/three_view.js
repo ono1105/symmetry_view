@@ -95,6 +95,7 @@ export class StaticStructureView {
     this.renderDataQuery = ""; // owner may set e.g. "?boundary_images=1" (puzzle)
     this.animationPathQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
     this.symmetryElementQuery = ""; // owner may set e.g. "&display_mode=source" (puzzle)
+    this.showCrystalAxes = false; // owner may enable an in-scene crystal-axis indicator (puzzle)
     this.showAnimationTargets = false; // owner may enable static target markers (puzzle)
     this.showAnimationTargetCopies = true;
     this.showTrajectories = false;
@@ -180,7 +181,7 @@ export class StaticStructureView {
     this.addAtoms(atoms, styles);
     if (payload.source_kind === "crystal" && payload.display_unit_cell) {
       this.addUnitCell(payload.display_unit_cell, renderData.unit_cell);
-      this.addCrystalAxes(payload.display_unit_cell, renderData.unit_cell);
+      if (this.showCrystalAxes) this.addCrystalAxes(payload.display_unit_cell, renderData.unit_cell);
     }
     this.fitCamera(renderData);
     this.animationOperationIndex = null;
@@ -708,6 +709,7 @@ export class StaticStructureView {
     this.operationViewDirection = Array.isArray(result?.view_direction_cart)
       ? [...result.view_direction_cart] : null;
     this.operationFocusPoint = null;
+    this.render();
   }
 
   updateCustomSequenceElements() {
@@ -726,6 +728,7 @@ export class StaticStructureView {
     if ((elements.planes || []).length && Array.isArray(elements.glide_translation_cart)) {
       this.addGlideArrow(elements.planes[0], elements.glide_translation_cart, span);
     }
+    this.render();
   }
 
   async loadSymmetryElements(operationIndex, generation) {
@@ -751,6 +754,7 @@ export class StaticStructureView {
     this.operationFocusPoint = Array.isArray(payload.focus_point_cart)
       ? [...payload.focus_point_cart]
       : null;
+    this.render();
   }
 
   rotateCamera(direction, angleDegrees) {
@@ -958,7 +962,6 @@ export class StaticStructureView {
   addSymmetryObject(object) {
     this.symmetryObjects.push(object);
     this.content.add(object);
-    this.render();
   }
 
   clearSymmetryElements() {

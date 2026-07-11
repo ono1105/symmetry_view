@@ -96,18 +96,19 @@ class OperationIdentifyTest(unittest.TestCase):
         answer = questions[screw]["answers"][0]
         wrong_shift = next(shift for shift in TRANSLATION_SHIFT_OPTIONS if shift != answer["shift"])
         self.assertIn(answer["shift"], TRANSLATION_SHIFT_OPTIONS)
-        self.assertIn("symbol", answer)
-        self.assertIn("notation", answer)
-        self.assertTrue(
-            check_answer(
-                render_data,
-                screw,
-                "screw",
-                answer["order"],
-                "hard",
-                selected_shift=answer["shift"],
-            )["correct"]
+        self.assertNotIn("symbol", answer)
+        self.assertNotIn("notation", answer)
+        result = check_answer(
+            render_data,
+            screw,
+            "screw",
+            answer["order"],
+            "hard",
+            selected_shift=answer["shift"],
         )
+        self.assertTrue(result["correct"])
+        self.assertIn("symbol", result["answers"][0])
+        self.assertIn("notation", result["answers"][0])
         self.assertFalse(
             check_answer(
                 render_data,
@@ -126,18 +127,19 @@ class OperationIdentifyTest(unittest.TestCase):
         glide = next(i for i, q in enumerate(questions) if q["answers"][0]["kind"] == "glide")
         answer = questions[glide]["answers"][0]
         self.assertIn(answer["shift"], TRANSLATION_SHIFT_OPTIONS)
-        self.assertIn("symbol", answer)
-        self.assertIn("notation", answer)
-        self.assertTrue(
-            check_answer(
-                render_data,
-                glide,
-                "glide",
-                None,
-                "hard",
-                selected_shift=answer["shift"],
-            )["correct"]
+        self.assertNotIn("symbol", answer)
+        self.assertNotIn("notation", answer)
+        result = check_answer(
+            render_data,
+            glide,
+            "glide",
+            None,
+            "hard",
+            selected_shift=answer["shift"],
         )
+        self.assertTrue(result["correct"])
+        self.assertIn("symbol", result["answers"][0])
+        self.assertIn("notation", result["answers"][0])
         self.assertFalse(check_answer(render_data, glide, "glide", None, "hard")["correct"])
 
     def test_hard_mode_empty_for_molecule(self):

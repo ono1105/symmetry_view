@@ -111,16 +111,11 @@ def _operation_notation(
     return symbol
 
 
-def _with_operation_label(
-    answer: dict,
-    render_data: dict,
-    operation: dict,
-    *,
-    display_symbol: str | None = None,
-) -> dict:
-    symbol = display_symbol or _display_symbol(render_data, operation)
+def _with_operation_label(answer: dict, render_data: dict, operation: dict) -> dict:
+    """Attach display-only symbol/notation when revealing an answer."""
+    symbol = _display_symbol(render_data, operation)
     notation = _operation_notation(render_data, operation, display_symbol=symbol)
-    result = dict(answer)
+    result = {key: value for key, value in answer.items() if not str(key).startswith("_")}
     if symbol:
         result["symbol"] = symbol
     if notation:
@@ -135,21 +130,21 @@ def _operation_answer(render_data: dict, operation: dict) -> dict | None:
         order = operation.get("order")
         if order is None or int(order) not in ROTATION_ORDER_OPTIONS:
             return None
-        return _with_operation_label({"kind": ROTATION, "order": int(order)}, render_data, operation)
+        return {"kind": ROTATION, "order": int(order)}
     if kind == "mirror":
-        return _with_operation_label({"kind": MIRROR, "order": None}, render_data, operation)
+        return {"kind": MIRROR, "order": None}
     if kind == "inversion":
-        return _with_operation_label({"kind": INVERSION, "order": None}, render_data, operation)
+        return {"kind": INVERSION, "order": None}
     if kind.startswith("improper_"):
         index = _improper_index(operation, invert=False)
         if index is None or index not in IMPROPER_ORDER_OPTIONS:
             return None
-        return _with_operation_label({"kind": ROTOREFLECTION, "order": index}, render_data, operation)
+        return {"kind": ROTOREFLECTION, "order": index}
     if kind.startswith("rotoinversion"):
         index = _improper_index(operation, invert=True)
         if index is None or index not in IMPROPER_ORDER_OPTIONS:
             return None
-        return _with_operation_label({"kind": ROTOINVERSION, "order": index}, render_data, operation)
+        return {"kind": ROTOINVERSION, "order": index}
     return None
 
 
@@ -216,17 +211,12 @@ def _translation_answer(render_data: dict, operation: dict) -> dict | None:
         shift = _screw_shift(symbol)
         if shift not in TRANSLATION_SHIFT_OPTIONS:
             return None
-        return _with_operation_label(
-            {"kind": SCREW, "order": int(order), "shift": shift},
-            render_data,
-            operation,
-            display_symbol=symbol,
-        )
+        return {"kind": SCREW, "order": int(order), "shift": shift}
     if kind == "glide":
         shift = _glide_shift(render_data, operation)
         if shift not in TRANSLATION_SHIFT_OPTIONS:
             return None
-        return _with_operation_label({"kind": GLIDE, "order": None, "shift": shift}, render_data, operation)
+        return {"kind": GLIDE, "order": None, "shift": shift}
     return None
 
 
@@ -300,6 +290,7 @@ def identify_questions(render_data: dict, difficulty: str = NORMAL) -> list[dict
         key = (answer["kind"], answer["order"], answer.get("shift"))
         if key not in group["seen"]:
             group["seen"].add(key)
+            answer = {**answer, "_operation_index": int(operation["index"])}
             group["answers"].append(answer)
 
     return [
@@ -349,6 +340,22 @@ def _answer_matches(answer: dict, selected_kind, selected_order, selected_shift=
     return True
 
 
+def _revealed_answers(render_data: dict, answers: list[dict]) -> list[dict]:
+    operations = {
+        int(operation["index"]): operation
+        for operation in render_data.get("operations", [])
+        if "index" in operation
+    }
+    revealed = []
+    for answer in answers:
+        operation = operations.get(int(answer.get("_operation_index", -1)))
+        if operation is None:
+            revealed.append({key: value for key, value in answer.items() if not str(key).startswith("_")})
+        else:
+            revealed.append(_with_operation_label(answer, render_data, operation))
+    return revealed
+
+
 def check_answer(
     render_data: dict,
     question_id: int,
@@ -371,6 +378,6 @@ def check_answer(
     )
     return {
         "correct": correct,
-        "answers": question["answers"],
+        "answers": _revealed_answers(render_data, question["answers"]),
         "operation_index": question["operation_index"],
     }

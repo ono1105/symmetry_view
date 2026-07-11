@@ -291,6 +291,7 @@ async function startStructure(example) {
   view.renderDataQuery = example.kind === "crystal" ? "?display_mode=source&boundary_images=0" : "";
   view.animationPathQuery = example.kind === "crystal" ? "&display_mode=source&boundary_images=0" : "";
   view.symmetryElementQuery = example.kind === "crystal" ? "&display_mode=source" : "";
+  view.showCrystalAxes = example.kind === "crystal";
   view.showAnimationTargets = example.kind === "crystal";
   view.showAnimationTargetCopies = false;
   view.showTrajectories = false;
@@ -380,6 +381,7 @@ function beginAxisRound() {
     { direction_cart: currentQuestion.direction_cart, point_cart: currentQuestion.point_cart },
     view.sceneSpan(),
   );
+  view.render();
   el("puzzle-question").textContent = "青い軸は何回回転軸ですか？";
   const options = el("puzzle-options");
   const choices = [...currentQuestion.options];
