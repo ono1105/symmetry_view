@@ -23,6 +23,10 @@ tools/
   regenerate_example_assets.py examples/cif・examples/moleculesからJSON/catalogを再生成
   view_json_pyvista.py    JSONを読む最小PyVista表示
 
+scripts/
+  setup.sh                venv作成・依存インストール・簡易動作確認
+  serve.sh                Webビューアー起動
+
 examples/
   cif/
     Halite.cif
@@ -46,7 +50,24 @@ archive/old_gui_attempt/
   以前のGUI/VTK実験コード。現行実装では使わない。
 ```
 
-## セットアップ
+## 最短セットアップ
+
+Linux/macOS:
+
+```bash
+git clone https://github.com/ono1105/symmetry_view.git
+cd symmetry_view
+scripts/setup.sh
+scripts/serve.sh --mode puzzle
+```
+
+ブラウザを自動で開きたくない場合:
+
+```bash
+scripts/serve.sh --mode puzzle --no-browser
+```
+
+## 手動セットアップ
 
 ```bash
 python3 -m venv .venv
@@ -113,6 +134,14 @@ JSON export:
 .venv/bin/python tools/view_json_gui.py exports/json/halite.json --operation 1
 .venv/bin/python tools/view_json_gui.py exports/json/halite.json --expanded
 .venv/bin/python tools/view_json_server.py exports/json/halite.json
+```
+
+Webビューアー:
+
+```bash
+scripts/serve.sh
+scripts/serve.sh --mode analysis
+scripts/serve.sh --mode puzzle
 ```
 
 通常起動はWebビューアーのみです。比較確認や旧GIF出力が必要な場合だけ
