@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -26,7 +27,8 @@ from .analysis_models import (
 )
 
 
-DEFAULT_LEGACY_CORE = Path("/home/ken/work/kouzoukaiseki/symmetry_core.py")
+LEGACY_CORE_ENV_VAR = "SYMMETRY_VIEW_LEGACY_CORE"
+DEFAULT_LEGACY_CORE = Path(__file__).resolve().parent / "legacy" / "symmetry_core.py"
 
 RHOMBOHEDRAL_SETTING_OPS: dict[int, tuple[str, ...]] = {
     146: ("x,y,z", "z,x,y", "y,z,x"),
@@ -89,7 +91,7 @@ def analyze_cif(
     symprec: float = 1e-3,
     angle_tolerance: float = 5.0,
     search_range: int = 2,
-    legacy_core_path: str | Path = DEFAULT_LEGACY_CORE,
+    legacy_core_path: str | Path | None = None,
 ) -> StructureAnalysisResult:
     cif_path = Path(cif_path)
     if not cif_path.exists():
@@ -117,7 +119,7 @@ def analyze_structure(
     symprec: float = 1e-3,
     angle_tolerance: float = 5.0,
     search_range: int = 2,
-    legacy_core_path: str | Path = DEFAULT_LEGACY_CORE,
+    legacy_core_path: str | Path | None = None,
 ) -> StructureAnalysisResult:
     core = load_legacy_core(legacy_core_path)
     source_file = Path(source_file)
@@ -401,10 +403,22 @@ def parse_atom_site_loop(text: str) -> tuple[list[str], list[str], np.ndarray]:
     return [], [], np.empty((0, 3), dtype=float)
 
 
-def load_legacy_core(path: str | Path) -> ModuleType:
-    path = Path(path)
+def resolve_legacy_core_path(path: str | Path | None = None) -> Path:
+    if path is not None:
+        return Path(path)
+    configured = os.environ.get(LEGACY_CORE_ENV_VAR)
+    if configured:
+        return Path(configured)
+    return DEFAULT_LEGACY_CORE
+
+
+def load_legacy_core(path: str | Path | None = None) -> ModuleType:
+    path = resolve_legacy_core_path(path)
     if not path.exists():
-        raise AnalysisError(f"legacy symmetry core not found: {path}")
+        raise AnalysisError(
+            f"legacy symmetry core not found: {path}. "
+            f"Set {LEGACY_CORE_ENV_VAR} to a symmetry_core.py path if you need to override it."
+        )
 
     module_name = "_kouzoukaiseki_symmetry_core"
     if module_name in sys.modules:

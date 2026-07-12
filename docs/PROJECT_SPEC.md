@@ -159,7 +159,8 @@ These differences do not change the project goal. They are staging choices to ke
 ## Known Non-Blocking Issues
 
 ```text
-crystal analysis still depends on /home/ken/work/kouzoukaiseki/symmetry_core.py
+crystal analysis uses the vendored legacy core at crystal_viewer/legacy/symmetry_core.py
+and can be overridden with SYMMETRY_VIEW_LEGACY_CORE when needed
 mixed-occupancy crystal sites are represented by their highest-occupancy element for now
 docs/archive files and old review notes mention earlier file names and should be treated as history
 ```

@@ -54,6 +54,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+結晶解析に使う旧 `symmetry_core.py` は `crystal_viewer/legacy/` に同梱されています。
+別の実装を使う場合だけ、`SYMMETRY_VIEW_LEGACY_CORE=/path/to/symmetry_core.py` で上書きできます。
+
 ## 動作確認
 
 結晶解析:
