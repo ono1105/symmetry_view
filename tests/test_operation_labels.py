@@ -77,6 +77,25 @@ class OperationLabelsTest(unittest.TestCase):
         self.assertEqual(bar_three["order"], 6)
         self.assertEqual(bar_three["notation_order"], 3)
 
+    def test_itc_like_proper_rotations_include_rotation_sense(self):
+        for fixture, kind, order in (
+            ("antimony", "rotation_3", 3),
+            ("halite", "rotation_4", 4),
+            ("cadmoselite", "screw_6", 6),
+        ):
+            with self.subTest(fixture=fixture):
+                payload = json.loads(Path(f"exports/json/{fixture}.json").read_text(encoding="utf-8"))
+                summaries = operation_summaries(payload["render_data"], payload["atom_mappings"])
+                symbols = {
+                    summary["itc_like_summary"].split(" ", 1)[0]
+                    for summary in summaries
+                    if summary["kind"] == kind
+                }
+                operation_symbols = {symbol.split("(", 1)[0] for symbol in symbols}
+
+                self.assertTrue(any(symbol.startswith(str(order)) and symbol.endswith("+") for symbol in operation_symbols))
+                self.assertTrue(any(symbol.startswith(str(order)) and symbol.endswith("-") for symbol in operation_symbols))
+
     def test_cadmoselite_glides_are_labeled_as_c_glides(self):
         payload = json.loads(Path("exports/json/cadmoselite.json").read_text(encoding="utf-8"))
 

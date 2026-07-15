@@ -296,6 +296,7 @@ async function startStructure(example) {
   view.showTrajectories = false;
   el("puzzle-target-copies").hidden = example.kind !== "crystal";
   el("puzzle-trajectories").hidden = true;
+  hidePuzzleGifButton();
   syncTargetCopiesButton();
   syncTrajectoriesButton();
   await view.refresh();
@@ -370,6 +371,7 @@ function beginRound() {
   el("puzzle-slider").value = "0";
   el("puzzle-replay").disabled = false;
   el("puzzle-trajectories").hidden = true;
+  hidePuzzleGifButton();
   syncTrajectoriesButton();
   if (currentQuiz === "axis") beginAxisRound();
   else beginOperationRound();
@@ -403,6 +405,7 @@ function beginOperationRound() {
   // The animation IS the question, so show the playback controls and play it now.
   revealOperation = currentQuestion.operation_index;
   el("puzzle-playback").hidden = false;
+  setPuzzleGifButtonReady(false);
   playReveal().catch(showError);
 }
 
@@ -492,6 +495,7 @@ async function playReveal() {
   if (revealOperation == null) return; // e.g. an infinite axis: nothing to play
   const generation = roundGeneration;
   el("puzzle-replay").disabled = true;
+  if (!el("puzzle-save-gif").hidden) el("puzzle-save-gif").disabled = true;
   try {
     // Override the shared analysis selection so puzzle rounds animate their own
     // displayed/unit-cell atoms consistently.
@@ -501,7 +505,12 @@ async function playReveal() {
     await animateReveal();
     revealOperationElements(generation);
   } finally {
-    if (generation === roundGeneration) el("puzzle-replay").disabled = false;
+    if (generation === roundGeneration) {
+      el("puzzle-replay").disabled = false;
+      if (!el("puzzle-save-gif").hidden) {
+        el("puzzle-save-gif").disabled = !view.animationPaths.size;
+      }
+    }
   }
 }
 
@@ -550,6 +559,7 @@ async function onCheckAxis() {
   } else {
     el("puzzle-playback").hidden = false;
     el("puzzle-trajectories").hidden = false;
+    setPuzzleGifButtonReady(false);
     playReveal().catch(showError);
   }
 }
@@ -653,6 +663,36 @@ function toggleTrajectories() {
   syncTrajectoriesButton();
 }
 
+function hidePuzzleGifButton() {
+  const button = el("puzzle-save-gif");
+  button.hidden = true;
+  button.disabled = true;
+  button.textContent = "GIFを保存";
+}
+
+function setPuzzleGifButtonReady(ready) {
+  const button = el("puzzle-save-gif");
+  button.hidden = false;
+  button.disabled = !ready;
+  button.textContent = "GIFを保存";
+}
+
+async function savePuzzleGif() {
+  const button = el("puzzle-save-gif");
+  if (view.recording) return;
+  const controls = [...el("puzzle-play").querySelectorAll("button, input")];
+  const disabled = new Map(controls.map(control => [control, control.disabled]));
+  for (const control of controls) control.disabled = true;
+  button.disabled = true;
+  button.textContent = "保存中...";
+  try {
+    await view.recordGif("puzzle-animation");
+  } finally {
+    for (const [control, wasDisabled] of disabled) control.disabled = wasDisabled;
+    button.textContent = "GIFを保存";
+  }
+}
+
 function setupCameraControls() {
   for (const [id, direction] of Object.entries(CAMERA_DIRECTIONS)) {
     el(id).addEventListener("click", () => {
@@ -673,6 +713,7 @@ function setupControls() {
   setupCameraControls();
   el("puzzle-check").addEventListener("click", () => onCheck().catch(showError));
   el("puzzle-replay").addEventListener("click", () => playReveal().catch(showError));
+  el("puzzle-save-gif").addEventListener("click", () => savePuzzleGif().catch(showError));
   el("puzzle-slider").addEventListener("input", (event) => {
     cancelReveal();
     view.setAnimationProgress(Number(event.target.value) / 1000);

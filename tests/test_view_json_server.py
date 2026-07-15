@@ -119,6 +119,7 @@ class BrowserUiAssetsTest(unittest.TestCase):
             'id="puzzle-again"',
             'id="puzzle-other"',
             'id="puzzle-result"',
+            'id="puzzle-save-gif"',
         ):
             self.assertIn(marker, HTML)
 
@@ -133,12 +134,28 @@ class BrowserUiAssetsTest(unittest.TestCase):
         self.assertIn("this.state.pause_at_breakpoints && !this.recording", source)
         self.assertIn("updateTrajectoryLines()", source)
         self.assertIn("new THREE.LineSegments(geometry, material)", source)
-        self.assertIn("async recordGif()", source)
+        self.assertIn("async recordGif(filename = null)", source)
+        self.assertIn("const GIF_END_HOLD_MS = 1000", source)
+        self.assertIn("const extraEndFrames", source)
+        self.assertIn("180 - frameCount", source)
         self.assertNotIn("recordWebm", source)
         self.assertIn("viewAlongCartesianDirection", source)
         self.assertIn("setCameraCenter", source)
         self.assertIn("setBackgroundMode", source)
         self.assertIn("setLegendVisible", source)
+
+    def test_itc_like_notation_formats_coordinate_bars_and_rotation_sense(self):
+        source = Path("crystal_viewer/web/browser_ui.js").read_text(encoding="utf-8")
+
+        self.assertIn('replace(/-((?:\\d+)?[xyz])/g, \'<span class="overline">$1</span>\')', source)
+        self.assertIn("<sup>$2</sup>", source)
+
+    def test_puzzle_gif_export_waits_for_animation_and_locks_controls(self):
+        source = Path("crystal_viewer/web/puzzle.js").read_text(encoding="utf-8")
+
+        self.assertIn("setPuzzleGifButtonReady(false)", source)
+        self.assertIn('querySelectorAll("button, input")', source)
+        self.assertIn("for (const control of controls) control.disabled = true", source)
 
     def test_empty_atom_selection_does_not_hide_operations(self):
         source = Path("crystal_viewer/web/browser_ui.js").read_text(encoding="utf-8")

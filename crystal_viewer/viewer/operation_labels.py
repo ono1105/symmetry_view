@@ -7,7 +7,7 @@ from math import gcd
 
 import numpy as np
 
-from crystal_viewer.geometry import integer_index_vector, normalize
+from crystal_viewer.geometry import integer_index_vector, normalize, signed_rotation_angle_from_matrix
 from crystal_viewer.itc_tables import itc_coordinate_summaries
 from crystal_viewer.viewer.animation import animation_paths
 from crystal_viewer.viewer.animation_path import effective_rotation_axis
@@ -562,7 +562,11 @@ def operation_itc_like_summary(
     # All other operations: symbol(t_int) position_expression
     position = operation_itc_position(operation)
     if position is not None:
-        symbol = display_symbol or str(operation.get("symbol") or operation.get("label", "?"))
+        symbol = itc_operation_symbol(
+            render_data,
+            operation,
+            display_symbol or str(operation.get("symbol") or operation.get("label", "?")),
+        )
         order = operation.get("order")
         W_frac = operation.get("matrix_frac")
         t_frac = operation.get("translation_frac")
@@ -585,6 +589,42 @@ def operation_itc_like_summary(
         centers,
         display_symbol=display_symbol,
     )
+
+
+def itc_operation_symbol(render_data: dict, operation: dict, symbol: str) -> str:
+    """Return an ITC operation symbol, including the sense of proper rotations.
+
+    ITC distinguishes the two inverse 3-, 4-, and 6-fold operations with + and
+    -. The sign is measured around a canonically oriented crystallographic axis,
+    rather than depending on whichever equivalent axis element was selected.
+    """
+    kind = str(operation.get("kind", ""))
+    if operation_notation_order(operation) not in (3, 4, 6) or not kind.startswith(("rotation_", "screw_")):
+        return symbol
+    if symbol.endswith(("+", "-")):
+        return symbol
+
+    unit_cell = render_data.get("unit_cell") or {}
+    lattice = np.asarray(unit_cell.get("lattice"), dtype=float)
+    matrix_frac = operation.get("matrix_frac")
+    matrix_cart = operation.get("matrix_cart")
+    if lattice.shape != (3, 3) or matrix_frac is None or matrix_cart is None:
+        return symbol
+
+    null_vecs = _itc_null_space(np.asarray(matrix_frac, dtype=float) - np.eye(3))
+    if len(null_vecs) != 1:
+        return symbol
+    direction_frac = integer_index_vector(null_vecs[0])
+    if direction_frac is None:
+        return symbol
+    direction_cart = normalize(direction_frac @ lattice)
+    if np.linalg.norm(direction_cart) < 1e-8:
+        return symbol
+
+    angle = signed_rotation_angle_from_matrix(np.asarray(matrix_cart, dtype=float), direction_cart)
+    if abs(angle) < 1e-8:
+        return symbol
+    return f"{symbol}{'+' if angle > 0 else '-'}"
 
 
 def operation_element_sort_key(

@@ -12,6 +12,7 @@ import {
 const CAMERA_FOV = 42;
 const ORTHOGRAPHIC_HEIGHT = 10;
 const STATIONARY_ANIMATION_SECONDS = 0.4;
+const GIF_END_HOLD_MS = 1000;
 const CURVED_PATH_TYPES = new Set(["rotation", "screw", "rotoinversion", "rotoreflection"]);
 const CRYSTAL_AXIS_COLORS = [0xef4444, 0x22c55e, 0x3b82f6];
 const ZERO_SCALE = new THREE.Vector3(0, 0, 0);
@@ -1192,11 +1193,11 @@ export class StaticStructureView {
     return this.baseAnimationDurationSeconds * 1000 / speed;
   }
 
-  downloadBlob(blob, extension) {
+  downloadBlob(blob, extension, filename = null) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `symmetry-op${this.animationOperationIndex ?? 0}.${extension}`;
+    link.download = filename ? `${filename}.${extension}` : `symmetry-op${this.animationOperationIndex ?? 0}.${extension}`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -1208,12 +1209,13 @@ export class StaticStructureView {
     }, "image/png");
   }
 
-  async recordGif() {
+  async recordGif(filename = null) {
     if (this.recording || !this.animationPaths.size) return;
     this.recording = true;
     const previousProgress = this.animationProgress;
     const durationMs = this.animationDurationMs();
     const frameCount = Math.max(2, Math.min(90, Math.ceil(durationMs / 100) + 1));
+    const frameDurationMs = Math.max(20, Math.round(durationMs / (frameCount - 1)));
     const frames = [];
     try {
       this.playing = false;
@@ -1228,16 +1230,24 @@ export class StaticStructureView {
         await new Promise(resolve => requestAnimationFrame(resolve));
         frames.push(this.canvas.toDataURL("image/png"));
       }
+      // Keep the completed structure visible for one second before the GIF loops.
+      // The final animation frame already occupies one frame duration.
+      const extraEndFrames = Math.min(
+        180 - frameCount,
+        Math.max(0, Math.ceil(GIF_END_HOLD_MS / frameDurationMs) - 1),
+      );
+      const finalFrame = frames.at(-1);
+      for (let index = 0; index < extraEndFrames; index += 1) frames.push(finalFrame);
       const response = await fetch("/api/export_gif", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           frames,
-          frame_duration_ms: Math.round(durationMs / (frameCount - 1)),
+          frame_duration_ms: frameDurationMs,
         }),
       });
       if (!response.ok) throw new Error(await response.text() || `${response.status} ${response.statusText}`);
-      this.downloadBlob(await response.blob(), "gif");
+      this.downloadBlob(await response.blob(), "gif", filename);
     } catch (error) {
       this.setStatus(`GIF export error: ${error.message}`);
     } finally {

@@ -183,7 +183,10 @@ function formatSymbol(symbol) {
 }
 
 function formatItcLikeSymbol(symbol) {
-  return formatSymbol(symbol).replace(/^\s*-([0-9]+)/, '<span class="overline">$1</span>');
+  return formatSymbol(symbol)
+    .replace(/^\s*-([0-9]+)/, '<span class="overline">$1</span>')
+    .replace(/-((?:\d+)?[xyz])/g, '<span class="overline">$1</span>')
+    .replace(/^(\s*\d(?:[₀₁₂₃₄₅₆])?)([+-])/, '$1<sup>$2</sup>');
 }
 
 function formatPlainOverbar(symbol) {
