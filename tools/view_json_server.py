@@ -57,6 +57,10 @@ from crystal_viewer.game.axis_orders import axis_questions as axis_order_questio
 from crystal_viewer.game.axis_orders import check_answer as check_axis_order_answer
 from crystal_viewer.game.operation_identify import check_answer as check_operation_answer
 from crystal_viewer.game.operation_identify import public_questions as public_operation_questions
+from crystal_viewer.game.composition import check_answer as check_composition_answer
+from crystal_viewer.game.composition import public_questions as public_composition_questions
+from crystal_viewer.game.atom_mapping import check_answer as check_mapping_answer
+from crystal_viewer.game.atom_mapping import public_questions as public_mapping_questions
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
     check_custom_operation,
@@ -1017,6 +1021,32 @@ def make_handler(
                     }
                 )
                 return
+            if path == "/api/puzzle/composition":
+                with state_lock:
+                    render_data = session.render_data
+                    source_kind = session.source_kind
+                # Each question carries the two operation indices to animate; the
+                # product's name/fold is revealed on /api/puzzle/composition/check.
+                self.send_json(
+                    {
+                        "source_kind": source_kind,
+                        "questions": public_composition_questions(render_data),
+                    }
+                )
+                return
+            if path == "/api/puzzle/mapping":
+                with state_lock:
+                    render_data = session.render_data
+                    source_kind = session.source_kind
+                # Each question carries the operation to animate and the atom to
+                # highlight; the target atom is revealed on /api/puzzle/mapping/check.
+                self.send_json(
+                    {
+                        "source_kind": source_kind,
+                        "questions": public_mapping_questions(render_data),
+                    }
+                )
+                return
             if path == "/api/state":
                 with state_lock:
                     body = dict(shared_state)
@@ -1123,6 +1153,39 @@ def make_handler(
                         difficulty,
                         selected_shift=shift,
                     )
+                except (TypeError, ValueError) as exc:
+                    self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
+                    return
+                if result is None:
+                    self.send_json_error("puzzle question not found", status=404)
+                    return
+                self.send_json(result)
+                return
+
+            if path == "/api/puzzle/composition/check":
+                with state_lock:
+                    render_data = session.render_data
+                try:
+                    question_id = int(payload.get("question_id"))
+                    kind = str(payload.get("kind", ""))
+                    order = payload.get("order")
+                    result = check_composition_answer(render_data, question_id, kind, order)
+                except (TypeError, ValueError) as exc:
+                    self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
+                    return
+                if result is None:
+                    self.send_json_error("puzzle question not found", status=404)
+                    return
+                self.send_json(result)
+                return
+
+            if path == "/api/puzzle/mapping/check":
+                with state_lock:
+                    render_data = session.render_data
+                try:
+                    question_id = int(payload.get("question_id"))
+                    selected_atom = payload.get("selected_atom_index")
+                    result = check_mapping_answer(render_data, question_id, selected_atom)
                 except (TypeError, ValueError) as exc:
                     self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
                     return

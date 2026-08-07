@@ -1578,11 +1578,19 @@
     }
     .puzzle-stage-head {
       margin-bottom: 10px;
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
     }
     .puzzle-structure-title {
       font-size: 18px;
       font-weight: 700;
       color: #0f2f4c;
+    }
+    .puzzle-stage-caption {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1667a8;
     }
     .puzzle-side {
       display: grid;

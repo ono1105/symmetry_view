@@ -41,6 +41,14 @@
             <span class="puzzle-quiz-name">操作あてクイズ</span>
             <span class="puzzle-quiz-desc">アニメーションで示された対称操作の種類と次数を当てます。</span>
           </button>
+          <button type="button" class="puzzle-quiz-card" data-quiz="composition">
+            <span class="puzzle-quiz-name">合成クイズ</span>
+            <span class="puzzle-quiz-desc">2つの操作を続けて行うと、どの1つの操作と同じになるかを当てます。</span>
+          </button>
+          <button type="button" class="puzzle-quiz-card" data-quiz="mapping">
+            <span class="puzzle-quiz-name">移り先クイズ</span>
+            <span class="puzzle-quiz-desc">対称操作で、選ばれた原子がどの原子に移るかをクリックで当てます。</span>
+          </button>
         </div>
       </div>
       <button type="button" id="puzzle-picker-back" class="secondary puzzle-subback" hidden>← クイズを選ぶ</button>
@@ -63,6 +71,7 @@
           <div class="puzzle-stage">
             <div class="puzzle-stage-head">
               <span id="puzzle-structure-title" class="puzzle-structure-title"></span>
+              <span id="puzzle-stage-caption" class="puzzle-stage-caption"></span>
             </div>
             <div id="puzzle-view" class="puzzle-view"><canvas></canvas></div>
             <div id="puzzle-playback" class="puzzle-playback" hidden>

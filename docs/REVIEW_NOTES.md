@@ -4541,3 +4541,512 @@ ITC テーブル照合（特に `itc_operation_notation_summaries`）の並び�
 ### 検証
 
 - 全 170 テストパス。実機API：CO2（反転・鏡映どちらも正解の1問）、methane（回映S4）、halite（回反-3/-4・境界原子27）、∞選択の安全な不正解処理、を確認。JS 構文チェック（`node --check`）OK。
+
+## 残レビュー項目の検証＋合成クイズ・移り先クイズを追加（Claude 実装 2026-08-06）
+
+### 残レビュー項目（前回チャットで挙げた #1〜#7）の結論
+
+コード変更は不要と判断。根拠：#1 操作ラベルの全件計算＝Codex `8f5de7c` で対応済み。#2 要素ごと `render()`＝`addSymmetryObject` は描画せず `clearSymmetryElements` が末尾1回のみ（解消済み）。#3 常時60fps二重描画＝`animate` は `animationChanged` 時のみ描画（解消済み）。#6 解析側の結晶ギズモ＝Codex `8a8f903` で削除済み。**#4 screw/glide の shift 未解析ドロップ＝ホワイトリスト12結晶で実測 0 件**（screw 記号パースは実データに堅牢）につき投機的フォールバックは追加せず。#5 ホワイトリストは意図的キュレーションで機能。#7 `refreshAnalysisFromServer` はモード切替時1回のみで許容。**唯一の実 papercut**：BaTiO3・Qusongite は難しいモードで0問（screw/glide 無し）＝丁寧な案内で処理済み・教育的にも許容。ユーザー了承のうえ放置（結晶は今後キュレーション）。
+
+### 追加した2クイズ（ユーザー採用 2026-08-06）
+
+いずれも判定を `game/` に単一実装し（`render_data` のみ消費）、既存の `StaticStructureView`・`/api/animation_path` を再利用。
+
+1. **合成クイズ**（`crystal_viewer/game/composition.py`、テスト `tests/test_puzzle_composition.py` 8件）
+   - 操作A→操作B（積 B∘A）と同じ1操作の種類・次数を答える。積の命名は `operation_identify._operation_answer` を再利用（点操作＝回転/鏡映/反転/回映/回反に限定；らせん・映進の積は範囲外）。
+   - **分子は matrix_frac が null**（格子なし）のため**直交座標で合成・照合**、結晶は**分率座標**で `symmetry_operations.compose_operation_sequence` ＋ 群への照合。結晶の照合は frac の回転部が整数・並進が 1/24 単位である性質を使い、O(1) 辞書照合に最適化（halite 456ms→73ms）。
+   - 出題は「A・B の視覚シグネチャ代表を種類あたり最大4」×「積の種類あたり最大8問」でキャップ（halite 56問7群、benzene 50問7群、SF6 56問7群）。同じ積種類＝同一 `group` で均等サンプリング。正解は `/check` まで秘匿（公開は A/B の operation_index のみ）。
+   - API：`GET /api/puzzle/composition`、`POST /api/puzzle/composition/check`。クライアント：クイズ選択に「合成クイズ」カード。A→B を順に再生（ステージ見出し「操作A」「操作B」で区別）、回答後に積のアニメ＋対称要素をリビール。色分けは spec §4 の通り将来検討（今はステージ見出しで区別）。
+
+2. **移り先クイズ**（`crystal_viewer/game/atom_mapping.py`、テスト `tests/test_puzzle_atom_mapping.py` 7件）
+   - 1原子を強調し、対称操作でどの原子に移るかを**クリック**で答える。判定＝像 `M@cart+t` の最近接原子（同元素・一意）。**分子限定**（結晶は周期像で移り先が曖昧になるため後段）。恒等・固定原子（例：メタンの中心C）は出題されない。
+   - 出題は操作種ごとに最大6問でキャップ、`group`＝操作種で均等サンプリング。正解 `target_atom_index` は `/check` まで秘匿。
+   - API：`GET /api/puzzle/mapping`、`POST /api/puzzle/mapping/check`。
+   - クライアント/three_view：`StaticStructureView` に **`onAtomPick` フック**（設定時は解析の原子選択＝`/api/state` を触らずパズルへクリックを流す）と **`setPickMarkers`**（原子追従リング＝黄=対象/青=自分の選択、および固定位置リング＝緑=移り先）を追加。`setAtomPosition` がリングも追従させるので、リビールで黄色い原子が緑の固定リング（＝移り先原子の元位置）へ着地する。向きの曖昧さ（Cn の回転方向）は操作を 18% だけプレビュー再生して提示。
+
+### 検証
+
+- 全 193 テストパス（+15：合成8・移り先7）。`node --check` OK（puzzle.js / three_view.js）、`py_compile` OK（server）。
+- 実機API疎通：methane 合成32問（q0→C3正解判定）、benzene 移り先42問（q0 target=1、正誤判定）を確認。
+
+### Codex への申し送り
+
+- 合成の色分け（操作A/Bを色で区別）は未実装。spec §4 の通り必要になれば `setPickMarkers` 等で導入余地あり。
+- 合成の結晶出題は点操作の積に限定。らせん・映進を絡めた合成は未対応（並進系は spec 通り後回し）。
+- 移り先の結晶対応（周期像の扱い）は未着手。`atom_mapping` 自体は結晶 render_data でも動くが、表示原子への一意着地に限られる。
+- ○×・偽要素・回映軸は保留（§0/§2/§7 参照）。○×（本物のみ）は `viewer/custom_operation.check_custom_operation` の判定が流用できる。
+
+### Codex 再レビューでの修正（2026-08-06）
+
+- **結晶積の照合**: 1/24キーは230空間群の標準Hall設定（530設定、7,388操作）では成立し、全398,298積で衝突・照合漏れなしを確認した。ただし任意の原点移動では並進が1/24格子から外れ得る。キーを高速経路に限定し、ヒットを`operations_equivalent`で検証、ミス・衝突時は`find_matching_operation_index`へフォールバックするよう修正。
+- **合成の出題品質**: 積種類ごとの先頭8件方式では高対称構造が反転始まりに偏り、鏡映×鏡映＝回転を落としていた。A/Bの種類層をラウンドロビン選抜し、教科書的な鏡映ペアを確実に残すよう修正。平面分子で同じ軌跡を持つCn/Snを区別できるよう、答えである積は隠したままA/Bの正式名を公開・見出し表示する。
+- **移り先の出題品質**: 操作種ごとの先頭6件方式ではベンゼンが炭素だけに偏っていた。操作index×元素で層化し、C/H双方を出題する。プレビュー中は対象原子だけを動かし候補原子を静止、曲線18%・直線10%とした。平面・直線分子は薄い軸方向から自動表示して候補の重なりを減らす。回答後のみ全原子を動かして着地をリビールする。
+- **非同期・画面遷移**: 合成と移り先に同一ラウンド内の再生世代を追加。質問再生中は回答を無効化し、再生/回答/リビール/別画面の古い処理を破棄する。全画面遷移で`onAtomPick`・リング・パスを解除する。
+- **クリック隔離・直接起動**: パズル用`StaticStructureView`は解析選択を常時無効化し、mapping以外のクリックも`/api/state`へ漏らさない。`--mode puzzle`でentryイベントがmodule読込より先に発火した場合も、表示状態から自己初期化する。
+- **表示**: 回反`-n`の表記が「回反（-n）（-n）」と重複する場合は後半を省略する。
+
+---
+
+## 合成クイズ・移り先クイズの独立再レビュー（Claude レビュー 2026-08-07・コード変更なし）
+
+`docs/PUZZLE_SPEC.md` と本ファイルの 2026-08-06 の2セクション（Claude 実装 / Codex 再レビューでの修正）を前提に、`game/composition.py`・`game/atom_mapping.py`・`web/puzzle.js`・`web/three_view.js`・`tools/view_json_server.py`・関連テストを独立に精査した。**コードは一切変更していない**（修正は Codex に委ねる）。
+
+作業ツリーにある Codex の未コミット変更（`three_view.js` の `setViewport`/`setScissorTest` 削除、`tests/test_view_json_server.py:147-152` の viewport テスト）はレビュー対象外として分離した。
+
+### ベースライン（レビュー前後で同一）
+
+- `.venv/bin/python -m unittest discover -s tests -q` → **200 tests OK**
+- `node --check crystal_viewer/web/puzzle.js` / `three_view.js` → OK
+- `py_compile tools/view_json_server.py` → OK / `git diff --check` → OK
+
+---
+
+### 1.【高】移り先: プレビューが操作を一意に決めず、原理的に答えられない問題が出る
+
+**症状**: 同じ原子を出発点にする2問で、プレビューの見え方がほぼ同一なのに正解原子が異なる。プレイヤーに判別手段がない。
+
+**実測**（サーバ実機の `/api/animation_path` を `animation_path.js` の `evaluatePath` で評価）:
+
+| 構造 | 2問（同一 source_atom） | プレビュー終点の差 | 動き幅 |
+|---|---|---|---|
+| allene | op0 `rotation_2`→原子4 vs op7 `improper_4`→原子5 | **0.002 Å** | 0.516 Å |
+| benzene | op0 `rotation_6`→原子1 vs op11 `improper_6`→原子2 | 0.029 Å | 0.292 Å |
+| benzene | op0 `rotation_6`→原子7 vs op11 `improper_6`→原子8 | 0.052 Å | 0.518 Å |
+| SF6 | op0 `rotation_2`→原子3 vs op28 `improper_4`→原子6 | 0.132 Å | 0.616 Å |
+
+判別不能ペア数（終点差 < 動き幅の25% かつ正解が異なる）: 現状 benzene 6 / SF6 7 / allene 1。
+
+**原因**: 回映・回反のアニメパスは2フェーズ（先に回転 → 後で鏡映/反転、`animation_path.js:259-267`）。前半だけ見せると、対応する純回転と完全に同じ見え方になる。加えて Cn を一部だけ見せる方式は「どの n か」を弧長の目測に委ねる（benzene 主軸 C6/C3/C2 は 18% で 10.8°/21.6°/32.4°）。
+
+**重要**: 下記 #2 のプレビュー割合を直しても解決しない。むしろ methane に3件、SF6 に8件の判別不能ペアが新たに出る（benzene・allene は解消）。つまり **#1 の根本原因はプレビュー割合ではない**。
+
+**修正案**: 合成クイズが同じ問題を解決した方法（A/B の正式名をステージ見出しに出す）を移り先にも適用する。`_revealed_answers` が返す `symbol`/`notation` を使って「この操作（S₄）でどの原子に移りますか？」と提示するか、回答前に `view.loadSymmetryElements(op)` で軸・面を見せる。プレビューは「向きのヒント」に徹させる。
+
+**必要テスト**: 同一 `source_atom_index` の全問について、プレビュー終点が互いに十分離れていること（または操作名が公開されていること）を検証する回帰テスト。
+
+---
+
+### 2.【中】`mappingPreviewFraction()` が回映・回反を「直線運動」と誤判定
+
+**場所**: `crystal_viewer/web/puzzle.js:790-800`
+
+`kind.startsWith("rotoreflection")` / `"rotoinversion"` を見ているが、**`render_data` の分子側 kind は `improper_4` / `improper_6`**。`rotoreflection`/`rotoinversion` は *パス型*（`animation_path.js:259`）の名前であって operation kind ではない。サーバ側の正しい定義は `game/operation_identify.py:62` の `_CURVED_PREFIXES = ("rotation_", "screw", "improper_", "rotoinversion")`。
+
+**影響**（曲線なのに 18% でなく 10% プレビューになる問題数）: methane 6/24、benzene 12/42、SF6 12/42、XeF4 6/28、allene 6/16、BF3 6/24。`PUZZLE_SPEC.md` の「曲線運動18%、直線運動10%」に反する。
+
+**修正案**: `improper_` を曲線側に追加。理想は `_CURVED_PREFIXES` をサーバから配るか `animation_path` のパス型で判定し、曲線/直線の定義の二重管理を消すこと（判定は一箇所、の方針 §8 に合致）。**単独で当てず #1 と併せて設計判断すること。**
+
+---
+
+### 3.【中】`composition._product_index` の分子側許容誤差が実データ精度より1桁以上厳しい
+
+**場所**: `crystal_viewer/game/composition.py:152-154`（`atol=1e-4`）
+
+PointGroupAnalyzer 由来の行列はそこまで正確でない。water の実測:
+
+```
+A=op0(rotation_2) B=op1(mirror)     -> _product_index=None  最近傍=op3 残差=1.59e-03
+A=op1(mirror)     B=op3(mirror)     -> _product_index=None  最近傍=op0 残差=1.54e-03   ← σ∘σ=C2
+（water の6積すべてが None。残差 1.54〜1.59e-03）
+```
+
+同じモジュール群の `_NO_MOTION_TOL = 1e-2` は「PointGroupAnalyzer is only ~1e-4 exact」とコメントしているが、実測精度は **1.6e-3**。
+
+**現状の影響**: カタログ内では water のみ。他の分子は残差 <1e-15、結晶側（`atol=1e-8` 経路）も全サンプルペアで残差 <5e-16 のため問題なし。water は #5 の別要因でも 0 問なので**今は表面化していない**が、分子を1つ追加した瞬間に静かに出題が消える罠。
+
+**副次的**: 一致判定が「許容内に入った**最初**の操作」であり最近傍ではない。許容を緩めるなら最近傍＋一意性チェックに変えること。全分子で最近傍と次点の差は ≥0.87 なので `atol=1e-2` は2桁の安全余裕がある。
+
+**必要テスト**: water の各積が `_product_index` で解決されること（現状は6積すべて None）。
+
+---
+
+### 4.【中】「分子限定」が docstring だけで、`/api/puzzle/mapping` は結晶にも答えている
+
+**場所**: `crystal_viewer/game/atom_mapping.py:9-10`
+
+docstring の「Crystals are out of scope here … such render_data simply yields no clean questions」は**事実と異なる**:
+
+```
+halite 42問 / nbp 16 / antimony 16 / batio3 12 / ge_hf_o4 12 / manganese_beta 12 / edgarite 6 / bromine 4
+（qusongite・helium・tellurium・cadmoselite は 0）
+```
+
+サーバ実機（Halite を開いた状態）で確認:
+```
+GET  /api/puzzle/mapping        -> {"source_kind":"crystal","questions":[{"id":0,"operation_index":2,...}]}
+POST /api/puzzle/mapping/check  -> {"correct":false,"target_atom_index":6,...}
+```
+
+現在は client の picker（`puzzle.js:235-236`）が分子だけに絞っているので露出しないだけ。結晶では像が周期像になり得るため、UI が少し変わるだけで曖昧な出題になる。
+
+**修正案**: `mapping_questions` の冒頭で `render_data.get("unit_cell") is not None` なら `[]` を返す（「判定はサーバ側で一貫処理」の方針どおり `game/` で担保）。docstring も実態に合わせる。
+
+---
+
+### 5.【低】出題プールが空になる構造がピッカーに残っている（特に H₂O）
+
+- 合成クイズ 0問: **water / carbon_dioxide / hydrogen_chloride / tellurium**
+- 移り先クイズ 0問: hydrogen_chloride
+
+water が 0 になる真因は #3 **と独立にもう1つ**ある: 水の3原子はすべて分子面上にあるため σ(分子面) が `_moves_any_atom` で除外され（basis は `[op0(C2), op1(σ)]` の2個だけ）、唯一の非自明な積 `C2·σv = σv'(分子面)` も同じ理由で除外される。**#3 を直しても water は 0 のまま**（実測確認済み）。
+
+設計上の帰結であり判定バグではないが、教科書の代表例である H₂O に「合成してできる操作がありません」と出るのは誤解を招く。ピッカーから外すか、文言を足すのが妥当。
+
+---
+
+### 6.【低】新エンドポイントの HTTP レベルテストが無い
+
+`/api/puzzle/composition`・`/composition/check`・`/api/puzzle/mapping`・`/mapping/check` は `tests/` に一度も現れない（`game/` の単体テストのみ）。既存の axis_orders / operations も同様なので新規劣化ではないが、**公開レスポンスが正解を漏らさない契約**（`answers`・`product_index`・`target_atom_index` を含まない）はサーバ越しに固定しておく価値がある。
+
+### 7.【低】回答 POST が失敗すると 回答／再生 ボタンが無効のまま残る
+
+`puzzle.js:642-648`（合成）と `puzzle.js:867-873`（移り先）は fetch の前に両ボタンを disable するが `finally` が無い。404/500 時は `showError` が出るだけでボタンは戻らず、そのラウンドは操作不能になる（「別の物質」で復帰可能なのでブロックはしない）。
+
+### 8.【低】「軸方向から見る」が合成・移り先で無反応
+
+`puzzle.js:1082-1086` は `currentQuiz !== "axis"` で早期 return するが、ボタンは常時表示。押しても何も起きない。hidden にするか、移り先では対象操作の軸方向を向かせると #1 の緩和にもなる。
+
+### 9.【低】`orientPlanarMappingStructure` は座標軸に平行な平面しか検出しない
+
+`puzzle.js:753-768` は軸並行スパンで薄い方向を探す。カタログの平面分子（water/benzene/ethene/BF3/XeF4/CO2）はたまたま全部 z=0 平面なので動くが、任意配向では発火しない。SVD の最小特異ベクトルを法線に使うのが素直。
+
+---
+
+### 問題なしと確認した点（再調査不要）
+
+- **結晶の積照合**（1/24ハッシュ → `operations_equivalent` 検証 → `find_matching_operation_index` フォールバック）は妥当。halite/nbp/antimony/batio3/ge_hf_o4/bromine/helium/qusongite/cadmoselite/edgarite/manganese_beta/tellurium のサンプル全ペアで残差 <5e-16、照合漏れ・誤照合ゼロ。
+- `composition_questions` / `mapping_questions` の並び順は決定的（dict は挿入順、`sorted` は全順序）。GET の `id` と `/check` の `id` は一致する。
+- 公開レスポンスは正解（`answers` / `product_index` / `target_atom_index`）を含まない。
+- `formatOperationAnswer` 系は `escapeHtml` 経由で `innerHTML` に入る（注入なし）。
+- `roundGeneration` / `compositionPlaybackGeneration` / `mappingPlaybackGeneration` の世代ガードは、再生・回答・リビール・画面遷移の各経路で整合している。
+- 合成の A→B 再生が毎回 `resetAnimation()` から始まる点は、対称操作の終端が原子集合と一致するため視覚的な飛びを生まない（結晶も `applyBoundaryContext` で折り返される）。
+- `pickMarkers` は `selectionMarkers` と同じ描画規約（`depthTest:true` / `renderOrder` 10→11 / `setAtomPosition` 追従）に揃っており、負キーの固定リングが `atomInstances` と衝突しない設計も正しい。
+- 出題数と group 数（`pickQuestion` の均等抽選が機能する粒度）: benzene 50/7、SF6 56/7、halite 56/7、methane 32/4、XeF4 38/5、antimony 40/5、helium 48/6、ge_hf_o4 8/1。
+
+---
+
+### 推奨する対応順序
+
+1. **#1**（移り先で操作を提示する）— 唯一「正解できない問題が出る」不具合。設計判断を伴う。
+2. **#2**（`improper_` を曲線判定に追加）— 1行だが仕様違反。#1 と併せて当てる。
+3. **#4**（mapping の結晶ガードを `game/` に入れる）＋ **#3**（許容誤差を 1e-2 に緩め、最近傍一致に変更）— どちらも小さく、テスト付きで潰せる。
+4. #5〜#9 は運用・整備。
+
+### 再現手順
+
+```bash
+# 合成の許容誤差（water の6積がすべて None になる）
+.venv/bin/python - <<'PY'
+import json; from pathlib import Path
+from crystal_viewer.game import composition as C
+rd = json.loads(Path("exports/json/water.json").read_text())["render_data"]
+ops = rd["operations"]
+for i, j in [(0,1),(1,0),(0,3),(3,0),(1,3),(3,1)]:
+    print(i, j, C._product_index(ops[i], ops[j], ops, is_crystal=False))
+PY
+
+# 移り先が結晶にも答える
+.venv/bin/python - <<'PY'
+import json; from pathlib import Path
+from crystal_viewer.game import atom_mapping as AM
+for n in ("halite","nbp","antimony","batio3"):
+    rd = json.loads((Path("exports/json")/f"{n}.json").read_text())["render_data"]
+    print(n, len(AM.mapping_questions(rd)))
+PY
+
+# プレビューの判別可能性（サーバを起動し /api/animation_path を evaluatePath で評価）
+.venv/bin/python tools/view_json_server.py exports/json/allene.json --no-browser --port 8791 --web-only &
+```
+
+---
+
+## 合成・移り先クイズ独立レビューへの修正（Codex 2026-08-07）
+
+直前の「Claude レビュー 2026-08-07」を実データとAPIで再現し、実害のある指摘を修正した。
+
+### 修正内容
+
+1. **移り先で操作を問題文として一意に提示**
+   - 公開問題へ、`operation_identify._revealed_answers` と同じ canonical な `operation`（kind/order/symbol/notation）を追加した。秘匿対象の `target_atom_index` は引き続き `/check` まで返さない。
+   - 問題文とステージ見出しに Cn / Sn / σ / i を表示し、回答前から対象操作の軸・面・中心を `/api/symmetry_elements` で描く。短い軌跡だけでは Cn と Sn を区別できなかった問題を解消した。
+   - 「操作要素方向から見る」を移り先で有効化し、無反応だった合成・操作あてではボタンを隠す。
+
+2. **移り先の曲線判定・スコープを修正**
+   - 分子 export の実際の kind である `improper_*` を曲線18%側へ追加した。
+   - `mapping_questions()` 冒頭で `unit_cell != None` を拒否し、「分子限定」をUIだけでなくgame/API層でも強制した（halite等は0問）。
+   - 平面検出をXYZ各軸の幅から、点群の外積で得る任意配向の面法線へ変更。直線分子も安定な垂直方向を選ぶ。
+
+3. **分子積の照合を最近傍＋一意性へ変更**
+   - Cartesian 行列・並進の誤差が最小の群元を選び、誤差 `<=1e-2` かつ次点との差 `>=0.1` を要求する。water の約 `1.6e-3` の数値残差を許容しつつ、列挙順依存の誤一致を防ぐ。
+   - water の6つの非恒等積がすべて群元へ解決する回帰テストを追加した。water の合成出題0問自体は、積となる分子面鏡映が全原子を動かさず出題対象外になる別仕様によるため維持した。
+
+4. **合成候補の取りこぼしを解消**
+   - 積を計算する前の「種類ごと代表4件」制限を撤廃し、視覚的に異なる全operandを列挙した後、積種類ごとの最大8問だけを層化選抜する。
+   - SF6 と halite の鏡映×鏡映で C2・C3・C4 がすべて公開プールに残るテストを追加した。
+
+5. **結晶1/24高速経路を厳格化・再検証**
+   - `_frac_key` は回転部が整数かつ並進が実際に1/24格子上にある場合だけキーを返す。標準設定は分率成分を直接合成し、候補の W/t を modulo lattice で厳密検証して O(1) 返却する。
+   - 非標準原点、キーmiss、衝突、検証不一致は `compose_operation_sequence` + `find_matching_operation_index` へフォールバックする。
+   - spglib の **530 Hall設定・7,388操作・398,298積**を全走査し、キー欠落・重複・積の照合漏れ0件を確認した。Fd-3m の1/8は3/24として含まれる。
+
+6. **リング意味・通信失敗復旧**
+   - 青リングを「選んだ原子に追従」から「クリックした移り先の初期座標に固定」へ変更した。正解時に青と緑が同心でも両方見えるよう半径を変えた。黄は対象原子へ追従、緑は正解位置へ固定のまま。
+   - 合成・移り先の `/check` POST が失敗した場合、同じラウンドなら回答・再生ボタンとready状態を戻す。
+
+7. **HTTP契約テストを追加**
+   - 実際の `make_handler` + localhost HTTP server で composition/mapping の GET と POST を試験する `tests/test_puzzle_server_api.py` を追加。GETで積/targetを秘匿し、`/check`だけが正解を返すことを固定した。
+
+### 検証結果
+
+- `.venv/bin/python -m unittest discover -s tests -q`: **207 tests OK**（内部のNode parity 10件もpass）。
+- `node --check crystal_viewer/web/puzzle.js` / `three_view.js`: OK。
+- `py_compile tools/view_json_server.py` / `git diff --check`: OK。
+- 43 export JSONを全走査し、合成の自明積・未命名積、移り先の着地誤差、結晶mapping露出はいずれも0件。
+- methane のライブAPIで composition GET（積秘匿）→ q0 C3正解、mapping GET（操作C2公開・target秘匿）→ `/check` target=2 を確認した。
+- システムの素の `python3` は numpy/pymatgen が未導入のためテストをimportできない。この作業環境では依存関係を持つ `.venv/bin/python` が正規のテスト実行環境。
+
+### 未変更の設計判断
+
+- water / CO2 等の合成0問、HClの移り先0問は既知の出題条件による。空プール時の案内を維持する。
+- 曲線18%・直線10%は、操作名・対称要素を明示したうえで回転方向だけを補う量として維持する。最終着地点までは見せない。
+- A/B色分け、結晶mapping、らせん・映進を含む積は従来どおり範囲外。
+
+---
+
+## Codex 修正の独立再検証（Claude レビュー 2026-08-07 第2回・コード変更なし）
+
+直前の「合成・移り先クイズ独立レビューへの修正（Codex 2026-08-07）」を、記録を正しいと仮定せずコード・実データ・実機APIから再検証した。**コードは一切変更していない。** `three_view.js` の `setViewport`/`setScissorTest` 削除と `tests/test_view_json_server.py:147-152` は今回のパズル変更と無関係な既存 Codex 変更として対象外にした。
+
+### 実行したコマンドと結果
+
+| コマンド | 結果 |
+|---|---|
+| `.venv/bin/python -m unittest discover -s tests -q` | **207 tests OK**（前回 200 → `tests/test_puzzle_server_api.py` の +7） |
+| `node --check crystal_viewer/web/puzzle.js` / `three_view.js` | OK |
+| `py_compile tools/view_json_server.py` | OK |
+| `git diff --check` | OK |
+
+**ブラウザでの目視プレイは実施できていない。** この環境には Chromium も Playwright/Puppeteer も無く、導入は新規依存の追加になるため見送った。代わりに (1) 実サーバへの HTTP 実測、(2) `animation_path.js` の実 `evaluatePath` によるプレビュー幾何の再現、(3) `puzzle.js` の import 指定子1行だけを差し替えた**ロジック無改変の複製**を Node 上で動かす状態機械テスト、で代替した。実ブラウザでの最終確認は残課題。
+
+---
+
+## 検出した問題（重要度順）
+
+### 1.【中】`order` と `notation` が食い違う操作があり、移り先の問題文と結果表示が誤る
+
+**再現条件**: benzene または boron_trifluoride で移り先クイズ／合成クイズ。
+
+`_operation_answer` は回転角から S3（120°の回映）を正しく導くが、`_with_operation_label` が付ける `symbol`/`notation` は**軸のラベル**（S6軸）を返すため、両者が食い違う。
+
+```
+benzene  op11 / op22 : kind=improper_6  answer=rotoreflection order=3  notation='S6'  ← 'S3' であるべき
+BF3      op5  / op9  : 同上
+```
+
+player-visible な影響:
+
+- **移り先の問題文が誤る**。benzene の原子0を起点とする問題は4問あり、すべて「操作 **S6** でどの原子に移りますか？」と表示されるが、実体は S6 が2問（正解 原子1／原子5）、**S3 が2問（正解 原子2／原子4）**。`shortOperationLabel` は `notation` を優先するため order は画面に出ない。
+- **合成の結果表示が自己矛盾する**。benzene で積が S3 の問題に正解すると `formatOperationAnswer` の冗長判定（`notation === "S"+order` 前提）が外れ、**「正解（回映（S3）（S6））」** と表示される。
+- 操作あてクイズのリビール表示にも同じ矛盾が出る（Codex 修正以前からの既存不具合。ただし移り先が notation を**問題文**へ昇格させたことで実害が増した）。
+
+**「答えられない問題」には至っていない**: S6 と S3 のプレビュー弧長が 0.263 Å と 0.524 Å で十分離れるため、実測した判別不能ペアは 0（後述）。教材としての誤表示が問題。
+
+**修正案**: `_with_operation_label` で rotoreflection / rotoinversion は `symbol` が `S{order}` / `-{order}` と食い違う場合に order 由来の表記を優先する（軸ラベルを操作表記に流用しない）。併せて `formatOperationAnswer` の冗長判定を表記ゆれに耐えるようにする。
+
+**必要テスト**: 公開される全 `operation` / `answers` について `kind` が rotoreflection/rotoinversion なら `notation == f"S{order}" / f"-{order}"` を要求する回帰テスト（benzene・BF3 が対象）。
+
+---
+
+### 2.【中】合成クイズのサーバ応答が halite で 1.5〜1.6 秒かかる
+
+**再現条件**: 結晶＝Halite で合成クイズ。構造選択直後に約1.6秒、回答するたびに約1.5秒の停止。
+
+実測（localhost、`curl -w %{time_total}`）:
+
+```
+GET  /api/puzzle/composition        1.623 s   (halite)
+POST /api/puzzle/composition/check  1.493 s   (halite)
+GET  /api/puzzle/composition        0.579 s   (SF6)
+```
+
+原因は**修正4（積前の代表打ち切り撤廃）の正しい副作用**。basis が 137 操作へ増え、18,632 の順序対を評価する。cProfile では `_frac_key` が 18,824 回で 1.01 s を占め、その大半が小さな配列に対する `np.allclose` ×2。加えて GET と `/check` で `composition_questions` を毎回まるごと再計算している。
+
+**修正案**: (a) `_frac_key` の `np.allclose` を素のスカラー比較へ置換、(b) operand 側のキーを事前計算して再利用、(c) `render_data` 単位で `composition_questions` をメモ化して GET と `/check` の二重計算をなくす。打ち切りを戻す必要はない（正解率の問題が再発する）。
+
+---
+
+### 3.【低】0問の構造では「操作要素方向から見る」ボタンが残り、押しても無反応
+
+`puzzle.js:425-427` はボタンの表示可否を `beginRound()` で決めるが、`startStructure` の0問経路（`puzzle.js:363-382`）は `beginRound()` に到達せず return する。移り先で benzene を遊んだ後に HCl（0問）を選ぶとボタンが残り、`currentQuestion` が null のため何も起きない。0問経路でも `hidden = true` にすれば済む。
+
+### 4.【低】青リングと黄リングの帯が接しており、正解時に区別しづらい
+
+実測した外径/内径（原子半径 0.35 の場合）:
+
+```
+黄(source, 追従)  内 0.472 / 外 0.525
+青(guess, 固定)   内 0.425 / 外 0.473
+緑(target, 固定)  内 0.558 / 0.619
+```
+
+青の外径 0.473 と黄の内径 0.472 がほぼ一致し、正解時（黄が着地して3本が同心になる）に青と黄が1本の太い帯に見える。緑とは 0.033 の隙間があり分離している。青の半径係数（`0.90`）をもう少し小さくすれば解消する。
+
+### 5.【低】`atom_mapping.public_questions` の None ガードが不整合
+
+`atom_mapping.py:132` は `answer` が falsy な場合に備えて `signature` をフォールバックさせるが、直後の `atom_mapping.py:142-145` は `{**answer}` を無防備に展開する。`mapping_questions` が返す operation_index は必ず存在するので**現状は到達しない**が、ガードの意図が半分しか実装されていない。
+
+### 6.【低】HTTP契約テストが methane だけを対象にしている
+
+`tests/test_puzzle_server_api.py` は良い追加だが、methane には S3 も回反も無いため #1 を検出できない。benzene（S3・S6 の両方を持つ）と結晶1件（mapping が 0 問になること・`/check` が 404 になること）を追加すると、今回の再検証で確認した契約がそのまま固定できる。
+
+---
+
+## 問題なしと確認した項目（Codex 修正はいずれも妥当）
+
+### 結晶合成（修正5）— 記録どおり、再現できた
+
+- `_frac_key` は回転部が整数（atol 1e-6）**かつ**並進が実際に 1/24 格子上にある（snap 誤差 atol 1e-6）ときだけキーを返す。off-grid は `None`。
+- 高速経路は候補の `W`/`t` を modulo lattice で 1e-8 検証してから返すので、**偽陽性は構造的に起こり得ない**。
+- **530 Hall設定を全走査**（`spglib.get_symmetry_from_database`）: 操作 **7,388**、順序対 **398,298**。結果は
+  - キーが取れない操作 **0**、キー衝突 **0**、群外に落ちる積 **0**
+  - **高速経路の結果が `compose_operation_sequence` + `find_matching_operation_index` と 398,298 件すべて一致（不一致 0）**
+  - Fd-3m の 1/8 は 3/24 として正しく格子に乗る
+- フォールバックの実証: Fd-3m に原点シフト s=(0.01,0.02,0.03) を掛けると 192 操作中 188 でキーが `None` になり、それでもサンプル576対すべてが汎用照合で正しく解決した。意図的な衝突ケース（1/24格子外の並進）も高速経路が拒否して index 1 を返す。
+- **順序**: `direct_w = W_B @ W_A`, `direct_t = W_B @ t_A + t_B` は `compose_affine_operations` の定義と完全一致。数値でも「x に A → B」と積操作の像が一致することを確認（B∘A ＝ 仕様どおり）。
+- `product ∉ {A, B}`・群の元であること・積が原子を動かすことの3条件は `composition.py:258-265` で維持されている。
+
+### 分子合成（修正3）
+
+- **water の6積がすべて群元へ解決**（C2·σ=σ'、σ·σ'=C2 が正しく出る）。
+- 全キュレーション分子で、命名可能な順序対は**すべて解決**（未解決 0）。最良一致の残差は water で 2.25e-3、それ以外は <1.5e-15。
+- 最近傍と次点の差は最小でも **1.414**（許容 1e-2、分離要求 0.1）。**分離要求で取りこぼした対は 0**。誤一致の余地は2桁以上ない。
+- 公開された全問題について `|W_B W_A − W_product|` の最大は **8.32e-16**。
+- `_operation_answer` の回映・回反次数は行列の周期と整合（methane improper_4→S4/周期4、benzene improper_6→S6 と S3/周期6、halite …_4→-4、…_6→-3）。**次数そのものは正しい。誤っているのは #1 の表記だけ。**
+
+### 出題品質（修正4）
+
+- 積計算前の打ち切りは撤廃済み（`_basis_operations` に cap なし）。basis は halite 137 / SF6 47 / benzene 18。
+- **鏡映×鏡映から C2・C3・C4 がすべて残る**: SF6 `{C2:1, C3:1, C4:1}`、halite `{C4:1, C2:1, C3:1}`、benzene `{C2:1, C3:2, C6:2}`、XeF4 `{C2:2, C4:2}`、methane `{C3:2, C2:2}`。
+- 積種類ごとの分布は上限8で**完全に均等**（例: benzene 56問=7種×8、halite 56問=7種×8、SF6 56問=7種×8）。
+- operand の偏りは解消済み（benzene は A/B とも rotation 33・mirror 17・inversion 6 で対称。halite は A=rotation 27/mirror 21/inversion 6/rotoinversion 2）。
+- 移り先の元素分布: benzene C21/H21、allene H11/C5、ethene H12/C6 と両元素をカバー。操作種ごとも各6問で均等。
+
+### 移り先（修正1・2）
+
+- 公開問題は `operation`（kind/order/symbol/notation）を含み、`target_atom_index` は**含まない**（実機 API で確認）。`/check` だけが正解を返す。
+- **結晶は game 層で強制的に 0 問**。実機で Halite / Ge Hf O4 / NbP / Antimony / BaTiO3 すべて 0 問、`/api/puzzle/mapping/check` は **404**。
+- `improper_*` が曲線18%側に入った（`puzzle.js:862-866`）。
+- 着地精度: 全分子214問で `|M·source + t − target_start|` の最大 **1.97e-3 Å**（許容 1e-2）。
+- 回答前に `loadSymmetryElements` が走り、軸・面・中心が描かれる（Node 状態機械テストで `elements:<op>` の発行を確認）。`viewAlongCurrentOperation()` はそこで設定される `operationViewDirection` を使うので移り先で機能する。
+- **前回レビュー #1（プレビューだけでは操作が一意に決まらない）は解消した**。実 API の対称要素＋実 `evaluatePath` のプレビュー終点で、「同じ起点原子・同じ表示ラベル・同じ描画要素・プレビュー終点が動き幅の25%未満」を満たす問題対を全数探索した結果、**9分子すべてで 0 件**（旧: benzene 6・SF6 7・allene 1）。以前に問題だった allene op0(C2) と op7(S4) はラベルだけで分離できる。
+- `orientPlanarMappingStructure` は**任意配向で正しく働く**。実ソースを抽出して Node で検証: benzene / water / CO2(直線) を4通りにランダム回転しても常に厚み/広がり = 0.0000 の法線を返し、methane / 3D分子では正しく発火しない。
+
+### クライアント（修正6）
+
+`puzzle.js` の import 指定子1行だけを差し替えた複製を Node で実行して確認:
+
+- **高速連打**: `beginRound()` を 12ms 間隔で8回 → `roundGeneration` は厳密に単調増加、再生完了後に生き残るラウンドはちょうど1つ、`compositionQuestionReady=true`・回答/再生とも有効に収束。
+- **`/check` が 500 を返したとき**: 合成・移り先とも例外は上位へ伝播しつつ、回答ボタン・再生ボタン・ready 状態が復旧し、**再試行が成功する**。
+- **画面遷移が飛び込んだとき**: `currentQuestion` が null 化、`onAtomPick` が null へ戻り、`clearPickMarkers` が走り、`disableAtomSelection` は true のまま（解析側 `/api/state` へは漏れない）。
+- **リングの意味**: 黄は source 原子を**追従**、青はクリックした原子の**初期座標に固定**、緑は正解原子の**初期座標に固定**。正解時は青と緑が同心で、半径が異なるため両方見える（#4 の但し書きあり）。
+- `setPickMarkers` は atom エントリを instanceId（正）、position エントリを負キーで保持するので `setAtomPosition` が固定リングを動かすことはない。
+- dispose: `clearPickMarkers` は geometry/material を明示的に破棄。`clearContent` は `pickMarkers.clear()` の後に `content.children` を traverse して全 geometry/material を破棄するので、**リークはない**（前回の懸念は誤り）。
+- 「操作要素方向から見る」は移り先で `viewAlongCurrentOperation()` を呼び、それ以外のクイズではボタンごと隠れる（0問経路を除く＝#3）。
+
+### 仕様との意味的な一致
+
+- 合成の問い「A→B」＝ B∘A は実装と一致。積は点操作限定、らせん・映進は範囲外（仕様どおり）。
+- water / CO2 / tellurium の合成 0 問、HCl の移り先 0 問は仕様の出題条件どおり。water は分子面鏡映が全原子を固定するため唯一の非自明な積が出題対象外になるという別要因で、許容誤差修正後も 0 のまま（意図どおり）。
+- `PUZZLE_SPEC.md` §2・§6・§10 の記述（打ち切り撤廃、移り先の操作名・対称要素明示、任意配向の自動整列、分子限定のサーバ強制）は実装と一致している。
+
+---
+
+## 残るブラウザ上の見やすさ・教育上の懸念
+
+1. **#1 の表記ゆれが最大の教育的リスク**。「操作 S6」と書かれた問題の正解が S3 の像だと、プレイヤーは正しく推論しても外す。表記を直すまで benzene / BF3 の移り先は誤学習を招く。
+2. 合成の結果表示「回映（S3）（S6）」は、対称操作を学ぶ画面としてそのまま出してはいけない文字列。
+3. 移り先のプレビューは「向きのヒント」であって着地量は示さない。同一軸・同一ラベルの Cn と Sn（benzene の S6 と S3 など）は**弧長を目測**して区別する必要があり、判別可能ではあるが要求精度は高い。ラベルが正しくなれば解消する。
+4. halite の合成は回答のたびに 1.5 秒止まる（#2）。テンポの面で他クイズと体感が揃っていない。
+5. 実ブラウザでの目視（A→B見出し、積リビール、リング着地、別物質・もう一度の高速切替）は未実施。Node 上の状態機械テストと HTTP 実測では再現しなかったが、描画順・カメラ・リングの視認性は実機確認が望ましい。
+
+---
+
+## Claude レビュー第2回の指摘への修正（Claude 2026-08-07）
+
+直前の「Codex 修正の独立再検証（Claude レビュー 2026-08-07 第2回）」で検出した6件をすべて修正した。
+
+### 1.【中】`order` と `notation` の食い違いを解消
+
+`_with_operation_label` に `_improper_notation` を追加し、回映・回反の `symbol`/`notation` を**操作自身の次数**（回転角から求めた `order`）由来の `S{n}` / `-{n}` に揃えた。表示記号は対称**要素**（軸）の名前であり、ベンゼン・BF3 の主軸は S6 と S3（= σh·C3）の両方を担うため、軸ラベルを操作表記に流用すると「操作 S6」の問題の正解が S3 の像になっていた。
+
+- 影響のあった操作は benzene op11/op22、BF3 op5/op9 の4件のみ（43 export 全走査で確認）。halite などの結晶の回反は元から一致していた。
+- 併せて `formatOperationAnswer` の冗長判定を、Unicode マイナス（−）や余分な空白があっても同一表記と見なすよう正規化した。これで「回映（S3）（S6）」の自己矛盾表示は出ない。
+- ベンゼンの移り先は S3 と S6 が別ラベルの別問題として出るようになった（各6問）。
+- `PUZZLE_SPEC.md` §10 に「回映・回反の表記は操作自身の次数に従う」を明記した。
+
+### 2.【中】合成クイズの応答時間を短縮（halite 1.6s → 0.06s）
+
+3点を修正した。**打ち切りは戻していない**（出題品質の後退を避けるため）。
+
+- `_frac_key` の `np.allclose` を `np.max(np.abs(...))` のスカラー比較に置換。キーの要素も numpy スカラーではなく素の int にした。
+- 高速経路を**整数演算**に変更。`_crystal_keys` が構造ごとに1回だけ各操作のキー（整数回転＋24分の1単位の並進）を作り、`_compose_frac_keys` が `W_B·W_A` と `W_B·t_A + t_B` を整数のまま合成する。丸めが1回も入らないので、浮動小数で合成してから格子へスナップする以前の経路と違い、近傍の別の群元へ吸着する余地が構造的に無い（辞書ヒット＝格子を法とした厳密一致）。
+- 分子側の群走査も numpy でベクトル化し、`composition_questions` を `render_data` の同一性で1件メモ化した（GET と `/check` の二重計算をなくす）。
+
+実測（localhost の実サーバ、GET と POST /check）:
+
+| 構造 | GET 前 | GET 後 | POST 前 | POST 後 |
+|---|---|---|---|---|
+| halite | 1.623 s | **0.062 s** | 1.493 s | **0.001 s** |
+| SF6 | 0.579 s | **0.050 s** | — | **0.001 s** |
+| benzene | — | 0.010 s | — | 0.001 s |
+
+### 3.【低】0問の構造で「操作要素方向から見る」ボタンが残る問題を解消
+
+`startStructure` の0問経路でも `puzzle-view-along` を明示的に隠すようにした（この経路は `beginRound()` に到達しないため、前の構造のボタンが残って無反応になっていた）。
+
+### 4.【低】青リングと黄リングの帯が接する問題を解消
+
+青（guess）の半径係数を `0.90` → `0.84` にした。原子半径 0.35 での外径/内径:
+
+```
+        修正前                修正後
+青  内 0.425 / 外 0.473   内 0.397 / 外 0.441
+黄  内 0.472 / 外 0.525   内 0.472 / 外 0.525   （変更なし）
+緑  内 0.558 / 外 0.619   内 0.558 / 外 0.619   （変更なし）
+```
+
+青→黄の隙間が 0.000 → 0.032 になり、黄→緑の 0.033 とほぼ同じになった。正解時に3本が同心になっても1本の太い帯には見えない。
+
+### 5.【低】`atom_mapping.public_questions` の None ガードを整理
+
+`mapping_questions` が名前の付く操作だけを残す以上 `answer` は None になり得ないので、中途半端なフォールバック（`signature` だけ守って `{**answer}` は無防備）を削除し、不変条件をコメントで明示した。操作名が付かない問題を公開するくらいなら早く落ちる方がよい（問題文が操作名を含むため、名前の無い問題は答えられない）。なお、公開 `id` は `mapping_questions` の位置と一致していなければならないため、スキップという選択肢は取れない。
+
+### 6.【低】HTTP契約テストを benzene と結晶へ拡張
+
+`tests/test_puzzle_server_api.py` を構造ごとにサーバを立てる形に整理し、methane に加えて benzene（S6/S3 を持つ）と halite（結晶）を対象にした。
+
+追加したテスト:
+
+- 公開される全ラベル（移り先の `operation`、合成の `operation_a`/`operation_b`、操作あての `/check` 応答）で、回映・回反なら `notation == symbol == S{order}` / `-{order}` を要求する（#1 を無効化すると benzene で8件失敗することを確認済み）。
+- 結晶の移り先は0問、`/api/puzzle/mapping/check` は404。
+- 結晶の合成も GET で積を秘匿し `/check` だけが返す。
+- `_compose_frac_keys` が `W_B·W_A`・`W_B·t_A + t_B`（格子を跨ぐ並進を含む）と厳密一致すること。
+- 格子外の並進（0.01）はキーを持たず、スナップせずに汎用照合へフォールバックすること。
+- 同一 `render_data` の再取得がメモ化を使い、別構造には使わないこと。
+- リング3本のどの隣接ペアも原子半径比 0.02 以上離れていること（半径係数を JS から読んで計算するので、係数を戻すと失敗する）。
+- 0問経路のブロック内に `puzzle-view-along` の非表示があること。
+
+### 検証結果
+
+- `.venv/bin/python -m unittest discover -s tests -q`: **216 tests OK**（207 → +9）。
+- `node --check crystal_viewer/web/puzzle.js` / `three_view.js`、`py_compile`、`git diff --check`: OK。
+- **合成の結果不変性**: 43 export 全構造の basis 順序対 **24,530 件**について、修正前の `_product_index`（逐語的な参照実装）と修正後で**結果が完全一致（差分0）**。
+- **530 Hall設定の再走査**: 操作 **7,388**、順序対 **398,298**。キー欠落0・衝突0・汎用照合との不一致0。今回は **398,298 件すべてが整数高速経路で解決**した。
+- **フォールバックの実証**: Fd-3m に原点シフト s=(0.01,0.02,0.03) を掛けると 192 操作中 188 でキーが消え、サンプル600対すべてが汎用照合で正しく解決した。格子外の並進 0.01 はキーが `None` になる（スナップしない）。
+- **43 export 全走査**: 合成 726 問・移り先 214 問について、表記の食い違い0、答えの露出0、積が群外/自明0、着地誤差1e-2超0、結晶の移り先公開0。
+- `formatOperationAnswer` を Node で直接実行し、`S3`・`S6`・` S3 `・`-3`・`−3` の各表記で期待どおりの表示になることを確認した。
+
+### 残課題
+
+- **実ブラウザでの目視は今回も未実施**（環境に Chromium も Playwright も無い）。リングの見え方（#4）とボタンの消失（#3）は幾何値とソース構造で検証したが、描画順・カメラ・視認性の最終確認は実機が望ましい。
+- 移り先プレビューの弧長で Cn と Sn を見分ける要求精度の話（前回の懸念3）は、S3/S6 のラベルが分離したことで解消した。

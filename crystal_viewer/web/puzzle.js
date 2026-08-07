@@ -9,7 +9,7 @@ import { StaticStructureView } from "/static/three_view.js";
 let view = null;
 let started = false;
 let catalog = null;
-let currentQuiz = "axis"; // "axis" | "operation"
+let currentQuiz = "axis"; // "axis" | "operation" | "composition" | "mapping"
 let currentOperationDifficulty = "normal"; // "normal" | "hard"
 let currentKind = "molecule"; // structure picker toggle
 let currentSourceKind = "molecule"; // kind of the loaded structure (for answer options)
@@ -19,10 +19,24 @@ let revealOperation = null; // operation index to animate for the reveal
 let revealAnim = null; // active reveal animation token
 let roundGeneration = 0; // invalidates async work from prior rounds/screens
 let operationAnswered = false;
+let mappingGuess = null; // mapping quiz: the atom the player clicked
+let mappingRevealTarget = null; // mapping quiz: the correct target atom (after answering)
+let compositionPlaybackGeneration = 0;
+let compositionQuestionReady = false;
+let mappingPlaybackGeneration = 0;
+let mappingQuestionReady = false;
 
 const REVEAL_DURATION_MS = 1600;
 const INFINITE = "inf";
 const SHIFT_OPTIONS = ["1/6", "1/4", "1/3", "1/2", "2/3", "3/4", "5/6"];
+// Mapping quiz: ring colours (source / player's guess / correct target) and how
+// far to preview the motion so the direction of a rotation is unambiguous while
+// the final landing still has to be predicted.
+const PICK_SOURCE_COLOR = 0xffd23f;
+const PICK_GUESS_COLOR = 0x3d9be9;
+const PICK_TARGET_COLOR = 0x35c46a;
+const MAPPING_CURVED_PREVIEW = 0.18;
+const MAPPING_STRAIGHT_PREVIEW = 0.10;
 const PUZZLE_CRYSTAL_EXAMPLES = new Set([
   "Antimony",
   "BaTiO3",
@@ -100,7 +114,16 @@ function formatOperationAnswer(kind, order, shift = null, notation = null) {
   if (kind === "glide") text = "映進";
   if (shift) text += `、並進成分 ${shift}`;
   const escaped = escapeHtml(text);
-  return notation ? `${escaped}（${formatOperationNotation(notation)}）` : escaped;
+  // The kind label already spells out Sn / -n, so repeating the notation would
+  // read "回映（S3）（S3）". Compare loosely so a unicode minus or stray spacing
+  // in the notation still counts as the same text.
+  const canonical =
+    kind === "rotoreflection" ? `S${order}` : kind === "rotoinversion" ? `-${order}` : null;
+  const normalize = (value) => String(value).replace(/\s+/g, "").replace(/[−–—]/g, "-");
+  const redundantNotation = canonical !== null && normalize(notation) === normalize(canonical);
+  return notation && !redundantNotation
+    ? `${escaped}（${formatOperationNotation(notation)}）`
+    : escaped;
 }
 
 function formatOperationAnswers(answers) {
@@ -134,7 +157,30 @@ function displayLabel(example) {
 
 // --- Screens: quiz select -> structure picker -> play ---
 
+function invalidatePuzzleWork() {
+  roundGeneration += 1;
+  compositionPlaybackGeneration += 1;
+  mappingPlaybackGeneration += 1;
+  compositionQuestionReady = false;
+  mappingQuestionReady = false;
+  cancelReveal();
+  operationAnswered = false;
+  currentQuestion = null;
+  if (view) {
+    view.pathGeneration += 1;
+    view.animationPaths.clear();
+    view.setAnimationSourceAtoms(null);
+    view.onAtomPick = null;
+    view.clearPickMarkers();
+    view.clearTargetMarkers();
+    view.clearSymmetryElements();
+    view.resetAnimation();
+  }
+  return roundGeneration;
+}
+
 function showQuizSelect() {
+  invalidatePuzzleWork();
   el("puzzle-quiz-select").hidden = false;
   el("puzzle-operation-difficulty").hidden = true;
   el("puzzle-picker-back").hidden = true;
@@ -144,9 +190,7 @@ function showQuizSelect() {
 }
 
 function showOperationDifficulty() {
-  roundGeneration += 1;
-  cancelReveal();
-  operationAnswered = false;
+  invalidatePuzzleWork();
   el("puzzle-quiz-select").hidden = true;
   el("puzzle-operation-difficulty").hidden = false;
   el("puzzle-picker-back").hidden = false;
@@ -156,9 +200,7 @@ function showOperationDifficulty() {
 }
 
 function showPicker() {
-  roundGeneration += 1;
-  cancelReveal();
-  operationAnswered = false;
+  invalidatePuzzleWork();
   el("puzzle-quiz-select").hidden = true;
   el("puzzle-operation-difficulty").hidden = true;
   el("puzzle-picker-back").hidden = false;
@@ -194,7 +236,9 @@ async function buildPicker() {
   const structureKinds =
     currentQuiz === "operation" && currentOperationDifficulty === "hard"
       ? STRUCTURE_KINDS.filter((item) => item.kind === "crystal")
-      : STRUCTURE_KINDS;
+      : currentQuiz === "mapping"
+        ? STRUCTURE_KINDS.filter((item) => item.kind === "molecule")
+        : STRUCTURE_KINDS;
   if (!structureKinds.some((item) => item.kind === currentKind)) {
     currentKind = structureKinds[0]?.kind || "molecule";
   }
@@ -272,13 +316,19 @@ function showPrompt(message) {
 }
 
 async function startStructure(example) {
-  const generation = ++roundGeneration;
-  cancelReveal();
-  operationAnswered = false;
+  const generation = invalidatePuzzleWork();
   showPlay();
   // Name/formula only; the point/space group would reveal the answer.
   el("puzzle-structure-title").innerHTML = displayLabel(example);
   el("puzzle-question").textContent = "読み込み中…";
+  el("puzzle-options").innerHTML = "";
+  el("puzzle-result").hidden = true;
+  el("puzzle-check").hidden = false;
+  el("puzzle-check").disabled = true;
+  el("puzzle-again").hidden = true;
+  el("puzzle-playback").hidden = true;
+  el("puzzle-view-along").hidden = true;
+  setStageCaption("");
   await getJson("/api/open_example", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -305,7 +355,11 @@ async function startStructure(example) {
   const endpoint =
     currentQuiz === "axis"
       ? `/api/puzzle/axis_orders${example.kind === "crystal" ? "?display_mode=source" : ""}`
-      : `/api/puzzle/operations?difficulty=${currentOperationDifficulty}`;
+      : currentQuiz === "composition"
+        ? "/api/puzzle/composition"
+        : currentQuiz === "mapping"
+          ? "/api/puzzle/mapping"
+          : `/api/puzzle/operations?difficulty=${currentOperationDifficulty}`;
   const payload = await getJson(endpoint);
   if (generation !== roundGeneration) return;
   currentSourceKind = payload.source_kind || example.kind;
@@ -316,25 +370,33 @@ async function startStructure(example) {
     const what =
       currentQuiz === "axis"
         ? "回転軸"
-        : currentOperationDifficulty === "hard"
-          ? "並進を含む操作（らせん・映進）"
-          : "基本操作";
+        : currentQuiz === "composition"
+          ? "2つの操作を合成してできる操作"
+          : currentQuiz === "mapping"
+            ? "移り先を答えられる原子"
+            : currentOperationDifficulty === "hard"
+              ? "並進を含む操作（らせん・映進）"
+              : "基本操作";
     el("puzzle-question").textContent = `この${noun}には出題できる${what}がありません。別の${noun}を選んでください。`;
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
     el("puzzle-again").hidden = true;
     el("puzzle-playback").hidden = true;
+    // beginRound() is what normally decides this button's visibility, and this
+    // path returns before it: leave no dead button from the previous structure.
+    el("puzzle-view-along").hidden = true;
     return;
   }
   beginRound();
 }
 
 function pickQuestion() {
-  // The operation quiz balances by answer type: a highly symmetric crystal has
-  // many equivalent operations of the common kinds, so pick a random group
-  // (opaque answer-type bucket) first, then a random question within it. The axis
-  // quiz is already one-per-inequivalent-axis, so a plain random pick is fine.
-  if (currentQuiz === "operation") {
+  // The operation and composition quizzes balance by answer type: a highly
+  // symmetric structure has many equivalent operations (or products) of the
+  // common kinds, so pick a random group (opaque answer-type bucket) first, then
+  // a random question within it. The axis quiz is already one-per-inequivalent
+  // axis, so a plain random pick is fine.
+  if (currentQuiz === "operation" || currentQuiz === "composition" || currentQuiz === "mapping") {
     const groups = new Map();
     for (const question of questions) {
       const key = question.group ?? question.id;
@@ -349,19 +411,14 @@ function pickQuestion() {
 }
 
 function beginRound() {
-  roundGeneration += 1;
-  cancelReveal();
+  invalidatePuzzleWork();
   currentQuestion = pickQuestion();
   revealOperation = null;
-  operationAnswered = false;
-  view.pathGeneration += 1;
-  view.animationPaths.clear();
   view.showTrajectories = false;
-  view.clearTargetMarkers();
   view.updateTrajectoryLines();
-  view.clearSymmetryElements();
-  view.resetAnimation();
   view.updateAnimationTargetMarkers();
+  mappingGuess = null;
+  mappingRevealTarget = null;
   const result = el("puzzle-result");
   result.hidden = true;
   el("puzzle-options").innerHTML = "";
@@ -369,11 +426,18 @@ function beginRound() {
   el("puzzle-check").disabled = false;
   el("puzzle-again").hidden = true;
   el("puzzle-slider").value = "0";
+  el("puzzle-slider").hidden = false;
   el("puzzle-replay").disabled = false;
   el("puzzle-trajectories").hidden = true;
+  const viewAlong = el("puzzle-view-along");
+  viewAlong.hidden = !(currentQuiz === "axis" || currentQuiz === "mapping");
+  viewAlong.textContent = currentQuiz === "mapping" ? "操作要素方向から見る" : "軸方向から見る";
+  setStageCaption("");
   hidePuzzleGifButton();
   syncTrajectoriesButton();
   if (currentQuiz === "axis") beginAxisRound();
+  else if (currentQuiz === "composition") beginCompositionRound();
+  else if (currentQuiz === "mapping") beginMappingRound().catch(showError);
   else beginOperationRound();
 }
 
@@ -458,23 +522,184 @@ function renderOperationOptions() {
   });
 }
 
+// --- Composition quiz ("A then B" -> which single operation?) ---
+
+function setStageCaption(text) {
+  const caption = el("puzzle-stage-caption");
+  if (caption) caption.textContent = text || "";
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shortOperationLabel(answer) {
+  const notation = answer?.notation || answer?.symbol;
+  if (notation) return String(notation).replace(/sigma/gi, "σ").replace(/_/g, "");
+  if (answer?.kind === "rotation") return `C${answer.order}`;
+  if (answer?.kind === "mirror") return "σ";
+  if (answer?.kind === "inversion") return "i";
+  if (answer?.kind === "rotoreflection") return `S${answer.order}`;
+  if (answer?.kind === "rotoinversion") return `-${answer.order}`;
+  return "?";
+}
+
+function compositionStageLabel(stage, answer) {
+  return `${stage}（${shortOperationLabel(answer)}）`;
+}
+
+function beginCompositionRound() {
+  // The product is always a point operation, so answer with the normal vocabulary.
+  currentOperationDifficulty = "normal";
+  el("puzzle-question").textContent =
+    "操作A を行い、続けて操作B を行うと、全体としてどの1つの操作と同じになりますか？";
+  renderOperationOptions();
+  // The two animations ARE the question. A single scrub slider is confusing across
+  // the two phases, so hide it; the 再生 button replays A then B.
+  el("puzzle-slider").hidden = true;
+  el("puzzle-playback").hidden = false;
+  el("puzzle-check").disabled = true;
+  hidePuzzleGifButton();
+  playCompositionQuestion().catch(showError);
+}
+
+async function playSingleOperation(operationIndex, generation, caption, isCurrent = null) {
+  const stillCurrent = isCurrent || (() => generation === roundGeneration);
+  if (!stillCurrent()) return false;
+  view.setAnimationSourceAtoms(null);
+  setStageCaption(caption);
+  await view.loadAnimationPaths(
+    Number(operationIndex),
+    ++view.pathGeneration,
+    view.showAnimationTargets ? "unit_cell" : "displayed",
+  );
+  if (!stillCurrent()) return false;
+  view.resetAnimation();
+  await animateReveal();
+  return stillCurrent();
+}
+
+async function playCompositionQuestion() {
+  const generation = roundGeneration;
+  const question = currentQuestion;
+  const playback = ++compositionPlaybackGeneration;
+  const isCurrent = () =>
+    generation === roundGeneration
+    && playback === compositionPlaybackGeneration
+    && question === currentQuestion
+    && !operationAnswered;
+  compositionQuestionReady = false;
+  el("puzzle-check").disabled = true;
+  el("puzzle-replay").disabled = true;
+  let completed = false;
+  try {
+    const labelA = compositionStageLabel("操作A", question.operation_a);
+    const labelB = compositionStageLabel("操作B", question.operation_b);
+    if (!await playSingleOperation(question.operation_index_a, generation, labelA, isCurrent)) return;
+    await sleep(450);
+    if (!isCurrent()) return;
+    if (!await playSingleOperation(question.operation_index_b, generation, labelB, isCurrent)) return;
+    if (!isCurrent()) return;
+    setStageCaption(`${labelA} → ${labelB}`);
+    completed = true;
+  } finally {
+    if (isCurrent()) {
+      compositionQuestionReady = completed;
+      el("puzzle-check").disabled = !completed;
+      el("puzzle-replay").disabled = false;
+    }
+  }
+}
+
+async function playCompositionProduct(generation = roundGeneration) {
+  const playback = ++compositionPlaybackGeneration;
+  const isCurrent = () =>
+    generation === roundGeneration
+    && playback === compositionPlaybackGeneration
+    && operationAnswered
+    && revealOperation != null;
+  cancelReveal();
+  el("puzzle-replay").disabled = true;
+  try {
+    if (!await playSingleOperation(revealOperation, generation, "合成の結果", isCurrent)) return;
+    if (!isCurrent()) return;
+    setStageCaption("合成の結果");
+    revealOperationElements(generation);
+  } finally {
+    if (isCurrent()) el("puzzle-replay").disabled = false;
+  }
+}
+
+async function onCheckComposition() {
+  const generation = roundGeneration;
+  if (!compositionQuestionReady) {
+    showPrompt("操作A・Bの再生が終わってから回答してください。");
+    return;
+  }
+  const { kind, order } = selectedOperationAnswer();
+  if (!kind) {
+    showPrompt("操作の種類を選んでください。");
+    return;
+  }
+  const config = operationKinds().find((k) => k.kind === kind);
+  if (config?.orders && order == null) {
+    showPrompt("回数も選んでください。");
+    return;
+  }
+  compositionQuestionReady = false;
+  compositionPlaybackGeneration += 1;
+  cancelReveal();
+  view.pathGeneration += 1;
+  el("puzzle-check").disabled = true;
+  el("puzzle-replay").disabled = true;
+  let result;
+  try {
+    result = await getJson("/api/puzzle/composition/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question_id: currentQuestion.id, kind, order }),
+    });
+  } catch (error) {
+    // A transient POST failure must not strand the round with both controls
+    // disabled.  Keep the already-viewed question answerable and replayable.
+    if (generation === roundGeneration) {
+      compositionQuestionReady = true;
+      el("puzzle-check").disabled = false;
+      el("puzzle-replay").disabled = false;
+    }
+    throw error;
+  }
+  if (generation !== roundGeneration) return;
+  const box = el("puzzle-result");
+  box.hidden = false;
+  box.className = `puzzle-result ${result.correct ? "hit" : "miss"}`;
+  const answerText = formatOperationAnswers(result.answers);
+  box.innerHTML = result.correct ? `正解（${answerText}）` : `不正解（正解は ${answerText}）`;
+  operationAnswered = true;
+  el("puzzle-again").hidden = false;
+  // Reveal the product: play its animation, then show its symmetry element.
+  revealOperation = result.product_index;
+  await playCompositionProduct(generation);
+}
+
 // --- Reveal animation (shared) ---
 
 function setSlider(fraction) {
   el("puzzle-slider").value = String(Math.round(fraction * 1000));
 }
 
-function animateReveal() {
+function animateProgress(from, to, durationMs) {
   cancelReveal();
   return new Promise((resolve) => {
     const token = { resolve, start: performance.now() };
     revealAnim = token;
     const step = (now) => {
       if (revealAnim !== token) return; // superseded/cancelled
-      const t = Math.min((now - token.start) / REVEAL_DURATION_MS, 1);
-      view.setAnimationProgress(t);
-      setSlider(t);
-      if (t >= 1) {
+      const k = Math.min((now - token.start) / durationMs, 1);
+      const fraction = from + (to - from) * k;
+      view.setAnimationProgress(fraction);
+      setSlider(fraction);
+      if (k >= 1) {
         revealAnim = null;
         resolve();
         return;
@@ -483,6 +708,10 @@ function animateReveal() {
     };
     requestAnimationFrame(step);
   });
+}
+
+function animateReveal() {
+  return animateProgress(0, 1, REVEAL_DURATION_MS);
 }
 
 function cancelReveal() {
@@ -521,12 +750,256 @@ function revealOperationElements(generation = roundGeneration) {
   view.loadSymmetryElements(Number(revealOperation), view.pathGeneration).catch(() => {});
 }
 
+// --- Mapping quiz ("where does this atom go?") ---
+
+function atomStartMarker(sourceAtom) {
+  for (const instance of view.atomInstances.values()) {
+    if (instance.sourceAtom === Number(sourceAtom)) {
+      return { position: instance.start, radius: instance.radius };
+    }
+  }
+  return null;
+}
+
+function refreshMappingMarkers({ revealTarget = null } = {}) {
+  const entries = [{ atom: currentQuestion.source_atom_index, color: PICK_SOURCE_COLOR }];
+  if (mappingGuess != null && mappingGuess !== currentQuestion.source_atom_index) {
+    // The blue ring means "the destination I clicked", so keep it at that
+    // original site while all atoms move during the reveal.  Following the atom
+    // that happened to occupy the site would give the colour a different meaning.
+    const guess = atomStartMarker(mappingGuess);
+    if (guess) {
+      entries.push({
+        position: [...guess.position],
+        color: PICK_GUESS_COLOR,
+        // Sits inside the yellow ring, which the source atom carries at radius
+        // 1.0. Leave the same visible gap the green answer ring has on the
+        // outside, so a correct guess reads as three rings and not one band.
+        radius: guess.radius * 0.84,
+      });
+    }
+  }
+  if (revealTarget != null) {
+    // A fixed ring at the target atom's start position: the highlighted atom lands
+    // inside it as the operation completes (the target atom itself moves away).
+    const target = atomStartMarker(revealTarget);
+    if (target) {
+      entries.push({
+        position: [...target.position],
+        color: PICK_TARGET_COLOR,
+        // A correct blue guess and the green answer are concentric.  Different
+        // radii leave both visible instead of letting one ring completely hide.
+        radius: target.radius * 1.18,
+      });
+    }
+  }
+  view.setPickMarkers(entries);
+}
+
+function orientPlanarMappingStructure() {
+  const coords = (view.renderData?.atoms || [])
+    .map((atom) => atom.cart?.map(Number))
+    .filter((cart) => Array.isArray(cart) && cart.length === 3 && cart.every(Number.isFinite));
+  if (coords.length < 2) return;
+  const add = (a, b) => a.map((value, axis) => value + b[axis]);
+  const subtract = (a, b) => a.map((value, axis) => value - b[axis]);
+  const scale = (a, factor) => a.map((value) => value * factor);
+  const dot = (a, b) => a.reduce((sum, value, axis) => sum + value * b[axis], 0);
+  const cross = (a, b) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+  const length = (a) => Math.sqrt(dot(a, a));
+  const center = scale(coords.reduce(add, [0, 0, 0]), 1 / coords.length);
+  const centered = coords.map((point) => subtract(point, center));
+  const primary = centered.reduce(
+    (best, point) => (length(point) > length(best) ? point : best),
+    [0, 0, 0],
+  );
+  const extent = length(primary);
+  if (!(extent > 1e-10)) return;
+
+  // A cross product finds the normal regardless of how the molecule is oriented
+  // in Cartesian space.  If all points are collinear, choose a stable direction
+  // perpendicular to the molecular line instead.
+  let normal = centered.reduce(
+    (best, point) => (length(cross(primary, point)) > length(best) ? cross(primary, point) : best),
+    [0, 0, 0],
+  );
+  if (length(normal) <= extent * extent * 1e-8) {
+    const leastAligned = Math.abs(primary[0]) <= Math.abs(primary[1])
+      && Math.abs(primary[0]) <= Math.abs(primary[2])
+      ? [1, 0, 0]
+      : Math.abs(primary[1]) <= Math.abs(primary[2]) ? [0, 1, 0] : [0, 0, 1];
+    normal = cross(primary, leastAligned);
+  }
+  const normalLength = length(normal);
+  if (!(normalLength > 1e-10)) return;
+  normal = scale(normal, 1 / normalLength);
+  const thickness = Math.max(...centered.map((point) => Math.abs(dot(point, normal))));
+  if (thickness > extent * 0.08) return;
+  view.viewAlongCartesianDirection(normal, center);
+}
+
+async function beginMappingRound() {
+  mappingGuess = null;
+  const operationLabel = shortOperationLabel(currentQuestion.operation);
+  el("puzzle-question").textContent =
+    `黄色の原子は、操作 ${operationLabel} でどの原子に移りますか？移り先の原子をクリックしてから回答してください。`;
+  setStageCaption(`操作 ${operationLabel}（一部をプレビュー）`);
+  el("puzzle-options").innerHTML = ""; // the answer is a click, not a radio choice
+  el("puzzle-slider").hidden = true;
+  el("puzzle-playback").hidden = false;
+  el("puzzle-check").disabled = true;
+  hidePuzzleGifButton();
+  // Face planar/linear molecules along their thin axis so candidate sites do not
+  // overlap (notably benzene's C/H rings in the default oblique camera).
+  orientPlanarMappingStructure();
+  view.onAtomPick = (atomIndex) => {
+    if (operationAnswered || !mappingQuestionReady || atomIndex == null) return;
+    mappingGuess = Number(atomIndex);
+    refreshMappingMarkers();
+  };
+  await playMappingPreview();
+}
+
+function mappingPreviewFraction() {
+  const operation = (view.renderData?.operations || []).find(
+    (item) => Number(item.index) === Number(currentQuestion?.operation_index),
+  );
+  const kind = String(operation?.kind || "");
+  const curved =
+    kind.startsWith("rotation_")
+    || kind.startsWith("improper_")
+    || kind.startsWith("rotoreflection")
+    || kind.startsWith("rotoinversion");
+  return curved ? MAPPING_CURVED_PREVIEW : MAPPING_STRAIGHT_PREVIEW;
+}
+
+async function playMappingPreview() {
+  const generation = roundGeneration;
+  const question = currentQuestion;
+  const playback = ++mappingPlaybackGeneration;
+  const isCurrent = () =>
+    generation === roundGeneration
+    && playback === mappingPlaybackGeneration
+    && question === currentQuestion
+    && !operationAnswered;
+  mappingQuestionReady = false;
+  el("puzzle-check").disabled = true;
+  el("puzzle-replay").disabled = true;
+  let completed = false;
+  try {
+    view.setAnimationSourceAtoms([question.source_atom_index]);
+    const pathGeneration = ++view.pathGeneration;
+    const elementRequest = view
+      .loadSymmetryElements(Number(question.operation_index), pathGeneration)
+      .catch(() => {});
+    await view.loadAnimationPaths(Number(question.operation_index), pathGeneration, "displayed");
+    await elementRequest;
+    if (!isCurrent()) return;
+    view.resetAnimation();
+    refreshMappingMarkers();
+    // Move only the yellow source atom. Candidate atoms remain fixed, so clicking
+    // a site has an unambiguous meaning even for indistinguishable atoms.
+    const fraction = mappingPreviewFraction();
+    await animateProgress(0, fraction, Math.max(280, REVEAL_DURATION_MS * fraction));
+    completed = isCurrent();
+  } finally {
+    if (isCurrent()) {
+      mappingQuestionReady = completed;
+      el("puzzle-check").disabled = !completed;
+      el("puzzle-replay").disabled = false;
+    }
+  }
+}
+
+async function playMappingReveal(generation = roundGeneration) {
+  const playback = ++mappingPlaybackGeneration;
+  const isCurrent = () =>
+    generation === roundGeneration
+    && playback === mappingPlaybackGeneration
+    && operationAnswered;
+  cancelReveal();
+  el("puzzle-replay").disabled = true;
+  view.setAnimationSourceAtoms(null);
+  view.resetAnimation();
+  refreshMappingMarkers({ revealTarget: mappingRevealTarget });
+  try {
+    await animateProgress(0, 1, REVEAL_DURATION_MS);
+  } finally {
+    if (isCurrent()) el("puzzle-replay").disabled = false;
+  }
+}
+
+async function onCheckMapping() {
+  const generation = roundGeneration;
+  if (!mappingQuestionReady) {
+    showPrompt("プレビューが終わってから移り先を選んでください。");
+    return;
+  }
+  if (mappingGuess == null) {
+    showPrompt("移り先の原子をクリックしてください。");
+    return;
+  }
+  mappingQuestionReady = false;
+  mappingPlaybackGeneration += 1;
+  cancelReveal();
+  view.pathGeneration += 1;
+  el("puzzle-check").disabled = true;
+  el("puzzle-replay").disabled = true;
+  let result;
+  try {
+    result = await getJson("/api/puzzle/mapping/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question_id: currentQuestion.id, selected_atom_index: mappingGuess }),
+    });
+  } catch (error) {
+    if (generation === roundGeneration) {
+      mappingQuestionReady = true;
+      el("puzzle-check").disabled = false;
+      el("puzzle-replay").disabled = false;
+    }
+    throw error;
+  }
+  if (generation !== roundGeneration) return;
+  operationAnswered = true;
+  const box = el("puzzle-result");
+  box.hidden = false;
+  box.className = `puzzle-result ${result.correct ? "hit" : "miss"}`;
+  box.textContent = result.correct ? "正解" : "不正解";
+  el("puzzle-again").hidden = false;
+  mappingRevealTarget = result.target_atom_index; // keep the guess ring; add the target
+  // Reveal the full operation from rest: the yellow atom lands on the fixed green
+  // destination ring while the rest of the molecule follows the same operation.
+  await playMappingReveal(generation);
+}
+
 // --- Checking answers ---
 
 async function onCheck() {
   if (!currentQuestion) return;
   if (currentQuiz === "axis") return onCheckAxis();
+  if (currentQuiz === "composition") return onCheckComposition();
+  if (currentQuiz === "mapping") return onCheckMapping();
   return onCheckOperation();
+}
+
+function onReplay() {
+  // Composition replays its own two-phase sequence (or the product, once answered).
+  if (currentQuiz === "composition") {
+    if (operationAnswered && revealOperation != null) {
+      return playCompositionProduct();
+    }
+    return playCompositionQuestion();
+  }
+  if (currentQuiz === "mapping") {
+    if (!operationAnswered) return playMappingPreview();
+    return playMappingReveal();
+  }
+  return playReveal();
 }
 
 function selectedOrder() {
@@ -700,9 +1173,12 @@ function setupCameraControls() {
     });
   }
   el("puzzle-view-along").addEventListener("click", () => {
-    // Only the axis quiz has a highlighted axis to look down.
-    if (currentQuiz !== "axis" || !currentQuestion) return;
-    view.viewAlongCartesianDirection(currentQuestion.direction_cart, currentQuestion.point_cart);
+    if (!currentQuestion) return;
+    if (currentQuiz === "axis") {
+      view.viewAlongCartesianDirection(currentQuestion.direction_cart, currentQuestion.point_cart);
+    } else if (currentQuiz === "mapping") {
+      view.viewAlongCurrentOperation();
+    }
   });
 }
 
@@ -712,7 +1188,7 @@ function setupControls() {
   el("puzzle-trajectories").addEventListener("click", toggleTrajectories);
   setupCameraControls();
   el("puzzle-check").addEventListener("click", () => onCheck().catch(showError));
-  el("puzzle-replay").addEventListener("click", () => playReveal().catch(showError));
+  el("puzzle-replay").addEventListener("click", () => onReplay().catch(showError));
   el("puzzle-save-gif").addEventListener("click", () => savePuzzleGif().catch(showError));
   el("puzzle-slider").addEventListener("input", (event) => {
     cancelReveal();
@@ -749,14 +1225,24 @@ function setupControls() {
   }
 }
 
-window.addEventListener("symmetry-enter-puzzle", () => {
+function enterPuzzle() {
   if (!started) {
     started = true;
     view = new StaticStructureView(el("puzzle-view"));
     view.setBackgroundMode("light");
+    // Puzzle clicks are never analysis selections. The mapping round installs its
+    // own hook; all other puzzle screens simply ignore atom clicks.
+    view.disableAtomSelection = true;
     setupControls();
   } else if (view) {
     view.resize();
   }
   showQuizSelect();
-});
+}
+
+window.addEventListener("symmetry-enter-puzzle", enterPuzzle);
+
+// In --mode puzzle the classic UI script can dispatch its entry event before this
+// module has registered the listener. Recover from that ordering by inspecting the
+// already-rendered screen; `started` keeps the path idempotent.
+if (el("puzzle-mode")?.hidden === false) queueMicrotask(enterPuzzle);

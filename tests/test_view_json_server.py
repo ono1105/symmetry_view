@@ -144,6 +144,12 @@ class BrowserUiAssetsTest(unittest.TestCase):
         self.assertIn("setBackgroundMode", source)
         self.assertIn("setLegendVisible", source)
 
+    def test_three_view_does_not_override_css_pixel_viewport(self):
+        source = Path("crystal_viewer/web/three_view.js").read_text(encoding="utf-8")
+
+        self.assertNotIn("setViewport(", source)
+        self.assertNotIn("setScissorTest(", source)
+
     def test_itc_like_notation_formats_coordinate_bars_and_rotation_sense(self):
         source = Path("crystal_viewer/web/browser_ui.js").read_text(encoding="utf-8")
 

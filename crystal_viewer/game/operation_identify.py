@@ -111,10 +111,31 @@ def _operation_notation(
     return symbol
 
 
+def _improper_notation(answer: dict) -> str | None:
+    """The Sn / -n text implied by an improper answer's own fold, or None."""
+    order = answer.get("order")
+    if order is None:
+        return None
+    if answer.get("kind") == ROTOREFLECTION:
+        return f"S{int(order)}"
+    if answer.get("kind") == ROTOINVERSION:
+        return f"-{int(order)}"
+    return None
+
+
 def _with_operation_label(answer: dict, render_data: dict, operation: dict) -> dict:
     """Attach display-only symbol/notation when revealing an answer."""
     symbol = _display_symbol(render_data, operation)
     notation = _operation_notation(render_data, operation, display_symbol=symbol)
+    # The display symbol names the symmetry *element*, and one axis can carry
+    # improper operations of different folds: benzene's principal axis is labelled
+    # S6 but also carries S3 (= σh·C3).  The fold in the answer comes from the
+    # operation's own rotation angle, so it wins over the axis label — a question
+    # that reads "S6" must not have the image of S3 as its answer.
+    improper_notation = _improper_notation(answer)
+    if improper_notation is not None and improper_notation != symbol:
+        symbol = improper_notation
+        notation = improper_notation
     result = {key: value for key, value in answer.items() if not str(key).startswith("_")}
     if symbol:
         result["symbol"] = symbol

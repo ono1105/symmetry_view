@@ -79,6 +79,15 @@ export class StaticStructureView {
     this.trajectoryObjects = [];
     this.selectionMarkers = new Map();
     this.selectionSignature = null;
+    // Puzzle-owned atom rings (source / guess / target), independent of the
+    // analysis selection. Set via setPickMarkers; an onAtomPick hook, when
+    // present, routes clicks to the puzzle instead of the analysis selection.
+    this.pickMarkers = new Map();
+    this.onAtomPick = null;
+    this.disableAtomSelection = false;
+    // Optional source-atom filter used by the mapping puzzle preview. Paths remain
+    // loaded for the full operation, but atoms outside the set stay at rest.
+    this.animationSourceAtoms = null;
     this.animationProgress = 0;
     this.animationStartedAt = null;
     this.playing = false;
@@ -293,6 +302,7 @@ export class StaticStructureView {
     this.trajectoryObjects = [];
     this.selectionMarkers.clear();
     this.selectionSignature = null;
+    this.pickMarkers.clear();
     this.atomInstances.clear();
     this.instanceMeshes.clear();
     for (const child of [...this.content.children]) {
@@ -374,6 +384,13 @@ export class StaticStructureView {
     this.pointerDown = null;
     if (movement > 5 || elapsed > 500) return;
     const hit = this.pickAtomInstance(event);
+    if (this.onAtomPick) {
+      // Puzzle mode owns clicks (e.g. the "where does this atom go?" quiz); do not
+      // touch the shared analysis selection / server state.
+      this.onAtomPick(hit ? hit.sourceAtom : null);
+      return;
+    }
+    if (this.disableAtomSelection) return;
     if (!hit && !String(this.state.scope).startsWith("selected")) return;
     this.selectAtom(hit ? hit.sourceAtom : null, event);
   }
@@ -469,6 +486,79 @@ export class StaticStructureView {
       this.selectionMarkers.set(instanceId, marker);
       this.content.add(marker);
     }
+  }
+
+  clearPickMarkers() {
+    for (const marker of this.pickMarkers.values()) {
+      this.content.remove(marker);
+      marker.geometry.dispose();
+      marker.material.dispose();
+    }
+    this.pickMarkers.clear();
+    this.container.dataset.pickMarkerCount = "0";
+    this.render();
+  }
+
+  setAnimationSourceAtoms(sourceAtoms = null) {
+    this.animationSourceAtoms = sourceAtoms == null
+      ? null
+      : new Set([...sourceAtoms].map((index) => Number(index)));
+  }
+
+  animationPathForInstance(instance) {
+    if (this.animationSourceAtoms && !this.animationSourceAtoms.has(instance.sourceAtom)) {
+      return null;
+    }
+    return this.animationPaths.get(instance.sourceAtom);
+  }
+
+  _makePickRing(color, radius) {
+    const outerRadius = radius * 1.5;
+    const geometry = new THREE.RingGeometry(outerRadius * 0.9, outerRadius, 48);
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.9,
+      depthTest: true,
+      depthWrite: false,
+    });
+    const marker = new THREE.Mesh(geometry, material);
+    marker.quaternion.copy(this.activeCamera.quaternion);
+    marker.renderOrder = 11;
+    return marker;
+  }
+
+  // entries: each is either
+  //   {atom: <sourceAtom index>, color} — a ring on that atom (and every displayed
+  //     instance sharing the source atom); follows the atom's animated position, so
+  //     a highlighted atom stays ringed as the operation plays, or
+  //   {position: [x,y,z], color, radius?} — a fixed ring at a world position (e.g.
+  //     the destination an atom will land on), which does NOT move with the animation.
+  setPickMarkers(entries) {
+    this.clearPickMarkers();
+    let staticKey = -1;
+    for (const entry of entries || []) {
+      if (entry.position) {
+        const marker = this._makePickRing(entry.color, entry.radius || 0.5);
+        marker.position.fromArray(entry.position);
+        // Negative keys are absent from atomInstances, so setAtomPosition never
+        // repositions them — the ring stays put while the animation plays.
+        this.pickMarkers.set(staticKey--, marker);
+        this.content.add(marker);
+        continue;
+      }
+      for (const [instanceId, instance] of this.atomInstances) {
+        if (instance.sourceAtom !== Number(entry.atom)) continue;
+        const marker = this._makePickRing(entry.color, instance.radius);
+        marker.position.fromArray(instance.current);
+        marker.visible = this.isAtomVisible(instance);
+        this.pickMarkers.set(instanceId, marker);
+        this.content.add(marker);
+      }
+    }
+    this.container.dataset.pickMarkerCount = String(this.pickMarkers.size);
+    this.render();
   }
 
   syncState(state, update = {}) {
@@ -1018,7 +1108,7 @@ export class StaticStructureView {
 
   applyAnimationProgress() {
     for (const [instanceId, instance] of this.atomInstances) {
-      const path = this.animationPaths.get(instance.sourceAtom);
+      const path = this.animationPathForInstance(instance);
       const applies = pathAppliesToDisplayInstance(path, instance);
       const evaluated = applies
         ? evaluatePath(path, this.animationProgress, instance.start)
@@ -1050,7 +1140,7 @@ export class StaticStructureView {
     const positions = [];
     for (const instance of this.atomInstances.values()) {
       if (!this.isAtomVisible(instance)) continue;
-      const path = this.animationPaths.get(instance.sourceAtom);
+      const path = this.animationPathForInstance(instance);
       if (!pathAppliesToDisplayInstance(path, instance)) continue;
       const samples = new Set([0, 1, ...pathBreakpoints(path, instance.start)]);
       // Wrapped trajectories need dense sampling so each straight segment folds
@@ -1111,7 +1201,7 @@ export class StaticStructureView {
     this.clearStartMarkers();
     for (const instance of this.atomInstances.values()) {
       if (!this.isAtomVisible(instance)) continue;
-      const path = this.animationPaths.get(instance.sourceAtom);
+      const path = this.animationPathForInstance(instance);
       if (!pathAppliesToDisplayInstance(path, instance)) continue;
       const geometry = new THREE.SphereGeometry(instance.radius * 0.98, 20, 12);
       const material = new THREE.MeshBasicMaterial({
@@ -1273,6 +1363,11 @@ export class StaticStructureView {
       marker.visible = this.isAtomVisible(instance);
       marker.position.fromArray(position);
     }
+    const pickMarker = this.pickMarkers.get(Number(instanceId));
+    if (pickMarker) {
+      pickMarker.visible = this.isAtomVisible(instance);
+      pickMarker.position.fromArray(position);
+    }
   }
 
   isAtomVisible(instance) {
@@ -1321,8 +1416,9 @@ export class StaticStructureView {
     for (const marker of this.selectionMarkers.values()) {
       marker.quaternion.copy(this.activeCamera.quaternion);
     }
-    this.renderer.setScissorTest(false);
-    this.renderer.setViewport(0, 0, this.renderer.domElement.width, this.renderer.domElement.height);
+    for (const marker of this.pickMarkers.values()) {
+      marker.quaternion.copy(this.activeCamera.quaternion);
+    }
     this.renderer.render(this.scene, this.activeCamera);
   }
 
