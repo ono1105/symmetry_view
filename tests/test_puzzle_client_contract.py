@@ -69,14 +69,22 @@ class PuzzleClientContractTest(unittest.TestCase):
                 f"{inner_name} and {outer_name} rings are {gap:.4f} apart and read as one band",
             )
 
-    def test_a_structure_with_no_questions_hides_the_view_along_button(self):
-        # The zero-question path returns before beginRound(), which is what
-        # normally decides this button's visibility; without an explicit hide the
-        # button survives from the previous structure and does nothing when
-        # pressed (currentQuestion is null).
+    def test_a_structure_with_no_questions_leaves_no_dead_view_along_button(self):
+        # Pressing this button with no current question does nothing, so it must
+        # not survive from the previous structure.  What guarantees that is the
+        # order of two things: startStructure hides it before loading anything,
+        # and beginRound — the only place it is shown again — is never reached on
+        # the zero-question path.
         source = (WEB_DIR / "puzzle.js").read_text(encoding="utf-8")
+        prologue = source.split("async function startStructure(", 1)[1].split("await getJson(", 1)[0]
+        self.assertIn('el("puzzle-view-along").hidden = true;', prologue)
+        self.assertEqual(
+            source.count('viewAlong.hidden = !('), 1,
+            "the button is shown in more than one place; the ordering above no longer holds",
+        )
         empty_branch = source.split("if (!questions.length) {", 1)[1].split("\n  }", 1)[0]
-        self.assertIn('el("puzzle-view-along").hidden = true;', empty_branch)
+        self.assertIn("return;", empty_branch)
+        self.assertNotIn("beginRound", empty_branch)
 
     def test_failed_checks_restore_round_controls(self):
         source = (WEB_DIR / "puzzle.js").read_text(encoding="utf-8")

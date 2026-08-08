@@ -1,0 +1,9 @@
+# Test-only dependencies. Not needed to run or package the viewer.
+#
+#   .venv/bin/python -m pip install -r requirements-dev.txt
+#   .venv/bin/playwright install chromium
+#
+# tests/test_puzzle_browser.py drives the real puzzle UI in headless Chromium;
+# it skips itself when playwright or the browser binary is absent.
+-r requirements.txt
+playwright>=1.40

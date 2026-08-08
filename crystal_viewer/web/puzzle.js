@@ -382,9 +382,6 @@ async function startStructure(example) {
     el("puzzle-check").hidden = true;
     el("puzzle-again").hidden = true;
     el("puzzle-playback").hidden = true;
-    // beginRound() is what normally decides this button's visibility, and this
-    // path returns before it: leave no dead button from the previous structure.
-    el("puzzle-view-along").hidden = true;
     return;
   }
   beginRound();
