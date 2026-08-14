@@ -73,7 +73,11 @@ scripts/serve.sh --mode puzzle --no-browser
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cd crystal_viewer/web && npm ci && cd ../..
 ```
+
+`npm ci` はWebビューアーが読み込むThree.jsを配置します。省略するとページは開きますが
+`/vendor/three` が503になり構造が描画されません。`scripts/setup.sh` はこれを自動で行います。
 
 結晶解析に使う旧 `symmetry_core.py` は `crystal_viewer/legacy/` に同梱されています。
 別の実装を使う場合だけ、`SYMMETRY_VIEW_LEGACY_CORE=/path/to/symmetry_core.py` で上書きできます。

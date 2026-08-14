@@ -22,6 +22,26 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
+# The web viewer imports Three.js from crystal_viewer/web/node_modules, which is
+# generated and not in the repository. Without it the page still loads but every
+# /vendor/three request answers 503 and no structure is drawn.
+if command -v npm >/dev/null 2>&1; then
+  NPM_CMD=(npm)
+elif command -v corepack >/dev/null 2>&1; then
+  # Distributions that ship node without npm still provide corepack.
+  NPM_CMD=(corepack npm@10)
+else
+  NPM_CMD=()
+fi
+
+if [ ${#NPM_CMD[@]} -gt 0 ]; then
+  (cd crystal_viewer/web && "${NPM_CMD[@]}" ci)
+else
+  echo "warning: neither npm nor corepack was found." >&2
+  echo "         The viewer will start but will not draw structures." >&2
+  echo "         Install Node.js, then run: cd crystal_viewer/web && npm ci" >&2
+fi
+
 python tools/analyze_structure.py examples/cif/Halite.cif >/dev/null
 python tools/analyze_molecule.py examples/molecules/water.xyz >/dev/null
 
