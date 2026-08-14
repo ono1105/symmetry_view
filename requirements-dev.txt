@@ -5,5 +5,18 @@
 #
 # tests/test_puzzle_browser.py drives the real puzzle UI in headless Chromium;
 # it skips itself when playwright or the browser binary is absent.
+#
+# The browser tests need Three.js in place as well, or every structure fails to
+# render and each test burns its full timeout instead of skipping:
+#
+#   cd crystal_viewer/web && npm ci      # scripts/setup.sh does this for you
+#
+# `playwright install` downloads the one Chromium build that matches the
+# installed playwright, into the shared ~/.cache/ms-playwright. If a browser is
+# already there from another project, matching that project's playwright version
+# reuses it instead of downloading another ~650MB.
+#
+# Verified 2026-08-15: playwright 1.62.0 with chromium-1234 (151.0.7922.34),
+# 6 browser tests OK in 52s.
 -r requirements.txt
 playwright>=1.40
