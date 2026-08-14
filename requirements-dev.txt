@@ -18,5 +18,10 @@
 #
 # Verified 2026-08-15: playwright 1.62.0 with chromium-1234 (151.0.7922.34),
 # 6 browser tests OK in 52s.
--r requirements.txt
+#
+# PyVista is pulled in because tests/test_animation_path.py imports the PyVista
+# controller to check that its sequence elements follow the same segment weights
+# as the Web path. Running the tests therefore needs VTK even though shipping
+# the viewer does not.
+-r requirements-pyvista.txt
 playwright>=1.40

@@ -76,6 +76,13 @@ pip install -r requirements.txt
 cd crystal_viewer/web && npm ci && cd ../..
 ```
 
+PyVistaは既定では入りません。Webビューアーだけで全機能が動くためです。
+比較用の参照レンダラや旧GIF出力（`--with-pyvista`）が要る場合だけ追加します。
+
+```bash
+pip install -r requirements-pyvista.txt   # VTKを含むため約670MB増える
+```
+
 `npm ci` はWebビューアーが読み込むThree.jsを配置します。省略するとページは開きますが
 `/vendor/three` が503になり構造が描画されません。`scripts/setup.sh` はこれを自動で行います。
 
@@ -149,7 +156,8 @@ scripts/serve.sh --mode puzzle
 ```
 
 通常起動はWebビューアーのみです。比較確認や旧GIF出力が必要な場合だけ
-`--with-pyvista`を付けてPyVistaを同時起動します。
+`--with-pyvista`を付けてPyVistaを同時起動します。この場合は
+`requirements-pyvista.txt`を先に入れてください（未導入なら導入手順を表示して終了します）。
 
 `tools/` ディレクトリに移動している場合:
 

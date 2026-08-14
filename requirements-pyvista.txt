@@ -1,0 +1,13 @@
+# Optional PyVista renderer. Only `tools/view_json_server.py --with-pyvista`,
+# `tools/view_json_pyvista.py`, `tools/view_json_gui.py` and the legacy GIF
+# export need it; the Web viewer runs entirely without it.
+#
+#   .venv/bin/python -m pip install -r requirements-pyvista.txt
+#
+# This pulls in VTK, which is roughly 670MB unpacked -- about three quarters of
+# the whole install. Skip it unless you want the reference renderer for
+# comparison, and note that requirements-dev.txt already includes it because
+# tests/test_animation_path.py imports the PyVista controller.
+-r requirements.txt
+pyvista>=0.43
+imageio>=2.37

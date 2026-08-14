@@ -1993,7 +1993,19 @@ def main() -> int:
 
     try:
         if args.pyvista_enabled:
-            from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
+            try:
+                from crystal_viewer.viewer.pyvista_controller import BrowserControlledViewer
+            except ImportError as exc:
+                # PyVista is an optional extra, so --with-pyvista is the one flag
+                # that can fail on an otherwise complete install.
+                print(
+                    f"--with-pyvista needs the optional PyVista renderer, which is not installed ({exc}).\n"
+                    "Install it with:\n"
+                    "  .venv/bin/python -m pip install -r requirements-pyvista.txt\n"
+                    "The Web viewer at the URL above works without it.",
+                    file=sys.stderr,
+                )
+                return 1
 
             app = BrowserControlledViewer(
                 json_path,
