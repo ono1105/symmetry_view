@@ -1,0 +1,55 @@
+通し確認の記録（2026-08-15）
+tools/capture_report_figures.py による。パズル側と解析側を別々に走らせたため2本立て。
+どちらも headless Chromium で実際に画面を操作した結果で、未捕捉の JS 例外は0件。
+
+=== パズルモード ===
+puzzle mode
+  saved docs/figures/fig04a_quiz_select.png
+  saved docs/figures/fig04_puzzle_layout.png
+ 回転軸クイズ (benzene)
+  saved docs/figures/fig05_axis_question.png
+  saved docs/figures/fig05_axis_answer.png
+  correct on attempt 1: 正解
+ 操作あてクイズ・普通 (benzene)
+  saved docs/figures/fig06_operation_normal_question.png
+  saved docs/figures/fig06_operation_normal_answer.png
+  correct on attempt 4: 正解（3回回転（C3） または 回映（S3） のいずれも正解）
+ 操作あてクイズ・難しい (halite)
+  saved docs/figures/fig06b_operation_hard_question.png
+  saved docs/figures/fig06b_operation_hard_answer.png
+  correct on attempt 2: 正解（映進、並進成分 1/4（g(-1/4,1/4,1/2)））
+ 合成クイズ (benzene)
+  saved docs/figures/fig07_composition_question.png
+  saved docs/figures/fig07_composition_answer.png
+  correct on attempt 1: 正解（反転（i））
+ 移り先クイズ (methane)
+  saved docs/figures/fig08_mapping_question.png
+  saved docs/figures/fig08_mapping_answer.png
+  correct on attempt 8: 正解
+
+=== 解析モード ===
+analysis mode
+  benzene: 24 operations, kinds=['identity', 'improper_6', 'inversion', 'mirror', 'rotation_2', 'rotation_3', 'rotation_6']
+  saved docs/figures/fig02a_analysis_benzene.png
+  saved docs/figures/fig02b_operation_list_molecule.png
+  saved docs/figures/fig09a_element_axis_edge_on.png
+  C6 selected: 'C6Operation matrixW0.5000-0.86600.00000.86600.50000.00000.00000.00001.0000t(0.00'
+  saved docs/figures/fig09a_element_axis.png
+  saved docs/figures/fig03_anim_before.png
+  saved docs/figures/fig03_anim_mid.png
+  saved docs/figures/fig03_anim_after.png
+  plane: op 2 — 'σOperation matrixW1.00000.00000.00000.00001.00000.00000.00000.0000-1.0000t(0.000'
+  saved docs/figures/fig09_element_plane.png
+  center: op 18 — 'iOperation matrixW-1.00000.00000.00000.0000-1.00000.00000.00000.0000-1.0000t(0.0'
+  saved docs/figures/fig09_element_center.png
+  improper: op 5 — 'S6Operation matrixW0.5000-0.86600.00000.86600.50000.00000.00000.0000-1.0000t(0.0'
+  saved docs/figures/fig09_element_improper.png
+  halite: 192 operations, kinds=['glide', 'identity', 'inversion', 'mirror', 'pure_translation_or_centering_translation', 'rotation_2', 'rotation_3', 'rotation_4', 'rotoinversion_or_improper_4', 'rotoinversion_or_improper_6', 'screw_2', 'screw_4']
+  saved docs/figures/fig02c_analysis_halite.png
+  saved docs/figures/fig02d_operation_list_crystal.png
+  glide: op 67 — '(1 0 1) @ (1/8, 0, 1/8); glide (1/4,1/2,-1/4)'
+  saved docs/figures/fig09_element_glide.png
+  screw: op 56 — '[1 0 0] @ (0, 1/4, 0)'
+  saved docs/figures/fig09_element_screw.png
+
+no uncaught page errors

@@ -20,28 +20,32 @@ symmetry_view プロジェクトの作業を再開します。
   .venv/bin/python -m unittest discover -s tests    # 222件 OK が期待値
 
 残っている作業は docs/REPORT_OUTLINE.md の「残作業」に書いてあります。
-次は「通し確認とスクリーンショット取得」からお願いします。
+次は「旧コード整理」からお願いします。
 ```
 
 ---
 
 ## 現在地（2026-08-15 時点）
 
-**機能は完成。残るのは完成確認と報告書。**
+**機能は完成。通し確認も済んだ。残るのは報告書。**
 
 - クイズ4種（回転軸・操作あて・合成・移り先）で打ち切り確定。○×＋偽要素は**見送り**（`PUZZLE_SPEC.md`§10 に理由を記録）
 - `PUZZLE_SPEC.md`§10 が「未決定なし」。有効コードに TODO/FIXME は 0 件
 - テスト 222 件 OK（うち headless Chromium の実機テスト 6 件）
-- `main` は `origin/main` より進んでいる。**push はまだしていない**
+- **通し確認済み**。4 クイズすべてを実機で遊んで正解まで到達、JS 例外 0 件。
+  報告書用の図版 26 枚は `docs/figures/` に取得済み（アーキテクチャ図だけ未作成）
+- `main` は `origin/main` より 1 コミット進んでいる（図版一式）。**push はまだ**
 
-### このセッションで入れた変更
+### 図版を撮り直したいとき
 
-```text
-9b56747 build: make PyVista an optional extra so the default install drops VTK
-e6801b3 docs: record that the maru-batsu quiz was dropped, and close the quiz set at four
-4e0f1d6 docs: record verified dependency versions and the 2026-08-15 session
-bfdfad6 fix: make generation operation lookup deterministic; install Three.js in setup
+手で撮ったものではない。UI を直したらこれで撮り直す。
+
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt   # playwright が要る
+.venv/bin/python tools/capture_report_figures.py
 ```
+
+対応表と、撮るときに引っかかった点は `docs/figures/README.md`。
 
 ---
 
