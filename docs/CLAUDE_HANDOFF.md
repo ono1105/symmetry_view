@@ -78,8 +78,10 @@ symmetry_view プロジェクトの作業を再開します。
   勝者を決めており、spglib 2.7.0 で答えが変わってテストが落ちた（`bfdfad6` で修正済み）。
   特殊位置の原子は席対称群のすべての操作で生成されるので、**どれが正解かは一意に決まらない**。
 - **`.claude/settings.json` はコミットしない**（ユーザー側の設定）。
-- **`crystal_viewer/legacy/` は現役**。結晶解析が使っているので消さない。
-  消してよい候補は `archive/old_gui_attempt/` のほう。
+- **`crystal_viewer/legacy/` は現役**。結晶解析が `symmetry_core.py` の上で動いている。
+  `load_legacy_core()` が **import ではなくファイルパスで読み込む**ので、import を grep しても
+  出てこない。名前と grep 結果だけ見て消すと CIF 経路が全部壊れる。
+  （`archive/old_gui_attempt/` のほうは 2026-08-15 に削除済み。git 履歴に残っている）
 
 ---
 

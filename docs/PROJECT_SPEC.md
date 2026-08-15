@@ -31,7 +31,7 @@ analysis
   -> future renderer-independent game logic
 ```
 
-The previous GUI/VTK attempt is archived in `archive/old_gui_attempt/` and should not be used as the base for new work unless explicitly requested.
+The previous GUI/VTK attempt was deleted once the rebuild it was kept for finished; recover it from git history (`git show e625e0f:archive/old_gui_attempt/viewer.py`) if it is ever wanted again.
 
 ## Active Code
 

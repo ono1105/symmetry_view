@@ -45,9 +45,6 @@ docs/
   PROJECT_SPEC.md        現在の目的・スコープ・設計方針
   README.md              ドキュメント入口
   archive/               古い仕様書・相談メモ
-
-archive/old_gui_attempt/
-  以前のGUI/VTK実験コード。現行実装では使わない。
 ```
 
 ## 最短セットアップ
