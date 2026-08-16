@@ -338,19 +338,53 @@ def capture_puzzle(page, base_url: str) -> None:
 
 # --- analysis mode ----------------------------------------------------------
 
-def open_example(page, kind: str, path: str) -> None:
-    if page.get_attribute("#structure-kind-toggle", "data-kind") == kind:
+def open_example(page, base_url: str, kind: str, path: str) -> None:
+    """Load an example and prove it actually loaded.
+
+    The picker lists one kind at a time and rebuilds its options when the kind
+    changes, so a value set too early is silently dropped and the previous
+    structure stays on screen. `.operation-row` is already present from that
+    structure, so waiting for it proves nothing — check the server's state and
+    the drawn list instead, or the figures record the wrong structure.
+    """
+    directory = f"examples/{'cif' if kind == 'crystal' else 'molecules'}/"
+    for _ in range(3):
+        listed = page.evaluate(
+            """directory => [...document.getElementById('example-select').options]
+                              .some(option => option.value.startsWith(directory))""",
+            directory,
+        )
+        if listed:
+            break
         page.click("#structure-kind-toggle")
-    page.evaluate(
+        page.wait_for_timeout(500)
+    else:
+        raise RuntimeError(f"the example picker never listed {directory}")
+
+    selected = page.evaluate(
         """path => {
              const select = document.getElementById('example-select');
              select.value = path;
              select.dispatchEvent(new Event('change', {bubbles: true}));
+             return select.value;
            }""",
         path,
     )
+    if selected != path:
+        raise RuntimeError(f"{path} is not among the picker's options")
     page.click("#open-example")
-    page.wait_for_selector(".operation-row", state="visible", timeout=LOAD_TIMEOUT_MS)
+
+    stem = Path(path).stem
+    deadline = time.monotonic() + LOAD_TIMEOUT_MS / 1000
+    while time.monotonic() < deadline:
+        loaded = json.loads(
+            urllib.request.urlopen(base_url + "/api/state", timeout=10).read()
+        ).get("json_path", "")
+        if stem.lower().replace("-", "_") in Path(loaded).stem:
+            break
+        time.sleep(0.3)
+    else:
+        raise RuntimeError(f"{path} never became the loaded structure (still {loaded})")
     page.wait_for_timeout(1200)  # first render of the structure
 
 
@@ -429,7 +463,7 @@ def capture_analysis(page, base_url: str) -> None:
 
     # Figure 2: the operation catalogue. Benzene carries rotation, mirror,
     # inversion and both improper families in one list.
-    open_example(page, "molecule", "examples/molecules/benzene.xyz")
+    open_example(page, base_url, "molecule", "examples/molecules/benzene.xyz")
     ops = operations(base_url)
     log(f"  benzene: {len(ops)} operations, kinds="
         f"{sorted({op['kind'] for op in ops})}")
@@ -463,7 +497,7 @@ def capture_analysis(page, base_url: str) -> None:
         shot(page.locator("#three-view"), f"fig09_element_{name}")
 
     # The crystal side: halite for the list, and a glide for the arrow figure.
-    open_example(page, "crystal", "examples/cif/Halite.cif")
+    open_example(page, base_url, "crystal", "examples/cif/Halite.cif")
     ops = operations(base_url)
     log(f"  halite: {len(ops)} operations, kinds={sorted({op['kind'] for op in ops})}")
     shot(page, "fig02c_analysis_halite")

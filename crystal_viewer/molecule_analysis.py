@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-from pymatgen.core import Molecule
+from pymatgen.core import Composition, Molecule
 from pymatgen.symmetry.analyzer import PointGroupAnalyzer
 
 from .geometry import (
@@ -109,7 +110,19 @@ def convert_molecule(source_file: str | Path | None, molecule: Molecule, center_
         site_count=len(molecule),
         atoms=tuple(atoms),
         center_cart=np.asarray(center_cart, dtype=float),
+        display_formula=molecular_display_formula(molecule.composition),
     )
+
+
+def molecular_display_formula(composition: Composition) -> str:
+    """The molecular formula as a chemist writes it: C6H6, NH3, XeF4.
+
+    The reduced formula collapses the molecule (benzene -> HC) and the Hill
+    formula alphabetizes it (NH3 -> H3N), so neither can be shown to a learner.
+    The IUPAC formula keeps both the true counts and the conventional element
+    order; it only needs its spaces and its explicit "1" subscripts removed.
+    """
+    return re.sub(r"(?<=[A-Za-z])1(?![0-9])", "", composition.iupac_formula.replace(" ", ""))
 
 
 def convert_point_group(analyzer: PointGroupAnalyzer, operations: tuple) -> MoleculePointGroupInfo:

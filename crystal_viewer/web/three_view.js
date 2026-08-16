@@ -7,11 +7,23 @@ import {
   pathAppliesToDisplayInstance,
   sequentialSegmentBoundaries,
 } from "/static/animation_path.js";
+import { SYMMETRY_ELEMENT_COLORS } from "/static/colors.js";
 
 
 const CAMERA_FOV = 42;
 const ORTHOGRAPHIC_HEIGHT = 10;
-const STATIONARY_ANIMATION_SECONDS = 0.4;
+
+function viewerConstants() {
+  // Injected by crystal_viewer/web/browser_ui.py so Python owns the value.
+  // The literals below are a last resort for contexts without the page (the
+  // JS syntax check and the node test harness), not a second definition.
+  try {
+    return JSON.parse(document.getElementById("viewer-constants").textContent);
+  } catch {
+    return {};
+  }
+}
+const STATIONARY_ANIMATION_SECONDS = viewerConstants().stationary_animation_seconds ?? 0.4;
 const GIF_END_HOLD_MS = 1000;
 const CURVED_PATH_TYPES = new Set(["rotation", "screw", "rotoinversion", "rotoreflection"]);
 const CRYSTAL_AXIS_COLORS = [0xef4444, 0x22c55e, 0x3b82f6];
@@ -42,6 +54,9 @@ export class StaticStructureView {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+    // Both views live for the whole session; only the visible one draws.
+    this.active = true;
+    this.frameHandle = null;
     this.controls = null;
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -125,7 +140,7 @@ export class StaticStructureView {
     window.addEventListener("symmetry-save-gif", () => {
       this.syncQueue.then(() => this.recordGif());
     });
-    requestAnimationFrame(this.animate);
+    this.requestFrame();
   }
 
   async renderPayload() {
@@ -909,7 +924,7 @@ export class StaticStructureView {
     const radius = span * 0.009;
     const length = this.isMolecule ? Math.max(span * 1.8, span + 4 * this.maxAtomRadius) : span * 1.45;
     const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
-    const material = new THREE.MeshBasicMaterial({color: 0x38bdf8, transparent: true, opacity: 0.92});
+    const material = new THREE.MeshBasicMaterial({color: SYMMETRY_ELEMENT_COLORS.axis, transparent: true, opacity: 0.92});
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(point);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
@@ -934,7 +949,7 @@ export class StaticStructureView {
       ...corners[0].toArray(), ...corners[2].toArray(), ...corners[3].toArray(),
     ], 3));
     const material = new THREE.MeshBasicMaterial({
-      color: 0xa78bfa,
+      color: SYMMETRY_ELEMENT_COLORS.planeFill,
       transparent: true,
       opacity: 0.24,
       side: THREE.DoubleSide,
@@ -947,7 +962,7 @@ export class StaticStructureView {
     const outlineGeometry = new THREE.BufferGeometry().setFromPoints([...corners, corners[0]]);
     const outline = new THREE.Line(
       outlineGeometry,
-      new THREE.LineBasicMaterial({color: 0xc4b5fd, transparent: true, opacity: 0.9}),
+      new THREE.LineBasicMaterial({color: SYMMETRY_ELEMENT_COLORS.planeOutline, transparent: true, opacity: 0.9}),
     );
     outline.renderOrder = 2;
     this.addSymmetryObject(outline);
@@ -961,7 +976,7 @@ export class StaticStructureView {
     const geometry = new THREE.EdgesGeometry(boxGeometry);
     boxGeometry.dispose();
     const material = new THREE.LineBasicMaterial({
-      color: 0xef4444,
+      color: SYMMETRY_ELEMENT_COLORS.center,
       transparent: true,
       opacity: 0.95,
       depthTest: false,
@@ -982,7 +997,7 @@ export class StaticStructureView {
       direction,
       origin,
       length,
-      0xd6b65c,
+      SYMMETRY_ELEMENT_COLORS.glideArrow,
       Math.max(span * 0.07, 0.12),
       Math.max(span * 0.028, 0.055),
     );
@@ -1287,9 +1302,20 @@ export class StaticStructureView {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = filename ? `${filename}.${extension}` : `symmetry-op${this.animationOperationIndex ?? 0}.${extension}`;
+    link.download = filename ? `${filename}.${extension}` : `${this.defaultDownloadName()}.${extension}`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  defaultDownloadName() {
+    // animationOperationIndex is null unless an animation path is loaded, so
+    // using it alone saved every recording as "symmetry-op0". The selected
+    // operation is what the file actually shows; name it, and the structure
+    // too, so exports from a session do not overwrite each other.
+    const index = this.state.operation_index ?? this.animationOperationIndex;
+    const source = String(this.state.json_path || "").split(/[\\/]/).pop() || "";
+    const stem = source.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_-]+/g, "-") || "symmetry";
+    return index === null || index === undefined ? stem : `${stem}-op${index}`;
   }
 
   savePng() {
@@ -1423,10 +1449,33 @@ export class StaticStructureView {
   }
 
   animate(timestamp) {
+    this.frameHandle = null;
+    // A hidden view has nothing to show, and both views exist for the whole
+    // session: without this the covered one keeps calling controls.update()
+    // sixty times a second behind the overlay.
+    if (!this.active) return;
     const animationChanged = this.updateAnimation(timestamp);
     this.controls?.update();
     if (animationChanged) this.render();
-    requestAnimationFrame(this.animate);
+    this.requestFrame();
+  }
+
+  requestFrame() {
+    // Guard the handle: setActive(true) twice, or a resume racing the loop,
+    // would otherwise leave two chains running and double the frame rate.
+    if (this.frameHandle !== null || !this.active) return;
+    this.frameHandle = requestAnimationFrame(this.animate);
+  }
+
+  setActive(active) {
+    const next = Boolean(active);
+    if (this.active === next) return;
+    this.active = next;
+    if (!next) return;
+    // The container was display:none while hidden, so the canvas has to be
+    // measured again before the first frame back.
+    this.resize();
+    this.requestFrame();
   }
 
   setStatus(message) {
@@ -1443,6 +1492,10 @@ async function initialize() {
   if (!container) return;
   const view = new StaticStructureView(container);
   window.symmetryThreeView = view;
+  // With --mode puzzle the mode is applied before this module finishes loading,
+  // so the entry event has already been and gone; read the mode off the body
+  // instead of waiting for one.
+  view.setActive(!document.body.classList.contains("in-puzzle"));
   try {
     await view.refresh();
     const stateResponse = await fetch("/api/state");
@@ -1459,8 +1512,9 @@ async function initialize() {
   setInterval(async () => {
     if (pollInProgress) return;
     // Puzzle mode drives its own view; pause the analysis poll while it is open
-    // (the next tick after returning re-syncs via the signature check).
-    if (document.body.classList.contains("in-puzzle")) return;
+    // (the next tick after returning re-syncs via the signature check). One
+    // flag now gates both this poll and the render loop.
+    if (!view.active) return;
     pollInProgress = true;
     try {
       const response = await fetch("/api/state");

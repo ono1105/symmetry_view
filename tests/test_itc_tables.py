@@ -7,6 +7,7 @@ from crystal_viewer.itc_tables import (
     load_itc_operation_data,
 )
 from crystal_viewer.viewer.cell_settings import standardized_payload
+from tests.support import load_export
 
 
 class ItcTablesTest(unittest.TestCase):
@@ -26,7 +27,7 @@ class ItcTablesTest(unittest.TestCase):
         self.assertEqual(matches[0], "x, y, z")
 
     def test_cadmoselite_matches_every_operation(self):
-        payload = json.loads(Path("exports/json/cadmoselite.json").read_text(encoding="utf-8"))
+        payload = load_export("cadmoselite")
         render_data = payload["render_data"]
 
         matches = itc_coordinate_summaries(render_data)

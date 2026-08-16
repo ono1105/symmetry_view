@@ -52,6 +52,7 @@ from crystal_viewer.viewer.animation_api import (
     custom_animation_path_response,
     symmetry_elements_response,
 )
+from crystal_viewer.game.catalog import PUZZLE_COUNT_KEYS
 from crystal_viewer.game.axis_orders import ROTATION_ORDER_OPTIONS
 from crystal_viewer.game.axis_orders import axis_questions as axis_order_questions
 from crystal_viewer.game.axis_orders import check_answer as check_axis_order_answer
@@ -61,6 +62,8 @@ from crystal_viewer.game.composition import check_answer as check_composition_an
 from crystal_viewer.game.composition import public_questions as public_composition_questions
 from crystal_viewer.game.atom_mapping import check_answer as check_mapping_answer
 from crystal_viewer.game.atom_mapping import public_questions as public_mapping_questions
+from crystal_viewer.game.point_group import check_answer as check_point_group_answer
+from crystal_viewer.game.point_group import public_questions as public_point_group_questions
 from crystal_viewer.viewer.custom_operation import (
     build_custom_operation_frac,
     check_custom_operation,
@@ -95,10 +98,13 @@ EXAMPLE_SUFFIXES = {
     SOURCE_KIND_MOLECULE: ".xyz",
 }
 EXAMPLE_CATALOG_PATH = PROJECT_ROOT / "examples/example_catalog.json"
+# Opened when the server is started without a file. Each must be an export of a
+# bundled example; f2_pd and jacobsite used to sit here long after the examples
+# they came from were removed.
 DEFAULT_STARTER_PATHS = (
     Path("exports/json/halite.json"),
-    Path("exports/json/f2_pd.json"),
-    Path("exports/json/jacobsite.json"),
+    Path("exports/json/benzene.json"),
+    Path("exports/json/water.json"),
 )
 EMPTY_VIEWER_JSON_PATH = Path(tempfile.gettempdir()) / "symmetry_view_empty.json"
 DEBUG_IMPORT_TIMING = os.environ.get("CRYSTAL_VIEWER_DEBUG_IMPORT") == "1"
@@ -624,9 +630,19 @@ def normalize_example_catalog(loaded: dict) -> dict[str, list[dict]]:
                 "name": str(raw.get("name") or Path(path).stem),
                 "path": path,
                 "formula": str(raw.get("formula") or ""),
+                "display_formula": str(raw.get("display_formula") or raw.get("formula") or ""),
                 "symmetry": str(raw.get("symmetry") or ""),
                 "point_group": str(raw.get("point_group") or ""),
             }
+            # Absent means playable, matching the puzzle_counts convention.
+            item["beyond_quiz_vocabulary"] = bool(raw.get("beyond_quiz_vocabulary"))
+            counts = raw.get("puzzle_counts")
+            if isinstance(counts, dict):
+                # Absent counts mean "unknown", and the picker treats unknown as
+                # playable; only pass on counts we actually have.
+                item["puzzle_counts"] = {
+                    key: int(counts.get(key, 0)) for key in PUZZLE_COUNT_KEYS
+                }
             if raw.get("error"):
                 item["error"] = str(raw["error"])
             catalog[kind].append(item)
@@ -717,6 +733,10 @@ def make_handler(
                 return
             if path == "/static/animation_path.js":
                 module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "animation_path.js"
+                self.send_javascript_file(module_path)
+                return
+            if path == "/static/colors.js":
+                module_path = PROJECT_ROOT / "crystal_viewer" / "web" / "colors.js"
                 self.send_javascript_file(module_path)
                 return
             if path == "/static/browser_ui.css":
@@ -1047,6 +1067,19 @@ def make_handler(
                     }
                 )
                 return
+            if path == "/api/puzzle/point_group":
+                with state_lock:
+                    render_data = session.render_data
+                    source_kind = session.source_kind
+                # The question carries only the answer choices; which one is
+                # correct is revealed by /api/puzzle/point_group/check.
+                self.send_json(
+                    {
+                        "source_kind": source_kind,
+                        "questions": public_point_group_questions(render_data),
+                    }
+                )
+                return
             if path == "/api/state":
                 with state_lock:
                     body = dict(shared_state)
@@ -1186,6 +1219,22 @@ def make_handler(
                     question_id = int(payload.get("question_id"))
                     selected_atom = payload.get("selected_atom_index")
                     result = check_mapping_answer(render_data, question_id, selected_atom)
+                except (TypeError, ValueError) as exc:
+                    self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
+                    return
+                if result is None:
+                    self.send_json_error("puzzle question not found", status=404)
+                    return
+                self.send_json(result)
+                return
+
+            if path == "/api/puzzle/point_group/check":
+                with state_lock:
+                    render_data = session.render_data
+                try:
+                    question_id = int(payload.get("question_id"))
+                    selected = payload.get("selected")
+                    result = check_point_group_answer(render_data, question_id, selected)
                 except (TypeError, ValueError) as exc:
                     self.send_json_error(f"invalid puzzle answer: {exc}", status=400)
                     return

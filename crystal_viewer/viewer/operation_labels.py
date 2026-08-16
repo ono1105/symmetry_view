@@ -121,32 +121,46 @@ def operation_fixed_atom_indices(
     """
     atoms = render_data.get("atoms", [])
     unit_cell = render_data.get("unit_cell")
-    fixed = []
     if unit_cell is not None:
         matrix = np.asarray(operation.get("matrix_frac"), dtype=float)
         translation = np.asarray(operation.get("translation_frac"), dtype=float)
         lattice = np.asarray(unit_cell.get("lattice"), dtype=float)
         if matrix.shape != (3, 3) or translation.shape != (3,) or lattice.shape != (3, 3):
-            return fixed
-        for atom in atoms:
-            position = np.asarray(atom.get("frac"), dtype=float)
-            if position.shape != (3,):
-                continue
-            displacement = matrix @ position + translation - position
-            displacement -= np.rint(displacement)
-            if np.linalg.norm(displacement @ lattice) <= tolerance_cart:
-                fixed.append(int(atom["index"]))
-        return fixed
+            return []
+        indices, positions = _atom_positions(atoms, "frac")
+        if not len(indices):
+            return []
+        # One operation over every atom at once: this runs for all operations of
+        # a structure, which is 192 x 56 matrix products on the largest example.
+        displacement = positions @ matrix.T + translation - positions
+        displacement -= np.rint(displacement)
+        within = np.linalg.norm(displacement @ lattice, axis=1) <= tolerance_cart
+    else:
+        matrix = np.asarray(operation.get("matrix_cart"), dtype=float)
+        translation = np.asarray(operation.get("translation_cart"), dtype=float)
+        if matrix.shape != (3, 3) or translation.shape != (3,):
+            return []
+        indices, positions = _atom_positions(atoms, "cart")
+        if not len(indices):
+            return []
+        displacement = positions @ matrix.T + translation - positions
+        within = np.linalg.norm(displacement, axis=1) <= molecule_tolerance_cart
+    return [int(index) for index in indices[within]]
 
-    matrix = np.asarray(operation.get("matrix_cart"), dtype=float)
-    translation = np.asarray(operation.get("translation_cart"), dtype=float)
-    if matrix.shape != (3, 3) or translation.shape != (3,):
-        return fixed
+
+def _atom_positions(atoms: list, key: str) -> tuple[np.ndarray, np.ndarray]:
+    """Indices and positions of the atoms that carry a usable `key` coordinate."""
+    indices = []
+    positions = []
     for atom in atoms:
-        position = np.asarray(atom.get("cart"), dtype=float)
-        if position.shape == (3,) and np.linalg.norm(matrix @ position + translation - position) <= molecule_tolerance_cart:
-            fixed.append(int(atom["index"]))
-    return fixed
+        position = atom.get(key)
+        if position is None or len(position) != 3:
+            continue
+        indices.append(int(atom["index"]))
+        positions.append(position)
+    if not indices:
+        return np.empty(0, dtype=int), np.empty((0, 3), dtype=float)
+    return np.asarray(indices, dtype=int), np.asarray(positions, dtype=float)
 
 
 def operation_notation_order(operation: dict) -> int | None:

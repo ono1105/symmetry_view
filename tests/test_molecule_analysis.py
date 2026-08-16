@@ -1,3 +1,4 @@
+from collections import Counter
 import unittest
 from pathlib import Path
 
@@ -39,6 +40,34 @@ class MolecularMirrorAnimationTest(unittest.TestCase):
 
         self.assertEqual(carbon_dioxide.point_group.symbol, "D∞h")
         self.assertEqual(hydrogen_chloride.point_group.symbol, "C∞v")
+
+
+class IcosahedralClusterTest(unittest.TestCase):
+    """Five-fold symmetry is read correctly, checked outside the generator.
+
+    A finite cluster may have the 5-fold axes a periodic lattice cannot, and the
+    molecule path takes the fold from the matrix period rather than assuming the
+    crystallographic restriction. That is what lets the viewer show the building
+    block of an icosahedral quasicrystal at all — the crystal path could not,
+    since it needs a lattice.
+    """
+
+    def test_cluster_analyses_as_ih_with_five_fold_axes(self):
+        result = analyze_molecule_file(Path("examples/molecules/al12w_icosahedron.xyz"))
+
+        self.assertEqual(result.point_group.symbol, "Ih")
+        self.assertEqual(len(result.operations), 120)
+        kinds = Counter(operation.kind for operation in result.operations)
+        self.assertEqual(kinds["rotation_5"], 24)  # 6 axes, C5 C5^2 C5^3 C5^4 each
+        self.assertEqual(kinds["improper_10"], 24)
+        self.assertEqual(kinds["rotation_3"], 20)
+        self.assertEqual(kinds["inversion"], 1)
+
+    def test_five_fold_operations_carry_order_five(self):
+        result = analyze_molecule_file(Path("examples/molecules/al12w_icosahedron.xyz"))
+
+        orders = {op.order for op in result.operations if op.kind == "rotation_5"}
+        self.assertEqual(orders, {5})
 
 
 if __name__ == "__main__":

@@ -134,6 +134,7 @@ browser_ui.js          browser controls and API interaction
 three_loader.js        Three.js dependency bootstrap
 three_view.js          Three.js scene, camera, picking, and animation
 animation_path.js      Cartesian animation-path evaluation
+colors.js              shared colour constants for three_view.js and puzzle.js
 ```
 
 This split is intentionally coarse: it keeps the current JSON viewer stable while making future CIF loading and molecule-specific controls easier to add without turning the server entry point into the single core file. The browser UI supports structure import, operation filtering/selection, operation sorting, direction filtering, atom visibility controls, color controls, Play, Stop, Reset, GIF saving, and custom operation checks. Operation rows stay compact: operation symbol plus representative axis `[uvw]`, plane normal `(hkl)`, and center/point fractional coordinates.
@@ -165,26 +166,58 @@ mixed-occupancy crystal sites are represented by their highest-occupancy element
 docs/archive files and old review notes mention earlier file names and should be treated as history
 ```
 
-## Validation Samples
+## Bundled Examples
 
-Representative input data:
+The bundled structures are chosen as teaching material: familiar substances with
+small cells, whose symmetry is worth watching move. `examples/cif/` holds 15
+crystals and `examples/molecules/` 21 molecules, listed in the README of each
+directory. Everything but `Halite.cif` and `BaTiO3.cif` is generated from
+published space groups, lattice constants and Wyckoff positions by
+`tools/generate_example_structures.py`, so the data and its sources live in code.
+
+The original example set — one real structure per crystal class, including
+128-atom cells and unfamiliar minerals — was retired to `tests/fixtures/cif/`.
+It is no longer offered to users but is still analysed by
+`tests/test_fixture_cif_coverage.py`, which is what keeps all 32 crystal classes
+covered.
+
+Two of the molecules are icosahedral clusters — the building block of an
+icosahedral quasicrystal, not a quasicrystal. A quasicrystal has no translational
+periodicity, so it has neither a unit cell nor a space group and cannot go down
+the crystal path at all: `structure_to_spglib_cell` requires a lattice, and
+spglib answers with *some* space group whatever it is given (an icosahedron in a
+cubic box reports `Pm-3`; tilted, `P-1`). A finite cluster has no such problem,
+and the molecule path reads its 5-fold axes correctly, so that is where they go.
+
+Which structures a quiz offers is data, not code. `regenerate_example_assets.py`
+runs the four question generators over each export and records the counts in
+`examples/example_catalog.json`; the picker offers a structure only where its
+count is non-zero. This is why the mapping quiz shows only molecules and the
+hard operation quiz only crystals — molecules have no screws or glides, crystals
+no atom-mapping questions — and why water never appears under the composition
+quiz to announce that it has no questions.
+
+The same catalog carries `beyond_quiz_vocabulary` for the other half of that
+question. The answer vocabulary is closed at folds 2/3/4/6 (plus ∞ for linear
+molecules), so a structure with a 5-fold axis is withdrawn from every quiz even
+though it still has plenty of C2/C3 questions — asking only those would teach
+that its 5-fold axes are not there. Both fields are computed by
+`crystal_viewer/game/catalog.py` from the quizzes' own logic, so adding or
+removing a structure never means editing the client.
 
 ```text
-examples/cif/
-examples/molecules/
-```
-
-Generated JSON samples:
-
-```text
-exports/json/halite.json
-exports/json/sio2.json
-exports/json/water.json
+examples/cif/           15 teaching crystals
+examples/molecules/     19 teaching molecules
+examples/example_catalog.json   generated: formula, symmetry, question counts
+exports/json/           generated: one export per bundled example
+tests/fixtures/cif/     30 retired crystal-class CIFs (not user-visible)
+tests/fixtures/json/    exports of the five fixtures tests read
 ```
 
 Regenerate the tracked JSON samples and browser catalog from the canonical inputs:
 
 ```bash
+.venv/bin/python tools/generate_example_structures.py   # rewrite the generated inputs
 .venv/bin/python tools/regenerate_example_assets.py --clean
 ```
 

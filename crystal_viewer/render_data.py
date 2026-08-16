@@ -97,6 +97,10 @@ class RenderMetadata:
     formula: str
     symmetry_label: str
     operation_count: int
+    # The formula to show a learner.  For crystals the reduced formula is the
+    # right one (NaCl); for molecules it is not (benzene reduces to HC), so the
+    # molecule path supplies its own.
+    display_formula: str = ""
     point_group_label: str | None = None
     lattice_parameters: dict[str, float] | None = None
     space_group_generators: tuple[str, ...] = ()
@@ -195,6 +199,7 @@ def render_data_from_crystal(result: StructureAnalysisResult) -> RenderData:
             formula=result.structure.formula,
             symmetry_label=f"{result.space_group.number} {result.space_group.international}",
             operation_count=result.space_group.operation_count,
+            display_formula=result.structure.formula,
             point_group_label=result.space_group.point_group,
             lattice_parameters=lattice_parameters_from_matrix(lattice),
             space_group_generators=operation_generators(operations, mode="space"),
@@ -246,6 +251,7 @@ def render_data_from_molecule(result: MoleculeAnalysisResult) -> RenderData:
             formula=result.molecule.formula,
             symmetry_label=result.point_group.symbol,
             operation_count=result.point_group.operation_count,
+            display_formula=result.molecule.display_formula or result.molecule.formula,
             point_group_label=result.point_group.symbol,
             point_group_generators=operation_generators(operations, mode="point"),
         ),

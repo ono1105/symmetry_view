@@ -7,14 +7,14 @@ import numpy as np
 from crystal_viewer.viewer.animation_api import (
     ANIMATION_PATH_SCHEMA_VERSION,
     animation_boundary_context,
-    animation_path_length,
     animation_path_response,
     custom_animation_path_response,
     serialize_animation_path,
     symmetry_elements_response,
 )
 from crystal_viewer.viewer.animation import apply_boundary_context
-from crystal_viewer.viewer.animation_path import evaluate_path
+from tests.support import load_export
+from crystal_viewer.viewer.animation_path import animation_path_length, evaluate_path
 
 
 class SerializeAnimationPathTest(unittest.TestCase):
@@ -131,7 +131,7 @@ class AnimationPathResponseTest(unittest.TestCase):
         self.assertGreater(sequence["animation_duration_seconds"], 0)
 
     def test_sio2_screw_paths_publish_one_shared_phase_boundary(self):
-        payload = json.loads(Path("exports/json/sio2.json").read_text(encoding="utf-8"))
+        payload = load_export("sio2")
 
         result = animation_path_response(
             payload["render_data"],

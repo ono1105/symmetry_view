@@ -12,7 +12,6 @@ import numpy as np
 import spglib
 from pymatgen.core import Element, Lattice, Structure
 from pymatgen.core.operations import SymmOp
-from pymatgen.io.cif import CifParser
 
 from .analysis_models import (
     AsymmetricUnitSite,
@@ -526,42 +525,6 @@ def site_label(site, element: str, index: int) -> str:
     if label:
         return str(label)
     return f"{element}{index + 1}"
-
-
-def read_asymmetric_unit_sites(cif_path: Path, lattice: np.ndarray) -> tuple[AsymmetricUnitSite, ...]:
-    parser = CifParser(str(cif_path))
-    cif_dict = parser.as_dict()
-    if not cif_dict:
-        return ()
-    block = next(iter(cif_dict.values()))
-    labels = block.get("_atom_site_label", [])
-    symbols = block.get("_atom_site_type_symbol", [])
-    xs = block.get("_atom_site_fract_x", [])
-    ys = block.get("_atom_site_fract_y", [])
-    zs = block.get("_atom_site_fract_z", [])
-    count = min(len(labels), len(symbols), len(xs), len(ys), len(zs))
-    sites = []
-    for index in range(count):
-        element = normalize_element_symbol(symbols[index], labels[index])
-        frac = np.asarray(
-            [
-                parse_cif_float(xs[index]),
-                parse_cif_float(ys[index]),
-                parse_cif_float(zs[index]),
-            ],
-            dtype=float,
-        )
-        sites.append(
-            AsymmetricUnitSite(
-                index=index,
-                label=str(labels[index]),
-                element=element,
-                atomic_number=int(Element(element).Z),
-                frac=frac,
-                cart=frac @ lattice,
-            )
-        )
-    return tuple(sites)
 
 
 def primary_site_element(site) -> tuple[str, int]:

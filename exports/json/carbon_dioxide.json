@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "source_kind": "molecule",
   "render_data": {
     "metadata": {
@@ -8,6 +8,7 @@
       "formula": "CO2",
       "symmetry_label": "D∞h",
       "operation_count": 5,
+      "display_formula": "CO2",
       "point_group_label": "D∞h",
       "lattice_parameters": null,
       "space_group_generators": [],

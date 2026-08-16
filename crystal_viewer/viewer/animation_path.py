@@ -12,6 +12,7 @@ from crystal_viewer.geometry import (
     signed_angle_to_target,
     signed_rotation_angle_from_matrix,
 )
+from crystal_viewer.viewer.display_atoms import display_atom_instances
 
 
 NORMALIZED_TRAVEL_SPEED_PER_SECOND = 0.525
@@ -535,6 +536,41 @@ def animation_path_length(
         return first_length + second_length
     endpoint = np.asarray(evaluate_path(path, 1.0, start_override=start), dtype=float)
     return float(np.linalg.norm(endpoint - start))
+
+
+def maximum_travel_distance(
+    render_data: dict,
+    paths: dict,
+    *,
+    display_mode: str,
+    cell_origin_mode: str,
+    include_boundary_images: bool,
+    unit_cell_only: bool | None = None,
+) -> float:
+    """Longest Cartesian travel among the atom instances actually on screen.
+
+    Playback time is derived from this, so it has to be measured over the
+    *displayed* instances: a periodic clone starts somewhere else and therefore
+    travels a different distance than the atom it was copied from.
+
+    `unit_cell_only=None` reads the flag off each path; pass a bool when the
+    caller has already decided it once for the whole response.
+    """
+    longest = 0.0
+    for instance in display_atom_instances(
+        render_data,
+        display_mode=display_mode,
+        cell_origin_mode=cell_origin_mode,
+        include_boundary_images=include_boundary_images,
+    ):
+        path = paths.get(int(instance["atom"]["index"]))
+        if path is None:
+            continue
+        primary_only = path.get("unit_cell_only") if unit_cell_only is None else unit_cell_only
+        if primary_only and not instance["is_primary_image"]:
+            continue
+        longest = max(longest, animation_path_length(path, start_override=instance["cart"]))
+    return longest
 
 
 def normalized_animation_duration_seconds(maximum_travel_distance: float, scene_span: float) -> float:

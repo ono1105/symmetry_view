@@ -20,6 +20,7 @@ tools/
   inspect_render_data.py  RenderData確認CLI
   inspect_atom_mapping.py AtomMapping確認CLI
   export_analysis_json.py JSON export CLI
+  generate_example_structures.py 空間群・格子定数・Wyckoff位置から収録構造を生成
   regenerate_example_assets.py examples/cif・examples/moleculesからJSON/catalogを再生成
   view_json_pyvista.py    JSONを読む最小PyVista表示
 
@@ -28,18 +29,16 @@ scripts/
   serve.sh                Webビューアー起動
 
 examples/
-  cif/
-    Halite.cif
-    SiO2.cif
-    ...
-  molecules/
-    water.xyz
-    methane.xyz
-    ...
+  cif/          教材向けの結晶15件（岩塩・ダイヤモンド・石英など）
+  molecules/    教材向けの分子19件（水・ベンゼン・メタンなど）
+  example_catalog.json  ブラウザが読む収録一覧（生成物）
 
 exports/
   json/      共有用JSON
   gifs/      ローカル確認用GIF出力
+
+tests/
+  fixtures/cif/  32結晶類のカバレッジ用CIF（UIには出ない）
 
 docs/
   PROJECT_SPEC.md        現在の目的・スコープ・設計方針

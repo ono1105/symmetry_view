@@ -160,7 +160,7 @@ def initial_render_state(
         "pause_at_breakpoints": bool(preserved.get("pause_at_breakpoints", False)),
         "show_trajectories": bool(preserved.get("show_trajectories", False)),
         "active_mode": "standard",
-        "gif_status": "",
+        "status_message": "",
         "view_request_id": None,
         "reset_view_request_id": None,
         "view_center_request_id": None,

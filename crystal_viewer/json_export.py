@@ -12,7 +12,7 @@ from .render_data import RenderData
 from .source_kinds import normalize_source_kind
 
 
-EXPORT_SCHEMA_VERSION = 6
+EXPORT_SCHEMA_VERSION = 7
 
 
 def export_payload(

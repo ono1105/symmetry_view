@@ -104,20 +104,52 @@ class PuzzleBrowserTest(unittest.TestCase):
     def text(self, selector: str) -> str:
         return (self.page.text_content(selector) or "").strip()
 
-    def open_quiz(self, quiz: str, structure: str, kind: str = "分子"):
-        """Quiz select -> structure picker -> a playable round."""
+    def go_to_quiz_select(self):
+        """Back out of whatever screen we are on until the quiz list is showing.
+
+        The operation quiz puts a difficulty screen between the quiz list and
+        the picker, so one 戻る does not always reach the list.
+        """
         page = self.page
-        if page.is_hidden(".puzzle-quiz-card"):
-            if page.is_hidden("#puzzle-picker"):
-                page.click("#puzzle-other")
+        for _ in range(4):
+            if page.is_visible("#puzzle-quiz-select"):
+                return
+            if page.is_hidden("#puzzle-picker") and page.is_hidden("#puzzle-operation-difficulty"):
+                page.click("#puzzle-other")  # a played round -> back to its picker
                 page.wait_for_selector(".puzzle-structure", state="visible")
             page.click("#puzzle-picker-back")
-            page.wait_for_selector(".puzzle-quiz-card", state="visible")
-        page.click(f'.puzzle-quiz-card[data-quiz="{quiz}"]')
+            page.wait_for_timeout(300)
+        self.fail("could not get back to the quiz list")
+
+    def open_picker(self, quiz: str, kind: str = "分子", difficulty: str | None = None):
+        """Quiz select -> (difficulty) -> structure picker, without picking one."""
+        page = self.page
+        self.go_to_quiz_select()
+        page.click(f'#puzzle-quiz-select .puzzle-quiz-card[data-quiz="{quiz}"]')
+        if difficulty:
+            card = (
+                "#puzzle-operation-difficulty .puzzle-quiz-card"
+                f'[data-operation-difficulty="{difficulty}"]'
+            )
+            page.wait_for_selector(card, state="visible", timeout=LOAD_TIMEOUT_MS)
+            page.click(card)
         # buildPicker() is async, so wait for it before reaching for its buttons.
         page.wait_for_selector(".puzzle-structure", state="visible", timeout=LOAD_TIMEOUT_MS)
         if page.locator(f'.puzzle-kind:has-text("{kind}")').count():
             page.click(f'.puzzle-kind:has-text("{kind}")')
+            page.wait_for_timeout(100)
+
+    def picker_names(self, quiz: str, kind: str = "分子") -> set[str]:
+        """Catalog names of the structures the picker is offering right now."""
+        self.open_picker(quiz, kind)
+        return set(self.page.locator(".puzzle-structure").evaluate_all(
+            "nodes => nodes.map(node => node.dataset.name)"))
+
+    def open_quiz(self, quiz: str, structure: str, kind: str = "分子",
+                  difficulty: str | None = None):
+        """Quiz select -> (difficulty) -> structure picker -> a playable round."""
+        page = self.page
+        self.open_picker(quiz, kind, difficulty)
         page.wait_for_selector(f'.puzzle-structure:has-text("{structure}")', state="visible")
         page.click(f'.puzzle-structure:has-text("{structure}")')
         page.wait_for_function(
@@ -125,6 +157,20 @@ class PuzzleBrowserTest(unittest.TestCase):
             ' && document.getElementById("puzzle-question").textContent.length > 0',
             timeout=LOAD_TIMEOUT_MS,
         )
+
+    def restore_puzzle_mode(self):
+        """Reload back into the quiz list; the page is shared across tests."""
+        self.page.goto(self.base_url, wait_until="networkidle")
+        self.page.wait_for_selector(".puzzle-quiz-card", state="visible", timeout=LOAD_TIMEOUT_MS)
+
+    def answer_choice_quiz(self, option_selector: str) -> str:
+        """Tick the first option of a single-choice quiz and press 回答."""
+        page = self.page
+        page.wait_for_function(READY, timeout=LOAD_TIMEOUT_MS)
+        page.locator(f"#puzzle-options {option_selector}").first.check()
+        page.click("#puzzle-check")
+        page.wait_for_function(VERDICT, timeout=LOAD_TIMEOUT_MS)
+        return self.text("#puzzle-result")
 
     def answer_operation_quiz(self) -> tuple[str, float]:
         """Tick a kind (plus a fold when one is needed) and press 回答.
@@ -140,6 +186,11 @@ class PuzzleBrowserTest(unittest.TestCase):
             orders = page.locator('#puzzle-options input[name="op-order"]')
             if orders.count():
                 orders.first.check()
+            # Screw/glide answers are incomplete without a translation component,
+            # and the hard mode refuses to judge until one is picked.
+            shifts = page.locator('#puzzle-options input[name="op-shift"]:visible')
+            if shifts.count():
+                shifts.first.check()
             started = time.perf_counter()
             page.click("#puzzle-check")
             try:
@@ -205,23 +256,71 @@ class PuzzleBrowserTest(unittest.TestCase):
         self.assertEqual(self.ring_count(), 3,
                          "the answer ring joins the source and guess rings")
 
-    def test_structure_with_no_questions_leaves_no_dead_controls(self):
-        # HCl has no mapping question. This path returns before beginRound(),
-        # which is what normally decides the buttons, so a leftover 「操作要素方向
-        # から見る」 would sit there doing nothing when pressed.
-        self.open_quiz("mapping", "C6H6")
-        self.page.wait_for_function(READY, timeout=LOAD_TIMEOUT_MS)
-        self.assertTrue(self.page.is_visible("#puzzle-view-along"))
-        self.page.click("#puzzle-other")
-        self.page.wait_for_selector(".puzzle-structure", state="visible")
-        self.page.click('.puzzle-structure:has-text("HCl")')
-        self.page.wait_for_function(
-            '() => document.getElementById("puzzle-question").textContent.includes("ありません")',
-            timeout=LOAD_TIMEOUT_MS,
+    def test_picker_offers_exactly_the_structures_the_quiz_can_ask_about(self):
+        # Two filters, not one. HCl has no mapping question and water has no
+        # composition question: both used to be offered and then dead-ended on
+        # 「問題がありません」, and the recorded question counts now hide them.
+        # Separately, a structure carrying symmetry the answer vocabulary cannot
+        # name is withheld from every quiz even though its counts are non-zero.
+        catalog = json.loads(
+            urllib.request.urlopen(self.base_url + "/api/examples", timeout=10).read()
         )
-        self.assertTrue(self.page.is_hidden("#puzzle-view-along"))
-        self.assertTrue(self.page.is_hidden("#puzzle-check"))
-        self.assertTrue(self.page.is_hidden("#puzzle-playback"))
+        for quiz, count_key, kind_label, kind in (
+            ("axis", "axis", "分子", "molecule"),
+            ("mapping", "mapping", "分子", "molecule"),
+            ("composition", "composition", "分子", "molecule"),
+            ("composition", "composition", "結晶", "crystal"),
+        ):
+            with self.subTest(quiz=quiz, kind=kind):
+                expected = {
+                    entry["name"]
+                    for entry in catalog[kind]
+                    if entry["puzzle_counts"][count_key] > 0
+                    and not entry.get("beyond_quiz_vocabulary")
+                }
+                self.assertTrue(expected, f"no {kind} can play {quiz}")
+                self.assertEqual(self.picker_names(quiz, kind_label), expected)
+
+    def test_axis_quiz_reaches_a_verdict(self):
+        # Benzene's principal axis is C6; the picker must reach a playable round
+        # and the answer must be judged. Unit tests cover axis_orders itself, so
+        # what this pins is the browser path: axis drawn, radio group posted.
+        self.open_quiz("axis", "C6H6")
+        self.page.wait_for_function(READY, timeout=LOAD_TIMEOUT_MS)
+        orders = self.page.locator('#puzzle-options input[name="puzzle-order"]')
+        self.assertGreater(orders.count(), 1, "the axis quiz offers a choice of folds")
+        verdict = self.answer_choice_quiz('input[name="puzzle-order"]')
+        self.assertRegex(verdict, r"正解|不正解")
+
+    def test_point_group_quiz_reaches_a_verdict(self):
+        # Unit tests cover the point-group table itself, so what this pins is
+        # the browser path: the structure loads bare (no highlighted element),
+        # a choice of symbols is offered, and the radio group posts and judges.
+        self.open_quiz("point_group", "C6H6")
+        self.page.wait_for_function(READY, timeout=LOAD_TIMEOUT_MS)
+        choices = self.page.locator('#puzzle-options input[name="puzzle-point-group"]')
+        self.assertGreater(choices.count(), 1, "the point-group quiz offers a choice of symbols")
+        verdict = self.answer_choice_quiz('input[name="puzzle-point-group"]')
+        self.assertRegex(verdict, r"正解|不正解")
+
+    def test_point_group_quiz_includes_the_icosahedral_clusters(self):
+        # The other four quizzes withdraw a structure with a 5-fold axis
+        # entirely (beyond_quiz_vocabulary); the point-group quiz is the one
+        # exception, since naming "Ih" never needs the closed 2/3/4/6 folds.
+        names = self.picker_names("point_group", "分子")
+        self.assertIn("al12w_icosahedron", names)
+        self.assertIn("mackay_icosahedron", names)
+
+    def test_operation_quiz_reaches_a_verdict_in_both_difficulties(self):
+        for structure, kind, difficulty in (("C6H6", "分子", "normal"), ("NaCl", "結晶", "hard")):
+            with self.subTest(difficulty=difficulty):
+                self.open_quiz("operation", structure, kind=kind, difficulty=difficulty)
+                verdict, _ = self.answer_operation_quiz()
+                self.assertRegex(verdict, r"正解|不正解")
+                if difficulty == "hard":
+                    # The hard mode asks for the translation component too, and
+                    # refuses to judge until one is picked.
+                    self.assertNotIn("並進成分も選んでください", verdict)
 
     def test_composition_reveal_never_prints_two_conflicting_notations(self):
         # "回映（S3）（S6）" is what an axis-derived label produced: the kind label
@@ -250,6 +349,68 @@ class PuzzleBrowserTest(unittest.TestCase):
             self.next_round()
         self.assertLess(max(elapsed), 1.0,
                         f"answering halite took {max(elapsed):.2f}s on screen")
+
+    def test_analysis_mode_can_still_open_an_example_after_a_quiz(self):
+        # The two clients issue load request ids from different sequences:
+        # puzzle.js sends Date.now(), the analysis panel a counter. The server
+        # keeps max(stored, incoming) so the newest load wins, which made every
+        # analysis load after a quiz smaller than the stored timestamp, and the
+        # server discarded it as stale. Nothing failed visibly — the previous
+        # structure just stayed on screen.
+        self.open_quiz("mapping", "CH4")
+        self.page.wait_for_function(READY, timeout=LOAD_TIMEOUT_MS)
+        loaded = lambda: json.loads(
+            urllib.request.urlopen(self.base_url + "/api/state", timeout=10).read()
+        ).get("json_path", "")
+        self.assertIn("methane", loaded())
+
+        # The shared page is left in analysis mode, so put the puzzle back for
+        # whatever test runs next.
+        self.addCleanup(self.restore_puzzle_mode)
+        self.go_to_quiz_select()
+        self.page.wait_for_selector("#puzzle-back", state="visible", timeout=LOAD_TIMEOUT_MS)
+        self.page.click("#puzzle-back")
+        self.page.wait_for_selector("#enter-analysis", state="visible", timeout=LOAD_TIMEOUT_MS)
+        self.page.click("#enter-analysis")
+        self.page.wait_for_selector("#open-example", state="visible", timeout=LOAD_TIMEOUT_MS)
+        # The analysis panel fetches the catalog when it first opens and lists one
+        # structure kind at a time, so wait for the options and then toggle until
+        # the molecules are the ones on offer.
+        lists_molecules = """() => [...document.getElementById('example-select').options]
+                                     .some(option => option.value.startsWith('examples/molecules/'))"""
+        self.page.wait_for_function(
+            """() => document.getElementById('example-select').options.length > 1""",
+            timeout=LOAD_TIMEOUT_MS,
+        )
+        for _ in range(3):
+            if self.page.evaluate(lists_molecules):
+                break
+            self.page.click("#structure-kind-toggle")
+            self.page.wait_for_timeout(500)
+        else:
+            self.fail("the analysis example picker never listed the molecules")
+        selected = self.page.evaluate(
+            """path => {
+                 const select = document.getElementById('example-select');
+                 select.value = path;
+                 select.dispatchEvent(new Event('change', {bubbles: true}));
+                 return select.value;
+               }""",
+            "examples/molecules/benzene.xyz",
+        )
+        self.assertEqual(selected, "examples/molecules/benzene.xyz",
+                         "the example picker is not listing molecules")
+        self.page.click("#open-example")
+        # Benzene and methane both have 24 operations, so waiting for a row count
+        # would pass on the previous structure's list. Wait for a symbol only
+        # benzene has: that covers both the load and the redraw.
+        self.page.wait_for_function(
+            """() => [...document.querySelectorAll(".operation-row")]
+                       .some(row => row.textContent.includes("C6"))""",
+            timeout=LOAD_TIMEOUT_MS,
+        )
+        self.assertIn("benzene", loaded())
+        self.assertEqual(self.page.locator(".operation-row").count(), 24)
 
     def test_no_uncaught_page_errors(self):
         self.assertEqual(self.errors, [])

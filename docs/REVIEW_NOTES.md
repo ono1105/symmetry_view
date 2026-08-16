@@ -5103,3 +5103,7 @@ GET  /api/puzzle/composition        0.579 s   (SF6)
 ### 残る所見（今回は変更していない）
 
 - 移り先クイズで、青の guess リングと対称要素として描かれる軸の線が近い色になることがある（benzene の C2 軸など）。形が違う（環と線）ので実用上は区別できるが、色設計として気になるなら別途検討。
+
+---
+
+**2026-08-16 に解消**: この節の指摘（`gif_status`・Python/JS の定数重複・最大移動距離ループの三重複・パズル中のポーリングと 2 つ目の WebGL・`renderOperationDetails` の再構築）はすべて対応済み。`gif_status` は削除ではなく `status_message` へ改名した（PyVista 側のエラー 4 種が実際に使っているため）。詳細は `docs/sessions/SESSION_REPORT_2026-08-16.md`。

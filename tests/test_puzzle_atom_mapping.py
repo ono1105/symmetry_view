@@ -1,6 +1,4 @@
-import json
 import unittest
-from pathlib import Path
 
 import numpy as np
 
@@ -9,13 +7,7 @@ from crystal_viewer.game.atom_mapping import (
     mapping_questions,
     public_questions,
 )
-
-EXPORT_DIR = Path("exports/json")
-
-
-def _render_data(name: str) -> dict:
-    payload = json.loads((EXPORT_DIR / f"{name}.json").read_text())
-    return payload.get("render_data", payload)
+from tests.support import load_render_data as _render_data
 
 
 def _atoms_by_index(render_data: dict) -> dict:

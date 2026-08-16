@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,7 @@ from tools.view_json_server import (
     ReusableThreadingHTTPServer,
     update_view_coordinate_state,
 )
+from tests.support import load_export
 
 
 class BrowserUiAssetsTest(unittest.TestCase):
@@ -94,8 +96,22 @@ class BrowserUiAssetsTest(unittest.TestCase):
         self.assertIn('<section class="panel advanced-only" id="custom-panel" hidden>', HTML)
         self.assertIn('id="mode-controls"', HTML)
         self.assertNotIn("__STRUCTURE_KIND_CONFIG__", HTML)
+        self.assertNotIn("__VIEWER_CONSTANTS__", HTML)
         self.assertNotIn("<style>", HTML)
         self.assertNotIn("<script>", HTML)
+
+    def test_viewer_constants_are_injected_from_python(self):
+        # three_view.js keeps a literal fallback so it parses without the page;
+        # this pins that the served page carries the Python value, so the two
+        # cannot drift apart unnoticed.
+        from crystal_viewer.viewer.animation_path import STATIONARY_ANIMATION_SECONDS
+
+        constants = json.loads(
+            re.search(r'id="viewer-constants"[^>]*>([^<]*)<', HTML).group(1)
+        )
+        self.assertEqual(
+            constants["stationary_animation_seconds"], STATIONARY_ANIMATION_SECONDS
+        )
 
     def test_split_assets_exist(self):
         web_dir = Path("crystal_viewer/web")
@@ -703,7 +719,7 @@ class CellSettingWorkerTest(unittest.TestCase):
         self.assertTrue(converted["atom_mappings"]["complete"])
 
     def test_worker_can_require_distinct_primitive_cell(self):
-        payload = json.loads(Path("exports/json/agcl.json").read_text(encoding="utf-8"))
+        payload = load_export("agcl")
 
         with self.assertRaises(RuntimeError):
             export_cell_setting_json_worker(
@@ -779,14 +795,32 @@ class ExampleCatalogAndPathTest(unittest.TestCase):
     def test_example_catalog_uses_canonical_directories(self):
         catalog = example_catalog()
 
-        self.assertEqual(len(catalog["crystal"]), 32)
-        self.assertEqual(len(catalog["molecule"]), 11)
+        # Count against the directories rather than a literal: the bundled set is
+        # curated and changes on purpose. tests/test_example_catalog.py checks the
+        # catalog and the directories agree.
+        self.assertEqual(len(catalog["crystal"]), len(list(Path("examples/cif").glob("*.cif"))))
+        self.assertEqual(
+            len(catalog["molecule"]), len(list(Path("examples/molecules").glob("*.xyz")))
+        )
         self.assertTrue(
             all(item["path"].startswith("examples/cif/") for item in catalog["crystal"])
         )
         self.assertTrue(
             all(item["path"].startswith("examples/molecules/") for item in catalog["molecule"])
         )
+
+    def test_catalog_passes_through_the_analysis_only_flag(self):
+        from tools.view_json_server import normalize_example_catalog
+
+        loaded = {
+            "crystal": [{"path": "examples/cif/Halite.cif", "beyond_quiz_vocabulary": True}],
+            "molecule": [{"path": "examples/molecules/water.xyz"}],
+        }
+        catalog = normalize_example_catalog(loaded)
+
+        self.assertTrue(catalog["crystal"][0]["beyond_quiz_vocabulary"])
+        # Absent means playable, so an older catalog keeps working.
+        self.assertFalse(catalog["molecule"][0]["beyond_quiz_vocabulary"])
 
     def test_resolve_example_path_accepts_catalog_crystal(self):
         path = resolve_example_path("crystal", "examples/cif/Halite.cif")

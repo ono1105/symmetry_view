@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "source_kind": "molecule",
   "render_data": {
     "metadata": {
@@ -8,6 +8,7 @@
       "formula": "XeF4",
       "symmetry_label": "D4h",
       "operation_count": 16,
+      "display_formula": "XeF4",
       "point_group_label": "D4h",
       "lattice_parameters": null,
       "space_group_generators": [],
@@ -483,11 +484,11 @@
         "matrix_cart": [
           [
             0.0,
-            -1.0,
+            -1.0000000000000002,
             0.0
           ],
           [
-            -1.0,
+            -1.0000000000000002,
             0.0,
             0.0
           ],
@@ -515,11 +516,11 @@
         "matrix_cart": [
           [
             0.0,
-            1.0,
+            1.0000000000000002,
             0.0
           ],
           [
-            1.0,
+            1.0000000000000002,
             0.0,
             0.0
           ],
@@ -658,7 +659,7 @@
         ],
         "direction_cart": [
           0.7071067811865475,
-          -0.7071067811865476,
+          -0.7071067811865477,
           0.0
         ],
         "label": "C2",
@@ -691,7 +692,7 @@
         ],
         "direction_cart": [
           0.7071067811865475,
-          0.7071067811865476,
+          0.7071067811865477,
           0.0
         ],
         "label": "C2",
@@ -1874,7 +1875,7 @@
           2,
           1
         ],
-        "max_distance": 0.0,
+        "max_distance": 4.440892098500626e-16,
         "unmatched_atoms": [],
         "entries": [
           {
@@ -1893,10 +1894,10 @@
           {
             "source_atom": 1,
             "target_atom": 4,
-            "distance": 0.0,
+            "distance": 4.440892098500626e-16,
             "transformed_cart": [
               0.0,
-              -1.95,
+              -1.9500000000000004,
               0.0
             ],
             "transformed_frac": null,
@@ -1906,10 +1907,10 @@
           {
             "source_atom": 2,
             "target_atom": 3,
-            "distance": 0.0,
+            "distance": 4.440892098500626e-16,
             "transformed_cart": [
               0.0,
-              1.95,
+              1.9500000000000004,
               0.0
             ],
             "transformed_frac": null,
@@ -1919,9 +1920,9 @@
           {
             "source_atom": 3,
             "target_atom": 2,
-            "distance": 0.0,
+            "distance": 4.440892098500626e-16,
             "transformed_cart": [
-              -1.95,
+              -1.9500000000000004,
               0.0,
               0.0
             ],
@@ -1932,9 +1933,9 @@
           {
             "source_atom": 4,
             "target_atom": 1,
-            "distance": 0.0,
+            "distance": 4.440892098500626e-16,
             "transformed_cart": [
-              1.95,
+              1.9500000000000004,
               0.0,
               0.0
             ],
@@ -1956,7 +1957,7 @@
           1,
           2
         ],
-        "max_distance": 0.0,
+        "max_distance": 4.440892098500626e-16,
         "unmatched_atoms": [],
         "entries": [
           {
@@ -1975,10 +1976,10 @@
           {
             "source_atom": 1,
             "target_atom": 3,
-            "distance": 0.0,
+            "distance": 4.440892098500626e-16,
             "transformed_cart": [
               0.0,
-              1.95,
+              1.9500000000000004,
               0.0
             ],
             "transformed_frac": null,
@@ -1988,10 +1989,10 @@
           {
             "source_atom": 2,
             "target_atom": 4,
-            "distance": 0.0,
+            "distance": 4.440892098500626e-16,
             "transformed_cart": [
               0.0,
-              -1.95,
+              -1.9500000000000004,
               0.0
             ],
             "transformed_frac": null,
@@ -2001,9 +2002,9 @@
           {
             "source_atom": 3,
             "target_atom": 1,
-            "distance": 0.0,
+            "distance": 4.440892098500626e-16,
             "transformed_cart": [
-              1.95,
+              1.9500000000000004,
               0.0,
               0.0
             ],
@@ -2014,9 +2015,9 @@
           {
             "source_atom": 4,
             "target_atom": 2,
-            "distance": 0.0,
+            "distance": 4.440892098500626e-16,
             "transformed_cart": [
-              -1.95,
+              -1.9500000000000004,
               0.0,
               0.0
             ],

@@ -1,8 +1,3 @@
-通し確認の記録（2026-08-15）
-tools/capture_report_figures.py による。パズル側と解析側を別々に走らせたため2本立て。
-どちらも headless Chromium で実際に画面を操作した結果で、未捕捉の JS 例外は0件。
-
-=== パズルモード ===
 puzzle mode
   saved docs/figures/fig04a_quiz_select.png
   saved docs/figures/fig04_puzzle_layout.png
@@ -17,17 +12,15 @@ puzzle mode
  操作あてクイズ・難しい (halite)
   saved docs/figures/fig06b_operation_hard_question.png
   saved docs/figures/fig06b_operation_hard_answer.png
-  correct on attempt 2: 正解（映進、並進成分 1/4（g(-1/4,1/4,1/2)））
+  correct on attempt 5: 正解（2回らせん、並進成分 1/2（21））
  合成クイズ (benzene)
   saved docs/figures/fig07_composition_question.png
   saved docs/figures/fig07_composition_answer.png
-  correct on attempt 1: 正解（反転（i））
+  correct on attempt 12: 正解（2回回転（C2））
  移り先クイズ (methane)
   saved docs/figures/fig08_mapping_question.png
   saved docs/figures/fig08_mapping_answer.png
-  correct on attempt 8: 正解
-
-=== 解析モード ===
+  correct on attempt 37: 正解
 analysis mode
   benzene: 24 operations, kinds=['identity', 'improper_6', 'inversion', 'mirror', 'rotation_2', 'rotation_3', 'rotation_6']
   saved docs/figures/fig02a_analysis_benzene.png

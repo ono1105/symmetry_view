@@ -11,6 +11,7 @@ from crystal_viewer.viewer.cell_settings import (
     hexagonal_conventional_render_data,
 )
 from crystal_viewer.viewer.operation_lookup import selected_mapping
+from tests.support import load_export
 
 
 class CellSettingsTest(unittest.TestCase):
@@ -47,7 +48,7 @@ class CellSettingsTest(unittest.TestCase):
         self.assertEqual(converted["metadata"]["display_cell_setting"], "primitive")
 
     def test_body_centered_tetragonal_can_be_displayed_as_primitive(self):
-        payload = json.loads(Path("exports/json/nbp.json").read_text(encoding="utf-8"))
+        payload = load_export("nbp")
         converted = standardized_cell_render_data(payload["render_data"], "primitive")
 
         self.assertIsNotNone(converted)
@@ -81,7 +82,7 @@ class CellSettingsTest(unittest.TestCase):
         self.assertTrue(mappings["complete"])
 
     def test_standardized_payload_can_require_distinct_primitive_cell(self):
-        payload = json.loads(Path("exports/json/agcl.json").read_text(encoding="utf-8"))
+        payload = load_export("agcl")
 
         self.assertIsNone(standardized_payload(payload, "primitive", require_distinct=True))
 

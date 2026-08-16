@@ -1,22 +1,15 @@
-import json
 import unittest
-from pathlib import Path
 
 import numpy as np
 
 from crystal_viewer.game.operation_identify import (
     TRANSLATION_SHIFT_OPTIONS,
+    _operation_answer,
     check_answer,
     identify_questions,
     public_questions,
 )
-
-EXPORT_DIR = Path("exports/json")
-
-
-def _render_data(name: str) -> dict:
-    payload = json.loads((EXPORT_DIR / f"{name}.json").read_text())
-    return payload.get("render_data", payload)
+from tests.support import load_render_data as _render_data
 
 
 def _answer_sets(name: str, difficulty: str = "normal"):
@@ -183,6 +176,52 @@ class OperationIdentifyTest(unittest.TestCase):
 
     def test_unknown_question_id(self):
         self.assertIsNone(check_answer(_render_data("water"), 99, "mirror"))
+
+
+def _rotoreflection(angle_deg: float) -> dict:
+    """An S operation about z: rotate by angle_deg, then reflect through z=0."""
+    angle = np.radians(angle_deg)
+    cos, sin = np.cos(angle), np.sin(angle)
+    matrix = [[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, -1.0]]
+    return {"kind": "improper_10", "order": 10, "matrix_cart": matrix}
+
+
+class ImproperIndexTest(unittest.TestCase):
+    """The Sn index comes from the rotation angle, and must reproduce it.
+
+    Rounding 360/theta names *every* angle something. S10^3 (108 deg) rounded to
+    3, so it was published as a question whose revealed answer was S3 — a
+    confident wrong answer rather than a crash.
+    """
+
+    def test_a_power_of_an_s10_axis_is_not_called_s3(self):
+        self.assertIsNone(_operation_answer({}, _rotoreflection(108.0)))
+
+    def test_s10_itself_is_rejected_as_outside_the_vocabulary(self):
+        # 360/10 reproduces the angle, but 10 is not an offered answer.
+        self.assertIsNone(_operation_answer({}, _rotoreflection(36.0)))
+
+    def test_a_genuine_s3_is_still_named(self):
+        self.assertEqual(
+            _operation_answer({}, _rotoreflection(120.0)),
+            {"kind": "rotoreflection", "order": 3},
+        )
+
+    def test_a_genuine_s4_and_s6_are_still_named(self):
+        self.assertEqual(_operation_answer({}, _rotoreflection(90.0))["order"], 4)
+        self.assertEqual(_operation_answer({}, _rotoreflection(60.0))["order"], 6)
+
+    def test_benzene_still_offers_both_s6_and_s3(self):
+        # The principal axis carries both, and they share a matrix period of 6:
+        # only the angle tells them apart. This is the regression that a
+        # "use the matrix order instead" "fix" would cause.
+        improper = {
+            (answer["kind"], answer["order"])
+            for question in identify_questions(_render_data("benzene"))
+            for answer in question["answers"]
+            if answer["kind"] == "rotoreflection"
+        }
+        self.assertEqual(improper, {("rotoreflection", 6), ("rotoreflection", 3)})
 
 
 if __name__ == "__main__":

@@ -5,6 +5,13 @@ let lastAtomMotionRequestKey = "";
 let pendingAtomMotionRequestKey = "";
 let atomMotionRequestGeneration = 0;
 let lastAtomRenderSignature = "";
+let lastOperationRenderSignature = "";
+// Which element groups (see operationGroupKey) the player has expanded past
+// the default collapse threshold, and which structure that set belongs to --
+// cleared on structure change so a stale expansion does not carry over.
+let expandedOperationGroups = new Set();
+let expandedOperationGroupsSource = null;
+let lastOperationDetailsSignature = "";
 let lastStructureInfoSignature = "";
 let state = {};
 let directionFilterValue = "";
@@ -354,44 +361,146 @@ function visibilityButton(visible, title, onToggle) {
   return button;
 }
 
+// How many rows a same-element run (e.g. six C2 axes) shows before collapsing
+// behind a "+N more" toggle. Matches the Jmol-style grouping this UI takes
+// after: identify the axis/plane/center once, then list what lives on it.
+const OPERATION_GROUP_COLLAPSE_THRESHOLD = 3;
+
+// The (direction, point) prefix of `element_sort_key`, without the trailing
+// operation symbol. Two operations on the very same axis carry different
+// symbols (C6 vs C3) and so different `element_sort_key` strings, but they
+// belong under one header -- this is what makes rows with a shared axis/plane
+// visually adjacent instead of the flat, look-alike list this replaces.
+function operationGroupKey(operation) {
+  const key = String(operation.element_sort_key || "");
+  const [direction = "", point = ""] = key.split("|");
+  return `${direction}|${point}`;
+}
+
+// null for the ungroupable cases (a lone translation, the identity): those
+// render as plain rows with no header, same as before.
+function operationGroupKind(operation) {
+  const key = String(operation.element_sort_key || "");
+  if (key.startsWith("axis:")) return "axis";
+  if (key.startsWith("plane:")) return "plane";
+  if (key.startsWith("center")) return "center";
+  return null;
+}
+
+function operationGroupLabel(operation) {
+  const kind = operationGroupKind(operation);
+  const direction = operation.direction_label || operation.direction_filter_label || "";
+  if (kind === "axis") return experienceMode === "beginner" ? `軸 ${direction}` : `Axis ${direction}`;
+  if (kind === "plane") return experienceMode === "beginner" ? `面 ${direction}` : `Plane ${direction}`;
+  if (kind === "center") return experienceMode === "beginner" ? "反転中心" : "Inversion center";
+  return "";
+}
+
+function buildOperationRow(operation, grouped, showHint) {
+  const text = optionText(operation);
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = grouped ? "operation-row operation-row--grouped" : "operation-row";
+  row.dataset.index = operation.index;
+  row.setAttribute("role", "option");
+  row.setAttribute("aria-selected", operation.index === state.operation_index ? "true" : "false");
+  if (operation.index === state.operation_index) row.classList.add("selected");
+  if (experienceMode === "beginner") {
+    const operationNumber = document.createElement("span");
+    operationNumber.className = "operation-number";
+    operationNumber.textContent = `op ${operation.index}:`;
+    operationNumber.title = "Stable operation index (independent of sort order)";
+    row.appendChild(operationNumber);
+  }
+  row.appendChild(renderHtml(text));
+  // A lone operation on its own axis/plane never gets a group header (one
+  // above it would be a header of one), so without this hint two rows like
+  // "op1: C2" and "op4: C2" are only distinguishable by clicking each one.
+  if (showHint) {
+    const direction = operation.direction_filter_label || "";
+    if (direction && direction !== "none") {
+      const hint = document.createElement("span");
+      hint.className = "operation-direction-hint";
+      hint.textContent = direction;
+      row.appendChild(hint);
+    }
+  }
+  row.addEventListener("click", () => {
+    activeMode = "standard";
+    customUnmappedAtoms = new Set();
+    syncActiveModeControls();
+    postState({
+      active_mode: "standard",
+      operation_index: operation.index,
+      playing: false,
+      reset: true,
+      clear_custom_check: true,
+    });
+  });
+  return row;
+}
+
 function renderOperations() {
   renderOperationTypeFilter();
   const root = document.getElementById("operations");
   const sorted = sortedOperations();
+  // Driven by the 1 s poll and by every postState, so most calls have nothing
+  // to change. Rebuilding the list anyway discards scroll position and hover.
+  const signature = operationListRenderSignature(sorted);
+  if (signature === lastOperationRenderSignature && root.childElementCount) return;
+  lastOperationRenderSignature = signature;
+  if (expandedOperationGroupsSource !== (state.json_path || "")) {
+    expandedOperationGroups = new Set();
+    expandedOperationGroupsSource = state.json_path || "";
+  }
   root.innerHTML = "";
-  for (const operation of sorted) {
-    if (operationTypeFilterValue && operationSymbolFilterKey(operation) !== operationTypeFilterValue) continue;
-    if (directionFilterValue && operationFilterKey(operation) !== directionFilterValue) continue;
-    if (fixedAtomFilterEnabled && !operationFixesSelectedAtoms(operation)) continue;
-    const text = optionText(operation);
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "operation-row";
-    row.dataset.index = operation.index;
-    row.setAttribute("role", "option");
-    row.setAttribute("aria-selected", operation.index === state.operation_index ? "true" : "false");
-    if (operation.index === state.operation_index) row.classList.add("selected");
-    if (experienceMode === "beginner") {
-      const operationNumber = document.createElement("span");
-      operationNumber.className = "operation-number";
-      operationNumber.textContent = `op ${operation.index}:`;
-      operationNumber.title = "Stable operation index (independent of sort order)";
-      row.appendChild(operationNumber);
+  const filtered = sorted.filter(operation =>
+    !(operationTypeFilterValue && operationSymbolFilterKey(operation) !== operationTypeFilterValue)
+    && !(directionFilterValue && operationFilterKey(operation) !== directionFilterValue)
+    && !(fixedAtomFilterEnabled && !operationFixesSelectedAtoms(operation))
+  );
+  // Group consecutive rows that share an axis/plane/center: `sortedOperations()`
+  // already clusters them (by index within the beginner kind order, or by the
+  // element sort key itself in "Axis / plane / center" mode), so a header only
+  // needs to watch for the group key changing between neighbours.
+  let index = 0;
+  while (index < filtered.length) {
+    const groupKey = operationGroupKey(filtered[index]);
+    const groupKind = operationGroupKind(filtered[index]);
+    let end = index + 1;
+    while (end < filtered.length && operationGroupKey(filtered[end]) === groupKey) end++;
+    const group = filtered.slice(index, end);
+    const grouped = Boolean(groupKind) && group.length > 1;
+    if (grouped) {
+      const header = document.createElement("div");
+      header.className = "operation-group-header";
+      header.appendChild(renderHtml(operationGroupLabel(group[0])));
+      root.appendChild(header);
     }
-    row.appendChild(renderHtml(text));
-    row.addEventListener("click", () => {
-      activeMode = "standard";
-      customUnmappedAtoms = new Set();
-      syncActiveModeControls();
-      postState({
-        active_mode: "standard",
-        operation_index: operation.index,
-        playing: false,
-        reset: true,
-        clear_custom_check: true,
+    const collapsed = grouped
+      && group.length > OPERATION_GROUP_COLLAPSE_THRESHOLD
+      && !expandedOperationGroups.has(groupKey);
+    const visible = collapsed ? group.slice(0, OPERATION_GROUP_COLLAPSE_THRESHOLD) : group;
+    // A header already names the axis/plane once for the whole group; a lone
+    // operation on its own element has no header, so it carries its own hint.
+    const showHint = Boolean(groupKind) && !grouped;
+    for (const operation of visible) {
+      root.appendChild(buildOperationRow(operation, grouped, showHint));
+    }
+    if (collapsed) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "operation-group-toggle";
+      const hidden = group.length - OPERATION_GROUP_COLLAPSE_THRESHOLD;
+      toggle.textContent = experienceMode === "beginner" ? `他 ${hidden} 件を表示` : `+ ${hidden} more`;
+      toggle.addEventListener("click", () => {
+        expandedOperationGroups.add(groupKey);
+        lastOperationRenderSignature = ""; // the signature alone would not change
+        renderOperations();
       });
-    });
-    root.appendChild(row);
+      root.appendChild(toggle);
+    }
+    index = end;
   }
   if (activeMode === "custom" && experienceMode === "advanced" && sourceKind === "crystal") {
     renderCustomSequenceControls(sorted);
@@ -1036,7 +1145,7 @@ function syncExamplePicker(items = sortedExampleItems(exampleCatalog[selectedStr
     trigger.textContent = "Select example...";
   } else {
     const prefix = document.createElement("span");
-    prefix.textContent = `${selected.formula ? `${selected.formula} ` : ""}${selected.name}`;
+    prefix.textContent = `${exampleFormula(selected) ? `${exampleFormula(selected)} ` : ""}${selected.name}`;
     trigger.appendChild(prefix);
     if (selected.symmetry) {
       trigger.appendChild(document.createTextNode(" — "));
@@ -1063,15 +1172,28 @@ function spaceGroupNumber(label) {
   return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
+function exampleFormula(item) {
+  // display_formula keeps molecules readable (C6H6 rather than the reduced HC).
+  return item.display_formula || item.formula || "";
+}
+
 function exampleOptionText(item) {
-  const formula = item.formula ? `${item.formula} ` : "";
+  const formula = exampleFormula(item) ? `${exampleFormula(item)} ` : "";
   const symmetry = item.symmetry ? formatPlainOverbar(formatSymbol(item.symmetry)) : "";
   return symmetry ? `${formula}${item.name} — ${symmetry}` : `${formula}${item.name}`;
 }
 
 function beginImport(message) {
   importInProgress = true;
-  const requestId = ++importRequestId;
+  // Take the id from the clock, not from a counter. puzzle.js stamps its own
+  // loads with Date.now() and the server keeps max(stored, incoming) so that
+  // the newest load wins; a counter starting at 1 is below every timestamp the
+  // puzzle has sent, so after playing a quiz every analysis-mode load came back
+  // {"ok": false, "stale": true} and was silently discarded — the old structure
+  // simply stayed on screen. Stay monotonic so two loads in the same
+  // millisecond still get distinct ids.
+  const requestId = Math.max(Date.now(), importRequestId + 1);
+  importRequestId = requestId;
   hideLoadError();
   syncImportControls();
   document.getElementById("status").textContent = message;
@@ -1232,10 +1354,35 @@ function appendOperationTitle(root, value) {
 function renderOperationDetails() {
   const div = document.getElementById("op-details");
   if (activeMode === "custom") {
+    // Driven by copMatrix and its nested result rather than by `operations`,
+    // so it has different inputs and keeps its own unconditional rebuild.
+    lastOperationDetailsSignature = "";
     renderCustomOperationDetails();
     return;
   }
   const op = operations.find(o => o.index === state.operation_index);
+  // Called from the 1 s poll and from every postState, almost always with
+  // nothing changed. The summaries (element_summary / itc_like_summary) arrive
+  // on a later fetch than the operation itself, so they belong in the
+  // signature: without them the panel would keep the pre-summary text.
+  const signature = JSON.stringify({
+    source: state.json_path || "",
+    reload: state.reload_request_id || 0,
+    sourceKind,
+    experienceMode,
+    operationLabelMode,
+    improperMode: state.improper_mode || "auto",
+    selected: state.operation_index,
+    operation: op && [
+      op.index,
+      op.symbol,
+      op.display_symbol,
+      op.element_summary,
+      op.itc_like_summary,
+    ],
+  });
+  if (signature === lastOperationDetailsSignature && div.childElementCount) return;
+  lastOperationDetailsSignature = signature;
   div.replaceChildren();
   if (!op) return;
   appendOperationTitle(div, optionText(op));
@@ -1537,6 +1684,38 @@ function renderSelectedAtomSummary() {
   root.appendChild(details);
 }
 
+function operationListRenderSignature(sorted) {
+  return JSON.stringify({
+    // The rows must be keyed on what they say, not just how many there are.
+    // `operations` and `state` are refreshed by separate responses, so there is
+    // a moment when the new structure's json_path is paired with the previous
+    // structure's operations; benzene and methane both have 24 operations
+    // numbered 0-23, and indices alone left methane's rows on screen.
+    source: state.json_path || "",
+    reload: state.reload_request_id || 0,
+    operations: sorted.map(operation => [
+      operation.index,
+      operation.symbol || "",
+      operation.display_symbol || "",
+    ]),
+    selected: state.operation_index,
+    operationTypeFilterValue,
+    directionFilterValue,
+    fixedAtomFilterEnabled,
+    // The fixed-atom filter and the beginner labels read these, so a change in
+    // either changes what the rows say even when the operation list has not.
+    fixed_atoms: fixedAtomFilterEnabled ? (state.selected_atoms || []) : [],
+    experienceMode,
+    improperMode: state.improper_mode || "auto",
+    // element_summary, the axis/plane/center group headers and the per-row
+    // direction hint all read fields that only arrive once summaries are
+    // ready. Without this, the first (pre-summary) render's signature still
+    // matches once the real data lands, and the refresh that re-fetches
+    // `operations` at that point (see refreshState) silently no-ops here.
+    summariesReady,
+  });
+}
+
 function atomListRenderSignature() {
   return JSON.stringify({
     atoms: atoms.map(atom => [
@@ -1703,8 +1882,8 @@ function setMovementProgress(progress) {
   const next = document.getElementById("next-frame");
   if (slider) slider.value = String(Math.round(value * 1000));
   if (output) output.textContent = `${Math.round(value * 100)}%`;
-  if (previous) previous.disabled = isGifSaving() || value <= 0;
-  if (next) next.disabled = isGifSaving() || value >= 1;
+  if (previous) previous.disabled = value <= 0;
+  if (next) next.disabled = value >= 1;
   syncPlayToggleButton();
 }
 
@@ -1741,25 +1920,6 @@ function stepMovementProgress(direction) {
     : proposed;
   if (state.playing) postState({playing: false});
   dispatchMovementProgress(progress);
-}
-
-function isGifSaving() {
-  return String(state.gif_status || "").startsWith("writing ");
-}
-
-function syncGifSavingControls() {
-  const saving = isGifSaving();
-  document.body.classList.toggle("saving-gif", saving);
-  for (const id of [
-    "save-gif", "play-toggle", "reset",
-    "previous-frame", "next-frame",
-  ]) {
-    const button = document.getElementById(id);
-    if (button) button.disabled = saving;
-  }
-  const saveGif = document.getElementById("save-gif");
-  if (saveGif) saveGif.textContent = saving ? "Saving..." : "Save GIF";
-  setMovementProgress(movementProgressValue);
 }
 
 function selectedAtomIndices() {
@@ -1805,7 +1965,7 @@ function renderStatus() {
     `selected atoms: ${selected}\\n` +
     `source: ${state.json_path || "-"}\\n` +
     `import: ${state.import_status || "-"}\\n` +
-    `gif: ${state.gif_status || "-"}`;
+    `status: ${state.status_message || "-"}`;
 }
 
 function viewCenterValue(id, fallback = 0) {
@@ -1907,7 +2067,6 @@ async function postState(update) {
   syncOperationLabelModeControls();
   syncAtomModeButtons();
   syncPlayToggleButton();
-  syncGifSavingControls();
   renderElementColorControls();
   renderDirectionFilter();
   renderOperations();
@@ -1958,8 +2117,7 @@ async function applyCellSetting(mode) {
     syncImproperModeControl();
     syncAtomModeButtons();
     syncPlayToggleButton();
-    syncGifSavingControls();
-    renderOperations();
+      renderOperations();
     await refreshAtomMotion();
     renderAtoms();
     renderSelectedAtomSummary();
@@ -2144,7 +2302,6 @@ async function applyLoadedStructure(result, fallbackError, examplePath = "", con
   syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
-  syncGifSavingControls();
   renderOperations();
   await refreshAtomMotion();
   renderAtoms();
@@ -2239,6 +2396,11 @@ for (const button of document.querySelectorAll(".mode-button")) {
 
 async function refreshState() {
   if (refreshInProgress) return;
+  // Nothing of the analysis panel is on screen during a quiz, so the 1 s poll
+  // would fetch and re-sync a dozen controls nobody can see. Re-entering
+  // analysis calls refreshAnalysisFromServer(), so no state is lost by
+  // skipping. The 3D view's own loop already bails on the same class.
+  if (document.body.classList.contains("in-puzzle")) return;
   refreshInProgress = true;
   try {
     state = await api("/api/state");
@@ -2893,7 +3055,6 @@ async function boot() {
   syncImproperModeControl();
   syncAtomModeButtons();
   syncPlayToggleButton();
-  syncGifSavingControls();
   renderOperations();
   renderAtoms();
   renderSelectedAtomSummary();
@@ -2949,8 +3110,7 @@ async function refreshAnalysisFromServer() {
     syncImproperModeControl();
     syncAtomModeButtons();
     syncPlayToggleButton();
-    syncGifSavingControls();
-    renderOperations();
+      renderOperations();
     renderAtoms();
     renderSelectedAtomSummary();
     renderStructureInfo();
@@ -2992,7 +3152,12 @@ function applyAppMode() {
   if (appMode === "puzzle") {
     // puzzle.js lazily builds its own 3D view the first time this fires.
     window.dispatchEvent(new Event("symmetry-enter-puzzle"));
+  } else {
+    // Tell the puzzle's view to stop drawing; without this both renderers keep
+    // an animation frame loop running for as long as the page is open.
+    window.dispatchEvent(new Event("symmetry-exit-puzzle"));
   }
+  window.symmetryThreeView?.setActive(appMode !== "puzzle");
 }
 function setAppMode(mode) {
   appMode = mode;

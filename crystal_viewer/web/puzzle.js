@@ -1,4 +1,5 @@
 import { StaticStructureView } from "/static/three_view.js";
+import { PUZZLE_RING_COLORS } from "/static/colors.js";
 
 // Puzzle mode (docs/PUZZLE_SPEC.md). Two quizzes share one flow — pick a quiz,
 // pick a structure, answer — and both reuse the analysis-mode StaticStructureView
@@ -9,7 +10,7 @@ import { StaticStructureView } from "/static/three_view.js";
 let view = null;
 let started = false;
 let catalog = null;
-let currentQuiz = "axis"; // "axis" | "operation" | "composition" | "mapping"
+let currentQuiz = "axis"; // "axis" | "operation" | "composition" | "mapping" | "point_group"
 let currentOperationDifficulty = "normal"; // "normal" | "hard"
 let currentKind = "molecule"; // structure picker toggle
 let currentSourceKind = "molecule"; // kind of the loaded structure (for answer options)
@@ -31,26 +32,15 @@ const INFINITE = "inf";
 const SHIFT_OPTIONS = ["1/6", "1/4", "1/3", "1/2", "2/3", "3/4", "5/6"];
 // Mapping quiz: ring colours (source / player's guess / correct target) and how
 // far to preview the motion so the direction of a rotation is unambiguous while
-// the final landing still has to be predicted.
-const PICK_SOURCE_COLOR = 0xffd23f;
-const PICK_GUESS_COLOR = 0x3d9be9;
-const PICK_TARGET_COLOR = 0x35c46a;
+// the final landing still has to be predicted. Colours come from colors.js so
+// they cannot silently collide with the symmetry-element colours three_view.js
+// draws in the same view (a blue guess ring used to sit almost on top of the
+// axis colour before that module existed).
+const PICK_SOURCE_COLOR = PUZZLE_RING_COLORS.source;
+const PICK_GUESS_COLOR = PUZZLE_RING_COLORS.guess;
+const PICK_TARGET_COLOR = PUZZLE_RING_COLORS.target;
 const MAPPING_CURVED_PREVIEW = 0.18;
 const MAPPING_STRAIGHT_PREVIEW = 0.10;
-const PUZZLE_CRYSTAL_EXAMPLES = new Set([
-  "Antimony",
-  "BaTiO3",
-  "Bromine",
-  "Cadmoselite",
-  "Edgarite",
-  "Ge Hf O4",
-  "Halite",
-  "Helium",
-  "Manganese-beta",
-  "NbP",
-  "Qusongite",
-  "Tellurium",
-]);
 
 // Operation-identify answer vocabulary (canonical kinds match game/operation_identify.py).
 // `orders` lists the folds offered for that kind (null = kind only). The improper
@@ -133,26 +123,40 @@ function formatOperationAnswers(answers) {
     .join(" または ");
 }
 
-// The catalog stores reduced formulae (benzene -> "HC"), which are wrong as
-// molecular formulae. For the curated example molecules keep proper, familiar
-// formulae; anything else falls back to the catalog value or the name.
-const MOLECULAR_FORMULA = {
-  water: "H2O",
-  ammonia: "NH3",
-  benzene: "C6H6",
-  methane: "CH4",
-  carbon_dioxide: "CO2",
-  boron_trifluoride: "BF3",
-  sulfur_hexafluoride: "SF6",
-  xenon_tetrafluoride: "XeF4",
-  allene: "C3H4",
-  ethene: "C2H4",
-  hydrogen_chloride: "HCl",
-};
-
 function displayLabel(example) {
-  const source = example.kind === "molecule" ? MOLECULAR_FORMULA[example.name] : null;
-  return formatFormula(source || example.formula || example.name);
+  // display_formula is the formula as a chemist writes it (C6H6, not the
+  // reduced HC); the analysis layer computes it, so there is no table here.
+  return formatFormula(example.display_formula || example.formula || example.name);
+}
+
+// Which catalog count decides whether the current quiz can use a structure.
+function puzzleCountKey() {
+  if (currentQuiz === "operation") {
+    return currentOperationDifficulty === "hard" ? "operation_hard" : "operation_normal";
+  }
+  return currentQuiz === "axis" ? "axis" : currentQuiz;
+}
+
+function isEligible(example) {
+  // Structures carrying symmetry the answer vocabulary cannot name are analysis
+  // only. This is not the same test as "has no questions": an icosahedral
+  // cluster has plenty of C2/C3 questions, and asking only those would teach
+  // that its 5-fold axes are not there.
+  // The point-group quiz is the one exception: naming the whole structure's
+  // point group (e.g. "Ih") never asks for a fold from the closed vocabulary,
+  // so a 5-fold axis does not make that question a lie the way it would for
+  // the other four (see beyond_quiz_vocabulary() in game/catalog.py).
+  if (currentQuiz !== "point_group" && example.beyond_quiz_vocabulary) return false;
+  // Counts come from the catalog, which the export step computes by running the
+  // real question generators. Without them (filesystem fallback catalog) assume
+  // playable rather than hiding everything.
+  const counts = example.puzzle_counts;
+  if (!counts) return true;
+  return Number(counts[puzzleCountKey()] || 0) > 0;
+}
+
+function eligibleExamples(kind) {
+  return (catalog?.[kind] || []).filter(isEligible);
 }
 
 // --- Screens: quiz select -> structure picker -> play ---
@@ -233,12 +237,11 @@ async function buildPicker() {
   if (!catalog) catalog = await getJson("/api/examples");
   const root = el("puzzle-picker");
   root.innerHTML = "";
-  const structureKinds =
-    currentQuiz === "operation" && currentOperationDifficulty === "hard"
-      ? STRUCTURE_KINDS.filter((item) => item.kind === "crystal")
-      : currentQuiz === "mapping"
-        ? STRUCTURE_KINDS.filter((item) => item.kind === "molecule")
-        : STRUCTURE_KINDS;
+  // Offer a kind only when it has a playable structure for this quiz. This
+  // derives what used to be hardcoded: molecules never score operation_hard
+  // (no screws or glides) and crystals never score mapping, so the hard
+  // operation quiz stays crystal-only and the mapping quiz molecule-only.
+  const structureKinds = STRUCTURE_KINDS.filter((item) => eligibleExamples(item.kind).length > 0);
   if (!structureKinds.some((item) => item.kind === currentKind)) {
     currentKind = structureKinds[0]?.kind || "molecule";
   }
@@ -265,16 +268,25 @@ async function buildPicker() {
   root.appendChild(heading);
   const list = document.createElement("div");
   list.className = "puzzle-picker-list";
-  const examples = (catalog[currentKind] || []).filter(
-    (example) => currentKind !== "crystal" || PUZZLE_CRYSTAL_EXAMPLES.has(example.name),
-  );
+  const examples = eligibleExamples(currentKind);
+  // Formulae are not unique (diamond and graphite are both C), so disambiguate
+  // with the structure name, but only where a label actually repeats.
+  const labelCounts = new Map();
   for (const example of examples) {
+    const label = displayLabel(example);
+    labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+  }
+  for (const example of examples) {
+    const label = displayLabel(example);
     const button = document.createElement("button");
     button.type = "button";
     button.className = "puzzle-structure";
+    button.dataset.name = example.name;
     // Only the name/formula — the point/space group would give the answer away.
-    button.innerHTML = `<span class="puzzle-structure-name">${displayLabel(example)}</span>`;
-    button.addEventListener("click", () => startStructure(example).catch(showError));
+    const suffix =
+      labelCounts.get(label) > 1 ? ` <span class="puzzle-structure-note">${escapeHtml(example.name)}</span>` : "";
+    button.innerHTML = `<span class="puzzle-structure-name">${label}${suffix}</span>`;
+    button.addEventListener("click", () => startStructure(example, label + suffix).catch(showError));
     list.appendChild(button);
   }
   root.appendChild(list);
@@ -315,11 +327,11 @@ function showPrompt(message) {
   result.textContent = message;
 }
 
-async function startStructure(example) {
+async function startStructure(example, label = displayLabel(example)) {
   const generation = invalidatePuzzleWork();
   showPlay();
   // Name/formula only; the point/space group would reveal the answer.
-  el("puzzle-structure-title").innerHTML = displayLabel(example);
+  el("puzzle-structure-title").innerHTML = label;
   el("puzzle-question").textContent = "読み込み中…";
   el("puzzle-options").innerHTML = "";
   el("puzzle-result").hidden = true;
@@ -359,7 +371,9 @@ async function startStructure(example) {
         ? "/api/puzzle/composition"
         : currentQuiz === "mapping"
           ? "/api/puzzle/mapping"
-          : `/api/puzzle/operations?difficulty=${currentOperationDifficulty}`;
+          : currentQuiz === "point_group"
+            ? "/api/puzzle/point_group"
+            : `/api/puzzle/operations?difficulty=${currentOperationDifficulty}`;
   const payload = await getJson(endpoint);
   if (generation !== roundGeneration) return;
   currentSourceKind = payload.source_kind || example.kind;
@@ -374,9 +388,11 @@ async function startStructure(example) {
           ? "2つの操作を合成してできる操作"
           : currentQuiz === "mapping"
             ? "移り先を答えられる原子"
-            : currentOperationDifficulty === "hard"
-              ? "並進を含む操作（らせん・映進）"
-              : "基本操作";
+            : currentQuiz === "point_group"
+              ? "点群"
+              : currentOperationDifficulty === "hard"
+                ? "並進を含む操作（らせん・映進）"
+                : "基本操作";
     el("puzzle-question").textContent = `この${noun}には出題できる${what}がありません。別の${noun}を選んでください。`;
     el("puzzle-options").innerHTML = "";
     el("puzzle-check").hidden = true;
@@ -435,6 +451,7 @@ function beginRound() {
   if (currentQuiz === "axis") beginAxisRound();
   else if (currentQuiz === "composition") beginCompositionRound();
   else if (currentQuiz === "mapping") beginMappingRound().catch(showError);
+  else if (currentQuiz === "point_group") beginPointGroupRound();
   else beginOperationRound();
 }
 
@@ -455,6 +472,47 @@ function beginAxisRound() {
     options.appendChild(label);
   }
   el("puzzle-playback").hidden = true; // reveal controls appear after answering
+}
+
+// --- Point-group quiz (bare structure, no highlighted element -- name the whole
+// thing's point group from a small multiple-choice list) ---
+
+function beginPointGroupRound() {
+  el("puzzle-question").textContent = "この構造の点群はどれですか？";
+  const options = el("puzzle-options");
+  for (const symbol of currentQuestion.options) {
+    const label = document.createElement("label");
+    label.className = "puzzle-option";
+    label.innerHTML = `<input type="radio" name="puzzle-point-group" value="${escapeHtml(symbol)}"><span>${escapeHtml(symbol)}</span>`;
+    options.appendChild(label);
+  }
+  el("puzzle-playback").hidden = true; // nothing to animate for this quiz
+}
+
+function selectedPointGroup() {
+  const checked = el("puzzle-options").querySelector('input[name="puzzle-point-group"]:checked');
+  return checked ? checked.value : null;
+}
+
+async function onCheckPointGroup() {
+  const generation = roundGeneration;
+  const selected = selectedPointGroup();
+  if (selected == null) {
+    showPrompt("点群を1つ選んでください。");
+    return;
+  }
+  el("puzzle-check").disabled = true;
+  const result = await getJson("/api/puzzle/point_group/check", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question_id: currentQuestion.id, selected }),
+  });
+  if (generation !== roundGeneration) return;
+  const box = el("puzzle-result");
+  box.hidden = false;
+  box.className = `puzzle-result ${result.correct ? "hit" : "miss"}`;
+  box.textContent = result.correct ? "正解" : `不正解（正解は ${escapeHtml(result.answer)}）`;
+  el("puzzle-again").hidden = false;
 }
 
 function beginOperationRound() {
@@ -981,6 +1039,7 @@ async function onCheck() {
   if (currentQuiz === "axis") return onCheckAxis();
   if (currentQuiz === "composition") return onCheckComposition();
   if (currentQuiz === "mapping") return onCheckMapping();
+  if (currentQuiz === "point_group") return onCheckPointGroup();
   return onCheckOperation();
 }
 
@@ -1232,12 +1291,16 @@ function enterPuzzle() {
     view.disableAtomSelection = true;
     setupControls();
   } else if (view) {
+    view.setActive(true);
     view.resize();
   }
   showQuizSelect();
 }
 
 window.addEventListener("symmetry-enter-puzzle", enterPuzzle);
+// Leaving the puzzle hides this canvas but does not destroy it, so stop its
+// frame loop; the analysis view resumes its own on the way in.
+window.addEventListener("symmetry-exit-puzzle", () => view?.setActive(false));
 
 // In --mode puzzle the classic UI script can dispatch its entry event before this
 // module has registered the listener. Recover from that ordering by inspecting the

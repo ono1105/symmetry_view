@@ -8,7 +8,10 @@ from crystal_viewer.json_export import to_jsonable
 from crystal_viewer.source_kinds import SOURCE_KIND_MOLECULE, normalize_source_kind
 from crystal_viewer.viewer.animation_context import animation_paths, display_equivalent_operation_context
 from crystal_viewer.viewer.custom_animation import build_custom_animation_paths
-from crystal_viewer.viewer.animation_path import animation_path_length, normalized_animation_duration_seconds
+from crystal_viewer.viewer.animation_path import (
+    maximum_travel_distance,
+    normalized_animation_duration_seconds,
+)
 from crystal_viewer.viewer.display_atoms import display_atom_instances, display_scene_span
 from crystal_viewer.viewer.operation_lookup import operation_by_index, selected_mapping
 from crystal_viewer.viewer.operation_labels import (
@@ -83,20 +86,14 @@ def animation_path_response(
             }
         )
 
-    maximum_travel_distance = 0.0
-    for instance in display_atom_instances(
+    travel = maximum_travel_distance(
         render_data,
+        paths,
         display_mode=display_mode,
         cell_origin_mode=cell_origin_mode,
         include_boundary_images=include_boundary_images,
-    ):
-        path = paths.get(int(instance["atom"]["index"]))
-        if path is None or (unit_cell_only and not instance["is_primary_image"]):
-            continue
-        maximum_travel_distance = max(
-            maximum_travel_distance,
-            animation_path_length(path, start_override=instance["cart"]),
-        )
+        unit_cell_only=unit_cell_only,
+    )
 
     return {
         "schema_version": ANIMATION_PATH_SCHEMA_VERSION,
@@ -108,9 +105,9 @@ def animation_path_response(
             else CRYSTAL_PERIODIC_IMAGE_POLICY
         ),
         "operation_index": int(operation_index),
-        "maximum_travel_distance": maximum_travel_distance,
+        "maximum_travel_distance": travel,
         "animation_duration_seconds": normalized_animation_duration_seconds(
-            maximum_travel_distance,
+            travel,
             display_scene_span(render_data, display_mode, cell_origin_mode),
         ),
         "boundary": animation_boundary_context(
@@ -152,15 +149,13 @@ def custom_animation_path_response(
         display_mode=display_mode, cell_origin_mode=cell_origin_mode,
     )
     items = [{"source_atom": source, "path": serialize_animation_path(path)} for source, path in sorted(paths.items())]
-    maximum = 0.0
-    for instance in display_atom_instances(
-        render_data, display_mode=display_mode, cell_origin_mode=cell_origin_mode,
+    maximum = maximum_travel_distance(
+        render_data,
+        paths,
+        display_mode=display_mode,
+        cell_origin_mode=cell_origin_mode,
         include_boundary_images=include_boundary_images,
-    ):
-        path = paths.get(int(instance["atom"]["index"]))
-        if path is None or (path.get("unit_cell_only") and not instance["is_primary_image"]):
-            continue
-        maximum = max(maximum, animation_path_length(path, start_override=instance["cart"]))
+    )
     return {
         "schema_version": ANIMATION_PATH_SCHEMA_VERSION,
         "coordinate_space": ANIMATION_COORDINATE_SPACE,

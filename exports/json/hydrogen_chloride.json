@@ -1,14 +1,15 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "source_kind": "molecule",
   "render_data": {
     "metadata": {
       "mode": "molecule",
       "source_file": "examples/molecules/hydrogen_chloride.xyz",
       "formula": "HCl",
-      "symmetry_label": "C*v",
+      "symmetry_label": "C∞v",
       "operation_count": 3,
-      "point_group_label": "C*v",
+      "display_formula": "HCl",
+      "point_group_label": "C∞v",
       "lattice_parameters": null,
       "space_group_generators": [],
       "point_group_generators": [

@@ -124,6 +124,25 @@ class PuzzleServerApiTest(unittest.TestCase):
                 self.assertTrue(checked["correct"])
                 self.assertEqual(checked["target_atom_index"], private["target_atom_index"])
 
+    def test_point_group_routes_hide_then_reveal_the_answer(self):
+        for name in ("methane", "benzene", "halite"):
+            with self.subTest(structure=name):
+                served = self.served[name]
+                public = served.get_json("/api/puzzle/point_group")
+                self.assertTrue(public["questions"])
+                question = public["questions"][0]
+                self.assertNotIn("correct", question)
+                self.assertNotIn("answer", question)
+
+                correct = served.render_data["metadata"]["point_group_label"]
+                self.assertIn(correct, question["options"])
+                checked = served.post_json(
+                    "/api/puzzle/point_group/check",
+                    {"question_id": question["id"], "selected": correct},
+                )
+                self.assertTrue(checked["correct"])
+                self.assertEqual(checked["answer"], correct)
+
     def test_crystals_publish_no_mapping_questions(self):
         served = self.served["halite"]
         public = served.get_json("/api/puzzle/mapping")

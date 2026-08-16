@@ -250,6 +250,51 @@
       color: inherit;
       font: inherit;
     }
+    .operation-direction-hint {
+      display: block;
+      margin-top: 2px;
+      color: #7d8a9a;
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .operation-row.selected .operation-direction-hint {
+      color: #1f2937;
+    }
+    /* A group header names the axis/plane/center a run of rows shares, so
+       telling six same-symbol rows apart no longer takes clicking each one. */
+    .operation-group-header {
+      margin: 10px 0 4px;
+      padding: 0 4px;
+      color: #91a0b3;
+      font-size: 11px;
+      font-weight: 650;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .operation-group-header:first-child {
+      margin-top: 2px;
+    }
+    .operation-row--grouped {
+      margin-left: 10px;
+      width: calc(100% - 10px);
+    }
+    .operation-group-toggle {
+      display: block;
+      width: calc(100% - 10px);
+      margin: 0 0 4px 10px;
+      padding: 6px 8px;
+      background: transparent;
+      border: 1px dashed #3a4350;
+      border-radius: 5px;
+      color: #91a0b3;
+      font-size: 12px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .operation-group-toggle:hover {
+      background: #1e252d;
+      color: #edf2f7;
+    }
     button {
       border: 0;
       border-radius: 6px;
@@ -311,17 +356,6 @@
       white-space: pre-wrap;
       max-height: 180px;
       overflow: auto;
-    }
-    .saving-gif button:not(#save-gif),
-    .saving-gif input,
-    .saving-gif select {
-      pointer-events: none;
-      opacity: 0.55;
-    }
-    .saving-gif #save-gif {
-      background: #f8fafc;
-      color: #111418;
-      cursor: wait;
     }
     .grid {
       display: grid;
@@ -843,7 +877,7 @@
       margin-bottom: 12px;
     }
     .selected-operation-panel {
-      margin: 0;
+      margin: 12px 0 0;
     }
     .view-center-row {
       display: grid;
@@ -1556,6 +1590,12 @@
       font-size: 17px;
       font-weight: 700;
       color: #0f2f4c;
+    }
+    /* Only shown when two structures share a formula (diamond / graphite). */
+    .puzzle-structure-note {
+      font-size: 13px;
+      font-weight: 500;
+      color: #4a6b80;
     }
     .puzzle-play {
       display: grid;

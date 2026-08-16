@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from crystal_viewer.game.operation_identify import _schoenflies_index
+
 ROTATION_ORDER_OPTIONS: tuple[int, ...] = (2, 3, 4, 6)
 
 _DIRECTION_TOL = 1e-4
@@ -43,8 +45,9 @@ def _improper_order(operation: dict) -> int | None:
     theta = float(np.degrees(np.arccos(cos_theta)))
     if theta < 1e-6:  # pure reflection (S1 = sigma)
         return None
-    n = round(360.0 / theta)
-    return int(n) if n >= 2 else None
+    # Rounding alone names every angle something; S10^3 (108 deg) came back as
+    # 3. Only keep an index that reproduces the angle. See _schoenflies_index.
+    return _schoenflies_index(theta)
 
 
 # Which operation kinds count for each problem type, and how to read the order.

@@ -18,3 +18,8 @@ Regenerate tracked JSON exports and `examples/example_catalog.json` with:
 ```bash
 .venv/bin/python tools/regenerate_example_assets.py --clean
 ```
+
+`--clean` deletes every top-level JSON here first, so exports of anything that is
+no longer a bundled example disappear with it. The retired crystal-class CIFs
+keep their exports under `tests/fixtures/json/` instead; see
+`tests/fixtures/README.md` for the command that refreshes those.

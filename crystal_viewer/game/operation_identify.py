@@ -29,6 +29,7 @@ from crystal_viewer.viewer.operation_labels import (
     display_operation_symbol,
     fractional_vector_label,
     glide_intrinsic_translation_frac,
+    is_pure_translation_operation,
     operation_summary_elements,
 )
 
@@ -62,6 +63,27 @@ _NO_MOTION_TOL = 1e-2
 _CURVED_PREFIXES = ("rotation_", "screw", "improper_", "rotoinversion")
 
 
+# How far the rounded index may miss the measured angle. An S6 in the bundled
+# examples is off by 4e-5 degrees, and the nearest wrong index is 12 degrees
+# away (S10^3), so this sits far from both.
+_ANGLE_ROUND_TRIP_TOL_DEG = 1e-2
+
+
+def _schoenflies_index(theta_deg: float) -> int | None:
+    """The n of an S_n / -n operation whose rotation angle is `theta_deg`.
+
+    Rounding 360/theta alone is not enough: it returns an integer for *any*
+    angle, so S10^3 (108 deg) came back as 3 and was published as a question
+    whose revealed answer was S3. Only an angle that 360/n actually reproduces
+    names an operation this vocabulary can express; a power like S10^3 needs
+    the "S10 cubed" form and has no single-symbol name, so reject it.
+    """
+    index = int(round(360.0 / theta_deg))
+    if index < 2 or abs(360.0 / index - theta_deg) > _ANGLE_ROUND_TRIP_TOL_DEG:
+        return None
+    return index
+
+
 def _improper_index(operation: dict, *, invert: bool) -> int | None:
     """The Sn / -n index of an improper operation, read from its rotation angle.
 
@@ -82,8 +104,7 @@ def _improper_index(operation: dict, *, invert: bool) -> int | None:
     theta = float(np.degrees(np.arccos(cos_theta)))
     if theta < 1e-6:  # S1 = mirror, S2 = inversion — handled by their own kinds
         return None
-    index = round(360.0 / theta)
-    return int(index) if index >= 2 else None
+    return _schoenflies_index(theta)
 
 
 def _display_symbol(render_data: dict, operation: dict) -> str | None:
@@ -282,6 +303,31 @@ def _visual_signature(operation: dict, atoms: list[dict]) -> tuple | None:
     kind = str(operation.get("kind", ""))
     motion = "curved" if any(kind.startswith(prefix) for prefix in _CURVED_PREFIXES) else "straight"
     return (motion, tuple(map(tuple, np.round(image, 2))))
+
+
+def unnameable_operations(render_data: dict) -> list[dict]:
+    """Operations this quiz's answer vocabulary has no name for.
+
+    The offered folds are 2/3/4/6, so a 5-fold rotation or an S10 has no
+    answer a player could pick. The quizzes skip such operations, which is the
+    right thing per question but the wrong thing per structure: an icosahedral
+    cluster would be asked only about its C2 and C3 axes, quietly teaching that
+    its 5-fold axes are not there. A structure with any of these belongs in the
+    analysis viewer only.
+
+    Not counted: the identity (never an answer), pure lattice translations
+    (bookkeeping rather than an operation to name), and infinite axes, which
+    the ∞ option does answer for linear molecules.
+    """
+    return [
+        operation
+        for operation in render_data.get("operations", [])
+        if str(operation.get("kind", "")) not in ("identity", "rotation_infinite")
+        and not is_pure_translation_operation(operation)
+        # ALL, not NORMAL: screws and glides are only answerable in hard mode,
+        # and judging them unnameable would flag every crystal.
+        and _answer_for(render_data, operation, ALL) is None
+    ]
 
 
 def identify_questions(render_data: dict, difficulty: str = NORMAL) -> list[dict]:

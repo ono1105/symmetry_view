@@ -49,6 +49,10 @@
             <span class="puzzle-quiz-name">移り先クイズ</span>
             <span class="puzzle-quiz-desc">対称操作で、選ばれた原子がどの原子に移るかをクリックで当てます。</span>
           </button>
+          <button type="button" class="puzzle-quiz-card" data-quiz="point_group">
+            <span class="puzzle-quiz-name">点群あてクイズ</span>
+            <span class="puzzle-quiz-desc">構造全体を見て、正しい点群記号を選びます。</span>
+          </button>
         </div>
       </div>
       <button type="button" id="puzzle-picker-back" class="secondary puzzle-subback" hidden>← クイズを選ぶ</button>
@@ -165,10 +169,6 @@
       <div class="three-view-status" data-three-status hidden></div>
     </div>
   </section>
-  <details class="panel advanced-only collapsible-panel selected-operation-panel" open>
-    <summary>Selected Operation</summary>
-    <div id="op-details" class="operation-details"></div>
-  </details>
   </div>
   <div class="grid" id="workspace">
     <div class="left-stack">
@@ -215,6 +215,10 @@
       </div>
       <label for="operations" id="operations-label">Operation list</label>
       <div class="operation-list" id="operations" role="listbox"></div>
+      <details class="panel advanced-only collapsible-panel selected-operation-panel" open>
+        <summary>Selected Operation</summary>
+        <div id="op-details" class="operation-details"></div>
+      </details>
     </section>
     <section class="panel advanced-only" id="custom-panel" hidden>
       <h2 class="section-title">Custom Operation</h2>
@@ -447,7 +451,7 @@
           </div>
         </details>
       </section>
-      <details class="viewer-camera-tools" id="view-panel">
+      <details class="viewer-camera-tools" id="view-panel" open>
         <summary id="view-title">Camera</summary>
         <div class="viewer-camera-tools-body">
         <div class="camera-block">
@@ -576,6 +580,7 @@
   <div class="status" id="status">Loading...</div>
 </main>
 <script id="structure-kind-config" type="application/json">__STRUCTURE_KIND_CONFIG__</script>
+<script id="viewer-constants" type="application/json">__VIEWER_CONSTANTS__</script>
 <script id="app-mode-config" type="application/json">__INITIAL_APP_MODE__</script>
 <script src="/static/browser_ui.js" defer></script>
 <script type="module" src="/static/three_loader.js"></script>

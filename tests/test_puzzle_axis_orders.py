@@ -1,17 +1,21 @@
-import json
+import math
 import unittest
-from pathlib import Path
 
 from crystal_viewer.game.axis_orders import (
+    _improper_order,
     axis_questions,
     check_answer,
     public_questions,
     rotation_axis_questions,
 )
+from tests.support import load_render_data as _render_data
 
 
-def _render_data(name):
-    return json.loads(Path(f"exports/json/{name}.json").read_text(encoding="utf-8"))["render_data"]
+def _rotoreflection_operation(angle_deg):
+    """An S operation about z: rotate by angle_deg, then reflect through z=0."""
+    angle = math.radians(angle_deg)
+    cos, sin = math.cos(angle), math.sin(angle)
+    return {"matrix_cart": [[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, -1.0]]}
 
 
 def _summary(name, kind="rotation"):
@@ -49,6 +53,14 @@ class AxisOrderPuzzleTest(unittest.TestCase):
         # order is 6 for both, so this only comes out right by reading the
         # rotoreflection angle rather than the matrix period.
         self.assertEqual(_summary("benzene", "improper"), [((3, 6), 1)])
+
+    def test_a_power_of_an_s10_axis_does_not_become_a_phantom_s3(self):
+        # S10^3 turns by 108 deg, and 360/108 rounds to 3. Naming it S3 would put
+        # a fold on the axis that is not there, so the index is only accepted
+        # when 360/n reproduces the angle.
+        self.assertIsNone(_improper_order(_rotoreflection_operation(108.0)))
+        self.assertEqual(_improper_order(_rotoreflection_operation(120.0)), 3)
+        self.assertEqual(_improper_order(_rotoreflection_operation(36.0)), 10)
 
     def test_public_and_check_support_improper(self):
         render_data = _render_data("methane")

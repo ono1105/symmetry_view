@@ -13,6 +13,7 @@ import numpy as np
 from crystal_viewer.viewer.animation_context import select_animation_context, shared_step_translation
 from crystal_viewer.viewer.operation_lookup import selected_mapping
 from crystal_viewer.viewer.symmetry_elements import display_symmetry_elements, glide_translation_cart
+from tests.support import load_export
 
 
 class OperationLabelsTest(unittest.TestCase):
@@ -84,7 +85,7 @@ class OperationLabelsTest(unittest.TestCase):
             ("cadmoselite", "screw_6", 6),
         ):
             with self.subTest(fixture=fixture):
-                payload = json.loads(Path(f"exports/json/{fixture}.json").read_text(encoding="utf-8"))
+                payload = load_export(fixture)
                 summaries = operation_summaries(payload["render_data"], payload["atom_mappings"])
                 symbols = {
                     summary["itc_like_summary"].split(" ", 1)[0]
@@ -97,7 +98,7 @@ class OperationLabelsTest(unittest.TestCase):
                 self.assertTrue(any(symbol.startswith(str(order)) and symbol.endswith("-") for symbol in operation_symbols))
 
     def test_cadmoselite_glides_are_labeled_as_c_glides(self):
-        payload = json.loads(Path("exports/json/cadmoselite.json").read_text(encoding="utf-8"))
+        payload = load_export("cadmoselite")
 
         glide_symbols = glide_display_symbols(payload)
 
@@ -144,7 +145,7 @@ class OperationLabelsTest(unittest.TestCase):
         self.assertEqual(glide["itc_like_summary"], "g(1/6,-1/6,1/3) x+1/2, -x, z")
 
     def test_glide_direction_vector_uses_centered_periodic_image(self):
-        payload = json.loads(Path("exports/json/cadmoselite.json").read_text(encoding="utf-8"))
+        payload = load_export("cadmoselite")
         render_data = payload["render_data"]
         operation = next(operation for operation in render_data["operations"] if "glide" in operation["kind"])
         _, planes, _ = display_symmetry_elements(render_data, payload["atom_mappings"], operation["index"], None)

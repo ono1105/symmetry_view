@@ -106,6 +106,9 @@ class MoleculeSummary:
     site_count: int
     atoms: tuple[AtomSite, ...]
     center_cart: np.ndarray
+    # `formula` is the reduced formula, which is wrong for a molecule (benzene
+    # reduces to HC).  `display_formula` is the formula as a chemist writes it.
+    display_formula: str = ""
 
 
 @dataclass(frozen=True)

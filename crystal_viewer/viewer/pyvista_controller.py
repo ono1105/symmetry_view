@@ -13,7 +13,7 @@ import pyvista as pv
 from crystal_viewer.geometry import normalize
 from crystal_viewer.viewer.native_gui import NativePyVistaViewer
 from crystal_viewer.viewer.animation_path import (
-    animation_path_length,
+    maximum_travel_distance,
     normalized_animation_duration_seconds,
 )
 from crystal_viewer.viewer.atom_style import HIGHLIGHT_RADIUS_SCALE, atom_color, color_to_rgb
@@ -333,7 +333,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             try:
                 self.set_manual_view_center(snapshot.view_center_frac)
             except Exception as exc:
-                self.set_gif_status(f"view center failed: {exc}")
+                self.set_status_message(f"view center failed: {exc}")
                 should_update_status = True
             self.last_view_center_request_id = snapshot.view_center_request_id
             should_render = True
@@ -345,7 +345,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             try:
                 self.view_along_fractional_direction(snapshot.view_direction_frac)
             except Exception as exc:
-                self.set_gif_status(f"view direction failed: {exc}")
+                self.set_status_message(f"view direction failed: {exc}")
                 should_update_status = True
             self.last_view_direction_request_id = snapshot.view_direction_request_id
             should_render = True
@@ -354,7 +354,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
             try:
                 self.view_along_plane_normal(snapshot.view_plane_hkl)
             except Exception as exc:
-                self.set_gif_status(f"view plane failed: {exc}")
+                self.set_status_message(f"view plane failed: {exc}")
                 should_update_status = True
             self.last_view_plane_request_id = snapshot.view_plane_request_id
             should_render = True
@@ -380,7 +380,7 @@ class BrowserControlledViewer(NativePyVistaViewer):
                 self.apply_custom_check(snapshot.custom_op_result)
             except Exception as exc:
                 self.clear_custom_check_actors()
-                self.set_gif_status(f"check highlight failed: {exc}")
+                self.set_status_message(f"check highlight failed: {exc}")
                 should_update_status = True
             # New check discards any previous custom animation paths
             if self.using_custom_paths:
@@ -898,26 +898,27 @@ class BrowserControlledViewer(NativePyVistaViewer):
         ]
         self.plotter.reset_camera_clipping_range()
 
-    def set_gif_status(self, status: str) -> None:
+    def set_status_message(self, status: str) -> None:
+        """Report a PyVista-side failure in the browser's status panel.
+
+        Named gif_status until 2026-08-16, which was wrong in both directions:
+        nothing about GIF writing sets it, and the camera/highlight errors it
+        does carry looked like GIF noise.
+        """
         with self.state_lock:
-            self.shared_state["gif_status"] = status
+            self.shared_state["status_message"] = status
 
     def animation_duration_seconds(self) -> float:
+        # Cached on path identity: this runs on every frame draw, and the paths
+        # only change when the operation or the display options do.
         if self.paths is not self._path_length_cache_paths:
-            self._maximum_path_length = 0.0
-            for instance in display_atom_instances(
+            self._maximum_path_length = maximum_travel_distance(
                 self.render_data,
+                self.paths,
                 display_mode=self.display_mode,
                 cell_origin_mode=self.cell_origin_mode,
                 include_boundary_images=self.include_boundary_images,
-            ):
-                path = self.paths.get(int(instance["atom"]["index"]))
-                if path is None or (path.get("unit_cell_only") and not instance["is_primary_image"]):
-                    continue
-                self._maximum_path_length = max(
-                    self._maximum_path_length,
-                    animation_path_length(path, start_override=instance["cart"]),
-                )
+            )
             self._path_length_cache_paths = self.paths
         speed_multiplier = max(float(self.speed), 0.1)
         base_duration = normalized_animation_duration_seconds(

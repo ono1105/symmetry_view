@@ -25,7 +25,15 @@ headless Chromium で操作して保存する。撮り直しは次のコマン�
 | 7 | 合成クイズ | `fig07_composition_question.png` / `fig07_composition_answer.png` | ベンゼン |
 | 8 | 移り先クイズ | `fig08_mapping_question.png` / `fig08_mapping_answer.png` | メタン |
 | 9 | 対称要素の表示 | `fig09a_element_axis.png`（軸）<br>`fig09_element_plane.png`（面）<br>`fig09_element_center.png`（中心）<br>`fig09_element_improper.png`（S6＝軸＋面）<br>`fig09_element_glide.png`（映進矢印）<br>`fig09_element_screw.png`（らせん軸） | 映進矢印は halite の一般映進 `g`。`fig09a_element_axis_edge_on.png` は既定カメラでの見え方 |
-| 10 | テスト実行結果 | `fig10_test_output.txt` | 222 件 OK |
+| 10 | テスト実行結果 | `fig10_test_output.txt` | 255 件 OK |
+
+## 撮り直しは「通し確認」も兼ねている
+
+`open_example()` は**読み込めたことを /api/state で確認してから**次へ進む。
+以前は `.operation-row` が出るのを待つだけだったが、この行は前の構造のものが
+残っているので何も保証していなかった。実際そのせいで、
+**ベンゼンのつもりでメタンの操作一覧を撮っていた**ことに気づけず、
+図が静かに間違ったまま保存されうる状態だった（2026-08-15 に修正）。
 
 ## 撮るときに引っかかった点
 
